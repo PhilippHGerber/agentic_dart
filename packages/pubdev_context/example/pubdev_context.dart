@@ -38,6 +38,7 @@ Future<void> main() async {
     config: const PubMcpConfig(),
     client: PubDevClient(),
     searchCache: ResponseCache<List<PackageSummary>>(),
+    packageCache: ResponseCache<PackageDetail>(),
   );
 
   // Connect an MCP client and initialise.

@@ -4,9 +4,9 @@
 /// [ResourcesSupport], [PromptsSupport], [CompletionsSupport], and
 /// [LoggingSupport]. All capabilities are registered inside [PubMcpServer.initialize].
 ///
-/// [PubDevClient] and the search [ResponseCache] are injected as constructor
-/// dependencies. The active log level is set from the [PubMcpConfig] supplied
-/// at construction time.
+/// [PubDevClient], the search [ResponseCache], and the package [ResponseCache]
+/// are injected as constructor dependencies. The active log level is set from
+/// the [PubMcpConfig] supplied at construction time.
 library;
 
 import 'dart:async';
@@ -17,6 +17,7 @@ import 'cache/memory_cache.dart';
 import 'config/config.dart';
 import 'data/models.dart';
 import 'data/pub_client.dart';
+import 'tools/get_package.dart';
 import 'tools/search_packages.dart';
 
 /// MCP server that exposes pub.dev package intelligence to LLM agents.
@@ -30,14 +31,17 @@ base class PubMcpServer extends MCPServer
   ///
   /// [config] controls the initial log level and other server-wide settings.
   /// [client] is the pub.dev HTTP gateway. [searchCache] is the shared TTL
-  /// store for search results; callers own its lifecycle.
+  /// store for search results and [packageCache] for individual package
+  /// lookups; callers own their lifecycles.
   PubMcpServer(
     super.channel, {
     required PubMcpConfig config,
     required PubDevClient client,
     required ResponseCache<List<PackageSummary>> searchCache,
+    required ResponseCache<PackageDetail> packageCache,
   }) : _client = client,
        _searchCache = searchCache,
+       _packageCache = packageCache,
        super.fromStreamChannel(
          implementation: Implementation(
            name: 'pubdev_context',
@@ -53,6 +57,7 @@ base class PubMcpServer extends MCPServer
 
   final PubDevClient _client;
   final ResponseCache<List<PackageSummary>> _searchCache;
+  final ResponseCache<PackageDetail> _packageCache;
 
   @override
   FutureOr<InitializeResult> initialize(InitializeRequest request) async {
@@ -68,13 +73,21 @@ base class PubMcpServer extends MCPServer
       CompleteResult(completion: Completion(values: const []));
 
   void _registerTools() {
-    final handler = SearchPackagesHandler(
+    final searchHandler = SearchPackagesHandler(
       client: _client,
       cache: _searchCache,
       log: log,
     );
-    registerTool(searchPackagesTool, handler.call);
+    registerTool(searchPackagesTool, searchHandler.call);
     log(LoggingLevel.debug, 'registered tool: search_packages');
+
+    final getPackageHandler = GetPackageHandler(
+      client: _client,
+      cache: _packageCache,
+      log: log,
+    );
+    registerTool(getPackageTool, getPackageHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_package');
   }
 
   static LoggingLevel _toLoggingLevel(LogLevel level) => switch (level) {

@@ -45,6 +45,7 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   config: config ?? const PubMcpConfig(),
   client: PubDevClient(),
   searchCache: ResponseCache<List<PackageSummary>>(),
+  packageCache: ResponseCache<PackageDetail>(),
 );
 
 /// Builds a [PubMcpServer] that shuts down cleanly at end of test without a
@@ -211,6 +212,20 @@ void main() {
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'search_packages');
         expect(tool.inputSchema.required, contains('query'));
+      });
+
+      test('lists get_package after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('get_package'));
+      });
+
+      test('get_package input schema marks name as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'get_package');
+        expect(tool.inputSchema.required, contains('name'));
       });
     });
 

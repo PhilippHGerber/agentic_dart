@@ -53,6 +53,11 @@ dart pub global activate pubdev_context
 | `--version`   | —                       | —         | Print version and exit        |
 | `--help`      | —                       | —         | Print usage and exit          |
 
+## MCP Inspector (interactive browser UI)
+
+npx @modelcontextprotocol/inspector /Users/gep/.pub-cache/bin/pubdev_context
+This opens a browser UI where you can call tools, inspect schemas, and see raw JSON-RPC responses — great for iterating quickly.
+
 ## Roadmap
 
 ### Tools

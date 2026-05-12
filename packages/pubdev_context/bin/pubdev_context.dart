@@ -39,11 +39,13 @@ void main(List<String> args) {
   final config = PubMcpConfig.fromArguments(args);
   final client = PubDevClient();
   final searchCache = ResponseCache<List<PackageSummary>>();
+  final packageCache = ResponseCache<PackageDetail>();
 
   PubMcpServer(
     stdioChannel(input: stdin, output: stdout),
     config: config,
     client: client,
     searchCache: searchCache,
+    packageCache: packageCache,
   );
 }
