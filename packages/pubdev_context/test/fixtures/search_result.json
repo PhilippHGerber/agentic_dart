@@ -1,0 +1,15 @@
+{
+  "packages": [
+    {"package": "http"},
+    {"package": "get"},
+    {"package": "http_parser"},
+    {"package": "http_interceptor"},
+    {"package": "dio"},
+    {"package": "retrofit"},
+    {"package": "chopper"},
+    {"package": "http_multi_server"},
+    {"package": "alice"},
+    {"package": "pretty_dio_logger"}
+  ],
+  "next": "https://pub.dev/api/search?q=http&page=2"
+}

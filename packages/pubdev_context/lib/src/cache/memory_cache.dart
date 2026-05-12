@@ -1,0 +1,89 @@
+/// In-memory TTL cache used by all tool and resource handlers.
+///
+/// Keys are strings derived from request URLs.
+/// Each entry carries an expiry timestamp; expired entries are treated
+/// as misses and evicted on next access.
+///
+/// TTL constants (named Durations) are defined here and used by handlers
+/// to ensure consistent cache expiry across the codebase.
+///
+/// Pre-v1.0: gains a pluggable backend interface for file-based persistence
+/// (see issue #14). The public interface defined here will not change.
+library;
+
+/// A function returning the current point in time.
+///
+/// Inject a custom implementation in tests to control time without sleeping.
+typedef Clock = DateTime Function();
+
+/// TTL applied to search-result entries.
+const Duration kSearchResultsTtl = Duration(minutes: 5);
+
+/// TTL applied to package-metadata entries.
+const Duration kPackageMetadataTtl = Duration(minutes: 15);
+
+/// TTL applied to changelog entries.
+const Duration kChangelogTtl = Duration(minutes: 15);
+
+/// TTL applied to API-documentation index (`index.json`) entries.
+const Duration kApiDocsTtl = Duration(hours: 1);
+
+/// TTL applied to README entries.
+const Duration kReadmeTtl = Duration(hours: 1);
+
+/// TTL applied to meta-resource entries (scoring, SDK versions).
+const Duration kMetaResourcesTtl = Duration(hours: 24);
+
+/// A single cached entry pairing a [Future] value with its absolute [expiry].
+final class _CacheEntry<T> {
+  _CacheEntry(this.value, this.expiry);
+
+  final Future<T> value;
+  final DateTime expiry;
+}
+
+/// A generic in-memory TTL cache used by all tool and resource handlers.
+///
+/// Keys are strings derived from request URLs. Each entry stores a [Future<T>]
+/// so that concurrent requests for the same key share a single in-flight HTTP
+/// call rather than issuing duplicate requests (cache-stampede prevention):
+/// call [set] with the [Future] before awaiting it.
+///
+/// Expired entries are evicted on the next access; no background sweep is used.
+final class ResponseCache<T> {
+  /// Creates a [ResponseCache].
+  ///
+  /// Supply [clock] in tests to control time without sleeping;
+  /// defaults to [DateTime.now].
+  ResponseCache({Clock? clock}) : _clock = clock ?? DateTime.now;
+
+  final Clock _clock;
+  final _entries = <String, _CacheEntry<T>>{};
+
+  /// Returns the cached [Future] for [key], or `null` on a miss or after TTL expiry.
+  ///
+  /// An expired entry is removed before returning `null`.
+  Future<T>? get(String key) {
+    final entry = _entries[key];
+    if (entry == null) return null;
+    if (_clock().isAfter(entry.expiry)) {
+      _entries.remove(key);
+      return null;
+    }
+    return entry.value;
+  }
+
+  /// Stores [value] under [key] with an absolute expiry of `now + ttl`.
+  ///
+  /// Call [set] with the [Future] before awaiting it so that concurrent callers
+  /// retrieve the same in-flight call via [get], preventing duplicate HTTP requests.
+  void set(String key, Future<T> value, Duration ttl) {
+    _entries[key] = _CacheEntry(value, _clock().add(ttl));
+  }
+
+  /// Removes the entry for [key] if it exists.
+  void invalidate(String key) => _entries.remove(key);
+
+  /// Removes all entries.
+  void clear() => _entries.clear();
+}

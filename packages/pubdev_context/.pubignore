@@ -1,0 +1,8 @@
+docs/
+benchmark/
+
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
+llmifierrc.yaml
+skills-lock.json

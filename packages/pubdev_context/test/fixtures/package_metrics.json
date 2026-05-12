@@ -1,0 +1,131 @@
+{
+  "score": {
+    "grantedPoints": 160,
+    "maxPoints": 160,
+    "likeCount": 8436,
+    "downloadCount30Days": 8484349,
+    "tags": [
+      "publisher:dart.dev",
+      "has:topic",
+      "sdk:dart",
+      "sdk:flutter",
+      "platform:android",
+      "platform:ios",
+      "platform:windows",
+      "platform:linux",
+      "platform:macos",
+      "platform:web",
+      "runtime:native-aot",
+      "runtime:native-jit",
+      "runtime:web",
+      "is:null-safe",
+      "is:wasm-ready",
+      "is:dart3-compatible",
+      "license:bsd-3-clause",
+      "license:fsf-libre",
+      "license:osi-approved",
+      "topic:http",
+      "topic:network",
+      "topic:protocols"
+    ]
+  },
+  "scorecard": {
+    "packageName": "http",
+    "packageVersion": "1.6.0",
+    "runtimeVersion": "2026.05.05",
+    "updated": "2026-05-07T21:55:21.500251",
+    "dartdocReport": {
+      "reportStatus": "success"
+    },
+    "panaReport": {
+      "timestamp": "2026-05-07T21:55:21.500251",
+      "reportStatus": "success",
+      "derivedTags": [
+        "sdk:dart",
+        "sdk:flutter",
+        "platform:android",
+        "platform:ios",
+        "platform:windows",
+        "platform:linux",
+        "platform:macos",
+        "platform:web",
+        "runtime:native-aot",
+        "runtime:native-jit",
+        "runtime:web",
+        "is:null-safe",
+        "is:wasm-ready",
+        "is:dart3-compatible",
+        "license:bsd-3-clause",
+        "license:fsf-libre",
+        "license:osi-approved",
+        "topic:http",
+        "topic:network",
+        "topic:protocols"
+      ],
+      "licenses": [
+        {
+          "spdxIdentifier": "BSD-3-Clause",
+          "operations": [
+            0,
+            44,
+            29,
+            "Copyright (c) <year> <owner>.",
+            1,
+            44,
+            533,
+            2,
+            578,
+            10,
+            0,
+            588,
+            20,
+            "the copyright holder",
+            1,
+            585,
+            918
+          ]
+        }
+      ],
+      "result": {
+        "repositoryUrl": "https://github.com/dart-lang/http/tree/master/pkgs/http",
+        "issueTrackerUrl": "https://github.com/dart-lang/http/issues",
+        "repositoryStatus": "verified",
+        "repository": {
+          "provider": "github",
+          "host": "github.com",
+          "repository": "dart-lang/http",
+          "branch": "master",
+          "path": "pkgs/http"
+        },
+        "contributingUrl": "https://github.com/dart-lang/http/blob/master/CONTRIBUTING.md",
+        "licenses": [
+          {
+            "spdxIdentifier": "BSD-3-Clause",
+            "operations": [
+              0,
+              44,
+              29,
+              "Copyright (c) <year> <owner>.",
+              1,
+              44,
+              533,
+              2,
+              578,
+              10,
+              0,
+              588,
+              20,
+              "the copyright holder",
+              1,
+              585,
+              918
+            ]
+          }
+        ],
+        "grantedPoints": 160,
+        "maxPoints": 160
+      }
+    },
+    "taskStatus": "completed"
+  }
+}

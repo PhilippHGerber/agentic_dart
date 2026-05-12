@@ -1,0 +1,5 @@
+# Integration tests live in test/integration/ and require a live network.
+# They are excluded from the default `dart test` run.
+# To run them: dart test test/integration/
+exclude_paths:
+  - test/integration

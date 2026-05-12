@@ -1,0 +1,126 @@
+[
+  {
+    "name": "browser_client",
+    "qualifiedName": "browser_client",
+    "href": "browser_client/",
+    "kind": 9,
+    "packageRank": 0,
+    "desc": ""
+  },
+  {
+    "name": "BrowserClient",
+    "qualifiedName": "browser_client.BrowserClient",
+    "href": "browser_client/BrowserClient-class.html",
+    "kind": 3,
+    "packageRank": 0,
+    "desc": "A package:web-based HTTP client that runs in the browser and is backed by\nwindow.fetch.",
+    "enclosedBy": {
+      "name": "browser_client",
+      "kind": 9,
+      "href": "browser_client/"
+    }
+  },
+  {
+    "name": "BrowserClient.new",
+    "qualifiedName": "browser_client.BrowserClient.BrowserClient.new",
+    "href": "browser_client/BrowserClient/BrowserClient.html",
+    "kind": 2,
+    "packageRank": 0,
+    "desc": "",
+    "enclosedBy": {
+      "name": "BrowserClient",
+      "kind": 3,
+      "href": "browser_client/BrowserClient-class.html"
+    }
+  },
+  {
+    "name": "close",
+    "qualifiedName": "browser_client.BrowserClient.close",
+    "href": "browser_client/BrowserClient/close.html",
+    "kind": 10,
+    "overriddenDepth": 2,
+    "packageRank": 0,
+    "desc": "Closes the client.",
+    "enclosedBy": {
+      "name": "BrowserClient",
+      "kind": 3,
+      "href": "browser_client/BrowserClient-class.html"
+    }
+  },
+  {
+    "name": "send",
+    "qualifiedName": "browser_client.BrowserClient.send",
+    "href": "browser_client/BrowserClient/send.html",
+    "kind": 10,
+    "overriddenDepth": 2,
+    "packageRank": 0,
+    "desc": "Sends an HTTP request and asynchronously returns the response.",
+    "enclosedBy": {
+      "name": "BrowserClient",
+      "kind": 3,
+      "href": "browser_client/BrowserClient-class.html"
+    }
+  },
+  {
+    "name": "withCredentials",
+    "qualifiedName": "browser_client.BrowserClient.withCredentials",
+    "href": "browser_client/BrowserClient/withCredentials.html",
+    "kind": 16,
+    "overriddenDepth": 0,
+    "packageRank": 0,
+    "desc": "Whether to send credentials such as cookies or authorization headers for\ncross-site requests.",
+    "enclosedBy": {
+      "name": "BrowserClient",
+      "kind": 3,
+      "href": "browser_client/BrowserClient-class.html"
+    }
+  },
+  {
+    "name": "http",
+    "qualifiedName": "http",
+    "href": "http/",
+    "kind": 9,
+    "packageRank": 0,
+    "desc": "A composable, Future-based library for making HTTP requests."
+  },
+  {
+    "name": "Abortable",
+    "qualifiedName": "http.Abortable",
+    "href": "http/Abortable-class.html",
+    "kind": 3,
+    "packageRank": 0,
+    "desc": "An HTTP request that can be aborted before it completes.",
+    "enclosedBy": {
+      "name": "http",
+      "kind": 9,
+      "href": "http/"
+    }
+  },
+  {
+    "name": "Abortable.new",
+    "qualifiedName": "http.Abortable.Abortable.new",
+    "href": "http/Abortable/Abortable.html",
+    "kind": 2,
+    "packageRank": 0,
+    "desc": "",
+    "enclosedBy": {
+      "name": "Abortable",
+      "kind": 3,
+      "href": "http/Abortable-class.html"
+    }
+  },
+  {
+    "name": "abortTrigger",
+    "qualifiedName": "http.Abortable.abortTrigger",
+    "href": "http/Abortable/abortTrigger.html",
+    "kind": 16,
+    "overriddenDepth": 0,
+    "packageRank": 0,
+    "desc": "Completion of this future aborts this request (if the client supports\nabortion).",
+    "enclosedBy": {
+      "name": "Abortable",
+      "kind": 3,
+      "href": "http/Abortable-class.html"
+    }
+  }
+]
