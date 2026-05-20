@@ -24,31 +24,6 @@ import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 
-/// The input schema for the `get_package` tool.
-final _kInputSchema = ObjectSchema(
-  required: ['name'],
-  properties: {
-    'name': Schema.string(description: 'The package name on pub.dev.'),
-    'version': Schema.string(
-      description:
-          'A specific version string (e.g. "1.2.0"). '
-          'Omit to fetch the latest published version.',
-    ),
-  },
-);
-
-/// The `get_package` tool definition registered with the MCP server.
-final getPackageTool = Tool(
-  name: 'get_package',
-  description:
-      'Get full details for a pub.dev package. '
-      'Returns a PackageDetail with scores, SDK constraints, dependencies, '
-      'recent versions, and a README excerpt. '
-      'Optionally pin a specific version with the version parameter. '
-      'Use search_packages first to discover package names.',
-  inputSchema: _kInputSchema,
-);
-
 /// Handles calls to the `get_package` MCP tool.
 ///
 /// Consults the cache before issuing HTTP requests; stores successful results
@@ -97,10 +72,9 @@ final class GetPackageHandler {
     _log(LoggingLevel.debug, 'get_package: cache miss key=$cacheKey');
     _log(LoggingLevel.info, 'get_package: HTTP request name=$name');
 
-    final result =
-        version != null
-            ? await _client.getPackageVersion(name, version)
-            : await _client.getPackage(name);
+    final result = version != null
+        ? await _client.getPackageVersion(name, version)
+        : await _client.getPackage(name);
 
     if (result case PubDevSuccess(:final value)) {
       _cache.set(cacheKey, Future.value(value), kPackageMetadataTtl);

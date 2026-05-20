@@ -26,49 +26,6 @@ import '../data/pub_client.dart';
 /// Well-known error code returned when the caller supplies an invalid input.
 const _kInvalidInput = 'invalid_input';
 
-/// The input schema for the `search_packages` tool.
-final _kInputSchema = ObjectSchema(
-  required: ['query'],
-  properties: {
-    'query': Schema.string(description: 'Search keywords or a package name.'),
-    'limit': Schema.int(
-      description: 'Maximum number of results to return (default 5, max 20).',
-      minimum: 1,
-      maximum: 20,
-    ),
-    'page': Schema.int(
-      description: '1-indexed result page (default 1).',
-      minimum: 1,
-    ),
-    'sdk': UntitledSingleSelectEnumSchema(
-      description: 'Filter by SDK compatibility.',
-      values: ['dart', 'flutter'],
-    ),
-    'sort': UntitledSingleSelectEnumSchema(
-      description:
-          'Sort order (default relevance). '
-          'Allowed: relevance | likes | pub_points | updated.',
-      values: ['relevance', 'likes', 'pub_points', 'updated'],
-      defaultValue: 'relevance',
-    ),
-    'platform': UntitledSingleSelectEnumSchema(
-      description: 'Filter by platform support.',
-      values: ['android', 'ios', 'web', 'linux', 'macos', 'windows'],
-    ),
-  },
-);
-
-/// The `search_packages` tool definition registered with the MCP server.
-final searchPackagesTool = Tool(
-  name: 'search_packages',
-  description:
-      'Search pub.dev packages by keyword. '
-      'Returns a list of PackageSummary records with scores, platform support, '
-      'and maintenance signals. '
-      'Use sdk/platform filters to narrow results for a specific environment.',
-  inputSchema: _kInputSchema,
-);
-
 /// Handles calls to the `search_packages` MCP tool.
 ///
 /// Consults `cache` before issuing HTTP requests; stores results with
@@ -140,10 +97,12 @@ final class SearchPackagesHandler {
 
     _cache.set(
       cacheKey,
-      future.then((r) => switch (r) {
-        PubDevSuccess(:final value) => value,
-        PubDevFailure() => <PackageSummary>[],
-      }),
+      future.then(
+        (r) => switch (r) {
+          PubDevSuccess(:final value) => value,
+          PubDevFailure() => <PackageSummary>[],
+        },
+      ),
       kSearchResultsTtl,
     );
 
@@ -166,8 +125,9 @@ final class SearchPackagesHandler {
     isError: true,
   );
 
-  static List<Map<String, Object?>> _summariesToJson(List<PackageSummary> summaries) =>
-      [for (final s in summaries) _summaryToJson(s)];
+  static List<Map<String, Object?>> _summariesToJson(List<PackageSummary> summaries) => [
+    for (final s in summaries) _summaryToJson(s),
+  ];
 
   static Map<String, Object?> _summaryToJson(PackageSummary s) => {
     'name': s.name,

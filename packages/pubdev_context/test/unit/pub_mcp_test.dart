@@ -46,6 +46,7 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   client: PubDevClient(),
   searchCache: ResponseCache<List<PackageSummary>>(),
   packageCache: ResponseCache<PackageDetail>(),
+  changelogCache: ResponseCache<List<ChangelogEntry>>(),
 );
 
 /// Builds a [PubMcpServer] that shuts down cleanly at end of test without a
@@ -225,6 +226,20 @@ void main() {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_package');
+        expect(tool.inputSchema.required, contains('name'));
+      });
+
+      test('lists get_changelog after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('get_changelog'));
+      });
+
+      test('get_changelog input schema marks name as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'get_changelog');
         expect(tool.inputSchema.required, contains('name'));
       });
     });

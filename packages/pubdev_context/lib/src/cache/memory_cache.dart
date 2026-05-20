@@ -11,6 +11,8 @@
 /// (see issue #14). The public interface defined here will not change.
 library;
 
+import 'dart:async';
+
 /// A function returning the current point in time.
 ///
 /// Inject a custom implementation in tests to control time without sleeping.
@@ -49,7 +51,9 @@ final class _CacheEntry<T> {
 /// call rather than issuing duplicate requests (cache-stampede prevention):
 /// call [set] with the [Future] before awaiting it.
 ///
-/// Expired entries are evicted on the next access; no background sweep is used.
+/// Expired entries are evicted both on the next access and proactively via a
+/// [Timer] scheduled at the TTL deadline, preventing unbounded memory growth
+/// in long-running sessions where entries are never re-queried.
 final class ResponseCache<T> {
   /// Creates a [ResponseCache].
   ///
@@ -59,6 +63,7 @@ final class ResponseCache<T> {
 
   final Clock _clock;
   final _entries = <String, _CacheEntry<T>>{};
+  final _timers = <String, Timer>{};
 
   /// Returns the cached [Future] for [key], or `null` on a miss or after TTL expiry.
   ///
@@ -68,6 +73,7 @@ final class ResponseCache<T> {
     if (entry == null) return null;
     if (_clock().isAfter(entry.expiry)) {
       _entries.remove(key);
+      _timers.remove(key)?.cancel();
       return null;
     }
     return entry.value;
@@ -77,13 +83,35 @@ final class ResponseCache<T> {
   ///
   /// Call [set] with the [Future] before awaiting it so that concurrent callers
   /// retrieve the same in-flight call via [get], preventing duplicate HTTP requests.
+  /// A [Timer] is scheduled to evict the entry after [ttl] even if [get] is
+  /// never called again.
   void set(String key, Future<T> value, Duration ttl) {
+    _timers.remove(key)?.cancel();
     _entries[key] = _CacheEntry(value, _clock().add(ttl));
+    _timers[key] = Timer(ttl, () {
+      _entries.remove(key);
+      _timers.remove(key);
+    });
   }
 
-  /// Removes the entry for [key] if it exists.
-  void invalidate(String key) => _entries.remove(key);
+  /// Removes the entry for [key] and cancels its pending eviction timer.
+  void invalidate(String key) {
+    _entries.remove(key);
+    _timers.remove(key)?.cancel();
+  }
 
-  /// Removes all entries.
-  void clear() => _entries.clear();
+  /// Removes all entries and cancels all pending eviction timers.
+  void clear() {
+    for (final timer in _timers.values) {
+      timer.cancel();
+    }
+    _entries.clear();
+    _timers.clear();
+  }
+
+  /// Cancels all pending timers and removes all entries.
+  ///
+  /// Call when the cache is no longer needed to prevent timer callbacks from
+  /// firing after the owning object is discarded.
+  void dispose() => clear();
 }

@@ -39,6 +39,7 @@ Future<void> main() async {
     client: PubDevClient(),
     searchCache: ResponseCache<List<PackageSummary>>(),
     packageCache: ResponseCache<PackageDetail>(),
+    changelogCache: ResponseCache<List<ChangelogEntry>>(),
   );
 
   // Connect an MCP client and initialise.

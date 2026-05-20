@@ -17,8 +17,12 @@ import 'cache/memory_cache.dart';
 import 'config/config.dart';
 import 'data/models.dart';
 import 'data/pub_client.dart';
+import 'tools/compare_packages.dart';
+import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
 import 'tools/search_packages.dart';
+import 'tools/tool_definitions.dart';
+import 'version.dart';
 
 /// MCP server that exposes pub.dev package intelligence to LLM agents.
 ///
@@ -31,26 +35,26 @@ base class PubMcpServer extends MCPServer
   ///
   /// [config] controls the initial log level and other server-wide settings.
   /// [client] is the pub.dev HTTP gateway. [searchCache] is the shared TTL
-  /// store for search results and [packageCache] for individual package
-  /// lookups; callers own their lifecycles.
+  /// store for search results, [packageCache] for individual package lookups
+  /// (shared by `get_package` and `compare_packages`), and [changelogCache]
+  /// for parsed changelog entry lists; callers own their lifecycles.
   PubMcpServer(
     super.channel, {
     required PubMcpConfig config,
     required PubDevClient client,
     required ResponseCache<List<PackageSummary>> searchCache,
     required ResponseCache<PackageDetail> packageCache,
+    required ResponseCache<List<ChangelogEntry>> changelogCache,
   }) : _client = client,
        _searchCache = searchCache,
        _packageCache = packageCache,
+       _changelogCache = changelogCache,
        super.fromStreamChannel(
          implementation: Implementation(
            name: 'pubdev_context',
-           version: '0.1.0',
+           version: packageVersion,
          ),
-         instructions:
-             'Search, evaluate, and inspect Dart and Flutter packages on pub.dev. '
-             'Use search_packages to discover packages by keyword. '
-             'All errors carry a machine-readable code and a corrective suggestion.',
+         instructions: kServerInstructions,
        ) {
     loggingLevel = _toLoggingLevel(config.logLevel);
   }
@@ -58,6 +62,7 @@ base class PubMcpServer extends MCPServer
   final PubDevClient _client;
   final ResponseCache<List<PackageSummary>> _searchCache;
   final ResponseCache<PackageDetail> _packageCache;
+  final ResponseCache<List<ChangelogEntry>> _changelogCache;
 
   @override
   FutureOr<InitializeResult> initialize(InitializeRequest request) async {
@@ -88,6 +93,22 @@ base class PubMcpServer extends MCPServer
     );
     registerTool(getPackageTool, getPackageHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_package');
+
+    final getChangelogHandler = GetChangelogHandler(
+      client: _client,
+      cache: _changelogCache,
+      log: log,
+    );
+    registerTool(getChangelogTool, getChangelogHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_changelog');
+
+    final comparePackagesHandler = ComparePackagesHandler(
+      client: _client,
+      cache: _packageCache,
+      log: log,
+    );
+    registerTool(comparePackagesTool, comparePackagesHandler.call);
+    log(LoggingLevel.debug, 'registered tool: compare_packages');
   }
 
   static LoggingLevel _toLoggingLevel(LogLevel level) => switch (level) {

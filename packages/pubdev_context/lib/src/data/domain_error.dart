@@ -21,6 +21,15 @@ abstract final class DomainErrors {
 
   /// The response body could not be parsed.
   static const unexpectedResponse = 'unexpected_response';
+
+  /// A request to pub.dev did not complete within the allotted time.
+  static const requestTimeout = 'request_timeout';
+
+  /// The package changelog contains no recognisable version headings.
+  static const noDocumentation = 'no_documentation';
+
+  /// A supplied parameter value is outside the accepted range or format.
+  static const invalidInput = 'invalid_input';
 }
 
 /// A structured error value returned when a pub.dev API operation fails.

@@ -144,6 +144,46 @@ void main() {
     });
   });
 
+  group('ResponseCache — proactive eviction', () {
+    test('entry is absent after TTL fires without any get() call', () async {
+      final cache = ResponseCache<String>();
+      addTearDown(cache.dispose);
+      cache.set('key', Future.value('v'), const Duration(milliseconds: 10));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(cache.get('key'), isNull);
+    });
+
+    test('invalidate cancels timer so a re-added entry survives the original TTL window', () async {
+      final cache = ResponseCache<String>();
+      addTearDown(cache.dispose);
+      cache
+        ..set('key', Future.value('v1'), const Duration(milliseconds: 10))
+        ..invalidate('key');
+      final future = Future.value('v2');
+      cache.set('key', future, const Duration(seconds: 60));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(cache.get('key'), same(future));
+    });
+
+    test('clear cancels pending timers', () async {
+      final cache = ResponseCache<String>()
+        ..set('a', Future.value('1'), const Duration(milliseconds: 10))
+        ..set('b', Future.value('2'), const Duration(milliseconds: 10))
+        ..clear();
+      // Re-add entries with a long TTL; if old timers had not been cancelled they
+      // would fire during the delay and remove the newly added entries.
+      final fa = Future.value('a2');
+      final fb = Future.value('b2');
+      cache
+        ..set('a', fa, const Duration(seconds: 60))
+        ..set('b', fb, const Duration(seconds: 60));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(cache.get('a'), same(fa));
+      expect(cache.get('b'), same(fb));
+      cache.dispose();
+    });
+  });
+
   group('ResponseCache.clear', () {
     late ResponseCache<String> cache;
 

@@ -14,10 +14,11 @@ import 'package:pubdev_context/src/config/config.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/server.dart';
+import 'package:pubdev_context/src/version.dart';
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   if (args.contains('--version')) {
-    stdout.writeln('pubdev_context 0.1.0');
+    stdout.writeln('pubdev_context $packageVersion');
     return;
   }
 
@@ -40,12 +41,17 @@ void main(List<String> args) {
   final client = PubDevClient();
   final searchCache = ResponseCache<List<PackageSummary>>();
   final packageCache = ResponseCache<PackageDetail>();
+  final changelogCache = ResponseCache<List<ChangelogEntry>>();
 
-  PubMcpServer(
+  final server = PubMcpServer(
     stdioChannel(input: stdin, output: stdout),
     config: config,
     client: client,
     searchCache: searchCache,
     packageCache: packageCache,
+    changelogCache: changelogCache,
   );
+
+  await server.done;
+  client.close();
 }

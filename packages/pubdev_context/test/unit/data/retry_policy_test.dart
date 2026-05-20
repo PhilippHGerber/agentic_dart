@@ -1,6 +1,8 @@
 /// Unit tests for [RetryPolicy].
 library;
 
+import 'dart:async' show TimeoutException;
+
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:test/test.dart';
@@ -178,6 +180,40 @@ void main() {
         (result as PubDevFailure<int>).error.error,
         equals(DomainErrors.serviceUnavailable),
       );
+    });
+  });
+
+  // ─── Timeout handling ─────────────────────────────────────────────────────
+
+  group('RetryPolicy — timeout', () {
+    test('retries on TimeoutException', () async {
+      var attempts = 0;
+      await _fastRetry().execute<int>(() async {
+        attempts++;
+        throw TimeoutException('timed out');
+      });
+      expect(attempts, equals(3));
+    });
+
+    test('returns request_timeout when all failures are timeouts', () async {
+      final result = await _fastRetry().execute<int>(
+        () async => throw TimeoutException('timed out'),
+      );
+      expect(
+        (result as PubDevFailure<int>).error.error,
+        equals(DomainErrors.requestTimeout),
+      );
+    });
+
+    test('succeeds on second attempt after an initial timeout', () async {
+      var attempts = 0;
+      final result = await _fastRetry().execute<int>(() async {
+        attempts++;
+        if (attempts == 1) throw TimeoutException('timed out');
+        return 42;
+      });
+      expect((result as PubDevSuccess<int>).value, equals(42));
+      expect(attempts, equals(2));
     });
   });
 

@@ -5,6 +5,7 @@
 /// this module; every public method returns a typed [PubDevResult].
 library;
 
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -44,8 +45,9 @@ final class RetryPolicy {
   final Future<void> Function(Duration) _delay;
 
   static const _retryStatusCodes = {429, 500, 502, 503, 504};
+  static const _timeoutSentinel = -1;
 
-  /// Executes [operation], retrying on transient HTTP failures.
+  /// Executes [operation], retrying on transient HTTP failures and timeouts.
   ///
   /// Returns [PubDevSuccess] on the first successful response, or
   /// [PubDevFailure] once retries are exhausted or a non-retryable error
@@ -64,6 +66,8 @@ final class RetryPolicy {
 
       try {
         return PubDevSuccess(await operation());
+      } on TimeoutException {
+        failures.add(_timeoutSentinel);
       } on HttpStatusException catch (e) {
         final retryable = _retryStatusCodes.contains(e.statusCode);
         final clientError = e.statusCode >= 400 && e.statusCode < 500 && e.statusCode != 429;
@@ -102,6 +106,13 @@ final class RetryPolicy {
   };
 
   static DomainError _exhaustedError(List<int> failures) {
+    if (failures.every((c) => c == _timeoutSentinel)) {
+      return const DomainError(
+        error: DomainErrors.requestTimeout,
+        message: 'pub.dev did not respond within the allotted time.',
+        suggestion: 'Check your network connection and try again.',
+      );
+    }
     if (failures.every((c) => c == 429)) {
       return const DomainError(
         error: DomainErrors.rateLimited,
@@ -155,13 +166,20 @@ final class PubDevClient {
   /// Creates a [PubDevClient].
   ///
   /// Supply [httpClient] and [retryPolicy] to override the defaults — useful
-  /// for testing without live network calls.
-  PubDevClient({http.Client? httpClient, RetryPolicy? retryPolicy})
-    : _http = httpClient ?? http.Client(),
-      _retry = retryPolicy ?? RetryPolicy();
+  /// for testing without live network calls. [requestTimeout] sets the deadline
+  /// for each individual HTTP call; the [RetryPolicy] may issue multiple calls
+  /// up to [RetryPolicy.maxAttempts] before returning a failure.
+  PubDevClient({
+    http.Client? httpClient,
+    RetryPolicy? retryPolicy,
+    Duration requestTimeout = const Duration(seconds: 10),
+  }) : _http = httpClient ?? http.Client(),
+       _retry = retryPolicy ?? RetryPolicy(),
+       _timeout = requestTimeout;
 
   final http.Client _http;
   final RetryPolicy _retry;
+  final Duration _timeout;
 
   /// Closes the underlying HTTP client and releases its resources.
   ///
@@ -318,6 +336,21 @@ final class PubDevClient {
     };
   }
 
+  /// Returns the raw changelog text for [name] from the pub.dev changelog page.
+  ///
+  /// Fetches `GET /packages/{name}/changelog` and converts the rendered HTML to
+  /// plain text with `## version` headings preserved so the caller can apply
+  /// the standard Keep-a-Changelog parsing algorithm.
+  Future<PubDevResult<String>> getChangelog(String name) async {
+    final result = await _retry.execute(
+      () => _getRaw('$_kBaseUrl/packages/$name/changelog'),
+    );
+    return switch (result) {
+      PubDevFailure<String>(:final error) => PubDevFailure(error),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(_extractChangelogText(value)),
+    };
+  }
+
   /// Returns a README excerpt for [name] from the rendered documentation page.
   ///
   /// Fetches `GET /documentation/{name}/latest/` and extracts plain text from
@@ -367,10 +400,9 @@ final class PubDevClient {
   }
 
   Future<String> _getRaw(String url) async {
-    final response = await _http.get(
-      Uri.parse(url),
-      headers: const {'Accept': _kAccept},
-    );
+    final response = await _http
+        .get(Uri.parse(url), headers: const {'Accept': _kAccept})
+        .timeout(_timeout);
     if (response.statusCode == 200) return response.body;
     throw HttpStatusException(response.statusCode);
   }
@@ -387,6 +419,32 @@ final class PubDevClient {
     final info = (infoResult as PubDevSuccess<Map<String, Object?>>).value;
     final score = (scoreResult as PubDevSuccess<Map<String, Object?>>).value;
     return PackageSummary.fromPackageAndScore(info, score);
+  }
+
+  /// Converts the pub.dev changelog HTML page to plain text with `## version`
+  /// headings so the caller can split on standard Keep-a-Changelog patterns.
+  ///
+  /// `<h2>` tags become `\n## ` prefixes; `<li>` tags become `\n- ` bullets;
+  /// all remaining tags and HTML entities are stripped or decoded.
+  static String _extractChangelogText(String html) {
+    return html
+        .replaceAll(RegExp('<h2[^>]*>'), '\n## ')
+        .replaceAll('</h2>', '\n')
+        .replaceAll(RegExp('<li[^>]*>'), '\n- ')
+        .replaceAll('</li>', '')
+        .replaceAll(RegExp('<[^>]+>'), '')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'")
+        .replaceAll('&#39;', "'")
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll(RegExp('&[a-z]+;|&#[0-9]+;', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'[ \t]+'), ' ')
+        .replaceAll(RegExp(r'\r\n|\r'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
   }
 
   static String _extractReadmeExcerpt(String html) {

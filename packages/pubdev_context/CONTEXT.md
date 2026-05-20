@@ -24,6 +24,14 @@ _Avoid_: error, exception, failure message
 An MCP tool exposed to the LLM agent. Each tool maps to one or more pub.dev endpoints and always returns either a typed value or a **DomainError** — it never throws.
 _Avoid_: command, endpoint, function
 
+**ToolDefinition**:
+The `Tool` + `ObjectSchema` pair that describes a tool to the MCP client. The complete LLM-facing contract: name, description, and parameter descriptions. Lives in `tool_definitions.dart` alongside the server instructions string.
+_Avoid_: tool spec, tool schema, tool config
+
+**ToolHandler**:
+The Dart class that implements a tool's logic (`GetPackageHandler`, `SearchPackagesHandler`, etc.). Has no knowledge of how the tool is described to the LLM — it only processes `CallToolRequest` and returns `CallToolResult`.
+_Avoid_: tool, handler, implementation
+
 ## Relationships
 
 - A **PackageDetail** is a strict superset of **PackageSummary** data
