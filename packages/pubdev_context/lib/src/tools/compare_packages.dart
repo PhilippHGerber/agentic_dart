@@ -61,8 +61,7 @@ final class ComparePackagesHandler {
   /// input validation fails.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
-    final names =
-        ((args['names'] as List<Object?>?) ?? const []).whereType<String>().toList();
+    final names = ((args['names'] as List<Object?>?) ?? const []).whereType<String>().toList();
 
     if (names.length < 2) {
       return _domainError(

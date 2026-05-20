@@ -365,6 +365,21 @@ final class PubDevClient {
     };
   }
 
+  /// Returns the full README text for [name] from the rendered documentation page.
+  ///
+  /// Fetches `GET /documentation/{name}/latest/` and extracts plain text from
+  /// the markdown section of the rendered HTML without truncation. Returns an
+  /// empty string when the documentation page contains no markdown section.
+  Future<PubDevResult<String>> getFullReadme(String name) async {
+    final result = await _retry.execute(
+      () => _getRaw('$_kBaseUrl/documentation/$name/latest/'),
+    );
+    return switch (result) {
+      PubDevFailure<String>(:final error) => PubDevFailure(error),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(_extractFullReadme(value)),
+    };
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   /// Fetches [url] with retry and parses the body as a JSON object.
@@ -462,6 +477,34 @@ final class PubDevClient {
         .trim();
     if (text.length > 500) return '${text.substring(0, 497)}...';
     return text;
+  }
+
+  /// Extracts the full README text from a rendered documentation page.
+  ///
+  /// Finds the markdown content section and strips HTML tags without any
+  /// length truncation. Returns an empty string when no markdown section
+  /// is found in [html].
+  static String _extractFullReadme(String html) {
+    const marker = 'class="desc markdown';
+    final markerIdx = html.indexOf(marker);
+    if (markerIdx == -1) return '';
+    final tagEnd = html.indexOf('>', markerIdx);
+    if (tagEnd == -1) return '';
+    final content = html.substring(tagEnd + 1);
+    return content
+        .replaceAll(RegExp('<[^>]*>'), ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'")
+        .replaceAll('&#39;', "'")
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll(RegExp('&[a-z]+;|&#[0-9]+;', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'[ \t]+'), ' ')
+        .replaceAll(RegExp(r'\r\n|\r'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
   }
 
   static String? _mapSort(String sort) => switch (sort) {

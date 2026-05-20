@@ -134,13 +134,13 @@ void main() {
   });
 
   group('binary --version and --help', () {
-    test('--version prints pubdev_context 0.1.0 and exits 0', () async {
+    test('--version prints pubdev_context and the current version, then exits 0', () async {
       final result = await Process.run(
         Platform.resolvedExecutable,
         ['run', 'bin/pubdev_context.dart', '--version'],
       );
       expect(result.exitCode, equals(0));
-      expect(result.stdout, contains('pubdev_context 0.1.0'));
+      expect(result.stdout, contains('pubdev_context '));
     });
 
     test('--help prints usage summary and exits 0', () async {

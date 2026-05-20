@@ -12,11 +12,14 @@ library;
 import 'dart:async';
 
 import 'package:dart_mcp/server.dart';
+import 'package:http/http.dart' as http;
 
 import 'cache/memory_cache.dart';
 import 'config/config.dart';
 import 'data/models.dart';
 import 'data/pub_client.dart';
+import 'resources/meta_resources.dart';
+import 'resources/package_resources.dart';
 import 'tools/compare_packages.dart';
 import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
@@ -38,9 +41,12 @@ base class PubMcpServer extends MCPServer
   /// [client] is the pub.dev HTTP gateway. [searchCache] is the shared TTL
   /// store for search results, [packageCache] for individual package lookups
   /// (shared by `get_package` and `compare_packages`), [changelogCache] for
-  /// parsed changelog entry lists, and [apiIndexCache] for dartdoc symbol
-  /// indexes (shared by `search_api_symbols` and the package resource handler);
-  /// callers own their lifecycles.
+  /// parsed changelog entry lists, [apiIndexCache] for dartdoc symbol indexes
+  /// (shared by `search_api_symbols` and the package resource handler), and
+  /// [readmeCache] for full package README strings, [metaCache] for the
+  /// `pub://meta/` resource responses; callers own their lifecycles. An optional
+  /// [metaHttpClient] may be supplied to override the HTTP client used by the
+  /// meta resource handler (useful in tests).
   PubMcpServer(
     super.channel, {
     required PubMcpConfig config,
@@ -49,11 +55,18 @@ base class PubMcpServer extends MCPServer
     required ResponseCache<PackageDetail> packageCache,
     required ResponseCache<List<ChangelogEntry>> changelogCache,
     required ResponseCache<List<DartdocSymbol>> apiIndexCache,
+    required ResponseCache<String> readmeCache,
+    required ResponseCache<String> metaCache,
+    http.Client? metaHttpClient,
   }) : _client = client,
        _searchCache = searchCache,
        _packageCache = packageCache,
        _changelogCache = changelogCache,
        _apiIndexCache = apiIndexCache,
+       _readmeCache = readmeCache,
+       _metaCache = metaCache,
+       _metaHttp = metaHttpClient ?? http.Client(),
+       _metaHttpOwned = metaHttpClient == null,
        super.fromStreamChannel(
          implementation: Implementation(
            name: 'pubdev_context',
@@ -69,19 +82,68 @@ base class PubMcpServer extends MCPServer
   final ResponseCache<PackageDetail> _packageCache;
   final ResponseCache<List<ChangelogEntry>> _changelogCache;
   final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
+  final ResponseCache<String> _readmeCache;
+  final ResponseCache<String> _metaCache;
+  final http.Client _metaHttp;
+
+  /// Whether [_metaHttp] was created internally and must be closed on shutdown.
+  final bool _metaHttpOwned;
 
   @override
   FutureOr<InitializeResult> initialize(InitializeRequest request) async {
     final result = await super.initialize(request);
     _registerTools();
+    _registerResources();
     log(LoggingLevel.info, 'pubdev_context server initialized');
     return result;
   }
 
-  /// Returns an empty completion result; completions are reserved for a future release.
   @override
-  FutureOr<CompleteResult> handleComplete(CompleteRequest request) =>
-      CompleteResult(completion: Completion(values: const []));
+  Future<void> shutdown() async {
+    if (_metaHttpOwned) _metaHttp.close();
+    await super.shutdown();
+  }
+
+  /// Handles `completion/complete` requests for resource template parameters.
+  ///
+  /// For the `{name}` parameter of both [PackageResourcesHandler.kReadmeTemplate]
+  /// and [PackageResourcesHandler.kApiTemplate], returns matching package names
+  /// from the most recently cached `search_packages` results. No HTTP call is
+  /// issued during autocomplete — cached entries only.
+  ///
+  /// Returns an empty [Completion] for all other references or argument names.
+  @override
+  FutureOr<CompleteResult> handleComplete(CompleteRequest request) async {
+    final ref = request.ref;
+    if (!ref.isResource) {
+      return CompleteResult(completion: Completion(values: const []));
+    }
+
+    final resourceRef = ref as ResourceTemplateReference;
+    final isPackageTemplate =
+        resourceRef.uri == PackageResourcesHandler.kReadmeTemplate.uriTemplate ||
+        resourceRef.uri == PackageResourcesHandler.kApiTemplate.uriTemplate;
+
+    if (!isPackageTemplate || request.argument.name != 'name') {
+      return CompleteResult(completion: Completion(values: const []));
+    }
+
+    final partial = request.argument.value.toLowerCase();
+    final names = <String>{};
+
+    // Collect package names from every cached search result — no HTTP calls.
+    for (final future in _searchCache.entries.values) {
+      final results = await future;
+      names.addAll(results.map((s) => s.name));
+    }
+
+    final matches = names.where((n) => n.toLowerCase().startsWith(partial)).take(100).toList()
+      ..sort();
+
+    return CompleteResult(
+      completion: Completion(values: matches, hasMore: false),
+    );
+  }
 
   void _registerTools() {
     final searchHandler = SearchPackagesHandler(
@@ -123,6 +185,30 @@ base class PubMcpServer extends MCPServer
     );
     registerTool(searchApiSymbolsTool, searchApiSymbolsHandler.call);
     log(LoggingLevel.debug, 'registered tool: search_api_symbols');
+  }
+
+  void _registerResources() {
+    final metaHandler = MetaResourcesHandler(
+      httpClient: _metaHttp,
+      cache: _metaCache,
+      log: log,
+    );
+    addResource(kScoringResource, metaHandler.handleScoring);
+    log(LoggingLevel.debug, 'registered resource: pub://meta/scoring');
+    addResource(kSdkVersionsResource, metaHandler.handleSdkVersions);
+    log(LoggingLevel.debug, 'registered resource: pub://meta/sdk-versions');
+
+    final handler = PackageResourcesHandler(
+      client: _client,
+      readmeCache: _readmeCache,
+      apiIndexCache: _apiIndexCache,
+      log: log,
+    );
+    addResourceTemplate(PackageResourcesHandler.kReadmeTemplate, handler.handleReadResource);
+    log(LoggingLevel.debug, 'registered resource template: $kReadmeUriTemplate');
+
+    addResourceTemplate(PackageResourcesHandler.kApiTemplate, handler.handleReadResource);
+    log(LoggingLevel.debug, 'registered resource template: $kApiUriTemplate');
   }
 
   static LoggingLevel _toLoggingLevel(LogLevel level) => switch (level) {

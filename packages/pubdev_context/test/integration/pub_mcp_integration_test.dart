@@ -147,22 +147,30 @@ void main() {
   // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
   group('lifecycle', () {
-    test('initialize response contains the protocolVersion field', () async {
-      final freshMcp = await _McpProcess.start();
-      final response = await freshMcp.handshake();
-      final result = response['result']! as Map<String, Object?>;
-      expect(result, contains('protocolVersion'));
-      await freshMcp.close();
-    }, timeout: const Timeout(Duration(seconds: 10)));
+    test(
+      'initialize response contains the protocolVersion field',
+      () async {
+        final freshMcp = await _McpProcess.start();
+        final response = await freshMcp.handshake();
+        final result = response['result']! as Map<String, Object?>;
+        expect(result, contains('protocolVersion'));
+        await freshMcp.close();
+      },
+      timeout: const Timeout(Duration(seconds: 10)),
+    );
 
-    test('initialize response advertises the tools capability', () async {
-      final freshMcp = await _McpProcess.start();
-      final response = await freshMcp.handshake();
-      final result = response['result']! as Map<String, Object?>;
-      final caps = result['capabilities']! as Map<String, Object?>;
-      expect(caps, contains('tools'));
-      await freshMcp.close();
-    }, timeout: const Timeout(Duration(seconds: 10)));
+    test(
+      'initialize response advertises the tools capability',
+      () async {
+        final freshMcp = await _McpProcess.start();
+        final response = await freshMcp.handshake();
+        final result = response['result']! as Map<String, Object?>;
+        final caps = result['capabilities']! as Map<String, Object?>;
+        expect(caps, contains('tools'));
+        await freshMcp.close();
+      },
+      timeout: const Timeout(Duration(seconds: 10)),
+    );
 
     test('process exits cleanly after stdin closes', () async {
       final freshMcp = await _McpProcess.start();

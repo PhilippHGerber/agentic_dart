@@ -65,6 +65,19 @@ final class ResponseCache<T> {
   final _entries = <String, _CacheEntry<T>>{};
   final _timers = <String, Timer>{};
 
+  /// Returns a snapshot of all non-expired cache entries, keyed by their cache key.
+  ///
+  /// Each value is the in-flight or completed [Future] originally passed to [set].
+  /// This getter is synchronous — callers that need the resolved values must await
+  /// each future individually. Expired entries are excluded from the returned map.
+  Map<String, Future<T>> get entries {
+    final now = _clock();
+    return {
+      for (final entry in _entries.entries)
+        if (!now.isAfter(entry.value.expiry)) entry.key: entry.value.value,
+    };
+  }
+
   /// Returns the cached [Future] for [key], or `null` on a miss or after TTL expiry.
   ///
   /// An expired entry is removed before returning `null`.

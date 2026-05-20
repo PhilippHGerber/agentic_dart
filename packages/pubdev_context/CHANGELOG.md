@@ -7,10 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- `compare_packages` tool — compare 2–5 packages side by side as a `ComparisonMatrix`; fetches via the shared 15-minute package-metadata cache (compatible with `get_package` cache keys); requests are issued sequentially with a 100 ms inter-request gap; partial failures are reported per-package in `errors` without blocking successful columns
-- `get_package` tool — fetch full `PackageDetail` for one package (metadata, scores, SDK constraints, dependencies, recent versions, README excerpt) with optional version pinning; 15-minute TTL cache
-- `get_changelog` tool — fetch and parse a package changelog into a newest-first `List<ChangelogEntry>` with `breaking` flags; supports `from_version` exclusive lower bound and `version_limit` cap; 15-minute TTL cache
-- `no_documentation` and `invalid_input` domain error codes
+- `get_package` tool — full metadata for a named package: scores, SDK constraints, dependencies, recent versions, and README excerpt; supports optional version pinning
+- `get_changelog` tool — parsed changelog as a newest-first list of entries with `breaking` flags; supports `from_version` lower bound and `version_limit` cap
+- `compare_packages` tool — side-by-side `ComparisonMatrix` for 2–5 packages; partial failures are reported per package without blocking the remaining columns
+- `pub://meta/scoring` resource — plain-text explanation of pub.dev's 160-point scoring system; embedded at compile time
+- `pub://meta/sdk-versions` resource — current stable Dart and Flutter SDK versions as a `{ dart, flutter }` JSON object
+- `pub://package/{name}/readme` resource template — full package README as `text/markdown`
+- `pub://package/{name}/api` resource template — dartdoc symbol index as `application/json`
+- Autocomplete for the `{name}` parameter in resource templates — returns matching package names from cached search results
 
 ## [0.1.0] - 2026-05-11
 

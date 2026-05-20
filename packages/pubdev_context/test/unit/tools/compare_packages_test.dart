@@ -310,8 +310,7 @@ void main() {
       expect(constraints['http']! as String, isNotEmpty);
     });
 
-    test('matrix contains the sdkConstraints.flutter field when packages declare it',
-        () async {
+    test('matrix contains the sdkConstraints.flutter field when packages declare it', () async {
       final result = await buildHandler().call(_request(['http', 'dio']));
 
       expect(_matrixOf(result), contains('sdkConstraints.flutter'));
@@ -404,47 +403,55 @@ void main() {
   // ─── Sequential pacing ───────────────────────────────────────────────────────
 
   group('sequential pacing', () {
-    test('at least 100 ms elapses between consecutive HTTP requests', () async {
-      _stubSuccess(mockHttp, 'http');
-      _stubSuccess(mockHttp, 'dio');
+    test(
+      'at least 100 ms elapses between consecutive HTTP requests',
+      () async {
+        _stubSuccess(mockHttp, 'http');
+        _stubSuccess(mockHttp, 'dio');
 
-      final requestTimes = <DateTime>[];
-      final handler = buildHandler(
-        log: (level, msg) {
-          if (msg.toString().contains('HTTP request')) {
-            requestTimes.add(DateTime.now());
-          }
-        },
-      );
+        final requestTimes = <DateTime>[];
+        final handler = buildHandler(
+          log: (level, msg) {
+            if (msg.toString().contains('HTTP request')) {
+              requestTimes.add(DateTime.now());
+            }
+          },
+        );
 
-      await handler.call(_request(['http', 'dio']));
+        await handler.call(_request(['http', 'dio']));
 
-      expect(requestTimes.length, equals(2));
-      expect(
-        requestTimes[1].difference(requestTimes[0]).inMilliseconds,
-        greaterThanOrEqualTo(100),
-      );
-    }, timeout: const Timeout(Duration(seconds: 5)));
+        expect(requestTimes.length, equals(2));
+        expect(
+          requestTimes[1].difference(requestTimes[0]).inMilliseconds,
+          greaterThanOrEqualTo(100),
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 5)),
+    );
 
-    test('requests are issued in the order the names are provided', () async {
-      _stubSuccess(mockHttp, 'http');
-      _stubSuccess(mockHttp, 'dio');
-      _stubSuccess(mockHttp, 'shelf');
+    test(
+      'requests are issued in the order the names are provided',
+      () async {
+        _stubSuccess(mockHttp, 'http');
+        _stubSuccess(mockHttp, 'dio');
+        _stubSuccess(mockHttp, 'shelf');
 
-      final requestedNames = <String>[];
-      final handler = buildHandler(
-        log: (level, msg) {
-          final s = msg.toString();
-          if (s.contains('HTTP request name=')) {
-            requestedNames.add(s.split('name=').last);
-          }
-        },
-      );
+        final requestedNames = <String>[];
+        final handler = buildHandler(
+          log: (level, msg) {
+            final s = msg.toString();
+            if (s.contains('HTTP request name=')) {
+              requestedNames.add(s.split('name=').last);
+            }
+          },
+        );
 
-      await handler.call(_request(['http', 'dio', 'shelf']));
+        await handler.call(_request(['http', 'dio', 'shelf']));
 
-      expect(requestedNames, equals(['http', 'dio', 'shelf']));
-    }, timeout: const Timeout(Duration(seconds: 10)));
+        expect(requestedNames, equals(['http', 'dio', 'shelf']));
+      },
+      timeout: const Timeout(Duration(seconds: 10)),
+    );
   });
 
   // ─── Cache hit ───────────────────────────────────────────────────────────────

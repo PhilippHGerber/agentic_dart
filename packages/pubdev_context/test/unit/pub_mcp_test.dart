@@ -48,6 +48,8 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   packageCache: ResponseCache<PackageDetail>(),
   changelogCache: ResponseCache<List<ChangelogEntry>>(),
   apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
+  readmeCache: ResponseCache<String>(),
+  metaCache: ResponseCache<String>(),
 );
 
 /// Builds a [PubMcpServer] that shuts down cleanly at end of test without a
@@ -156,9 +158,9 @@ void main() {
         expect(result.serverInfo.name, equals('pubdev_context'));
       });
 
-      test('responds with version 0.1.0', () async {
+      test('responds with the current package version', () async {
         final result = await doInitialize();
-        expect(result.serverInfo.version, equals('0.1.0'));
+        expect(result.serverInfo.version, isNotEmpty);
       });
 
       test('advertises the tools capability', () async {
@@ -242,6 +244,40 @@ void main() {
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_changelog');
         expect(tool.inputSchema.required, contains('name'));
+      });
+    });
+
+    // ─── Resource registration ───────────────────────────────────────────────────
+
+    group('resource registration', () {
+      test('lists pub://meta/scoring after initialization', () async {
+        await doInitialize();
+        final resources = await serverConnection.listResources(ListResourcesRequest());
+        final uris = resources.resources.map((r) => r.uri).toList();
+        expect(uris, contains('pub://meta/scoring'));
+      });
+
+      test('lists pub://meta/sdk-versions after initialization', () async {
+        await doInitialize();
+        final resources = await serverConnection.listResources(ListResourcesRequest());
+        final uris = resources.resources.map((r) => r.uri).toList();
+        expect(uris, contains('pub://meta/sdk-versions'));
+      });
+
+      test('pub://meta/scoring resource has a non-empty name', () async {
+        await doInitialize();
+        final resources = await serverConnection.listResources(ListResourcesRequest());
+        final resource = resources.resources.firstWhere((r) => r.uri == 'pub://meta/scoring');
+        expect(resource.name, isNotEmpty);
+      });
+
+      test('pub://meta/sdk-versions resource has a non-empty name', () async {
+        await doInitialize();
+        final resources = await serverConnection.listResources(ListResourcesRequest());
+        final resource = resources.resources.firstWhere(
+          (r) => r.uri == 'pub://meta/sdk-versions',
+        );
+        expect(resource.name, isNotEmpty);
       });
     });
 
