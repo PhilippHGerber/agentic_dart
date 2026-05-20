@@ -40,23 +40,30 @@ dart pub global activate pubdev_context
 
 ## Tools
 
-| Tool              | Description                                    |
-| ----------------- | ---------------------------------------------- |
-| `search_packages` | Search pub.dev by keyword, SDK, and sort order |
+| Tool                | Description                                                            |
+| ------------------- | ---------------------------------------------------------------------- |
+| `search_packages`   | Search pub.dev by keyword, SDK, platform, and sort order               |
+| `get_package`       | Full metadata for one package — scores, constraints, deps, README      |
+| `get_changelog`     | Recent version history with computed `breaking` flags                  |
+| `compare_packages`  | Side-by-side comparison matrix for 2–5 packages                        |
+| `search_api_symbols`| Search the dartdoc symbol index of a package by name or description    |
 
 ## Configuration
 
-| Flag          | Env var                 | Default   | Description                   |
-| ------------- | ----------------------- | --------- | ----------------------------- |
+| Flag          | Env var                    | Default   | Description                   |
+| ------------- | -------------------------- | --------- | ----------------------------- |
 | `--log-level` | `pubdev_context_LOG_LEVEL` | `warning` | `error\|warning\|info\|debug` |
 | `--cache-dir` | `pubdev_context_CACHE_DIR` | none      | Enable file-based cache       |
-| `--version`   | —                       | —         | Print version and exit        |
-| `--help`      | —                       | —         | Print usage and exit          |
+| `--version`   | —                          | —         | Print version and exit        |
+| `--help`      | —                          | —         | Print usage and exit          |
 
 ## MCP Inspector (interactive browser UI)
 
-npx @modelcontextprotocol/inspector /Users/gep/.pub-cache/bin/pubdev_context
-This opens a browser UI where you can call tools, inspect schemas, and see raw JSON-RPC responses — great for iterating quickly.
+```
+npx @modelcontextprotocol/inspector pubdev_context
+```
+
+Opens a browser UI where you can call tools, inspect schemas, and see raw JSON-RPC responses.
 
 ## Roadmap
 
@@ -64,9 +71,6 @@ This opens a browser UI where you can call tools, inspect schemas, and see raw J
 
 | Tool                | Description                                               |
 | ------------------- | --------------------------------------------------------- |
-| `get_package`       | Full metadata for one package in a single call            |
-| `get_changelog`     | Recent version history with computed `breaking` flags     |
-| `compare_packages`  | Side-by-side comparison matrix for 2–5 packages           |
 | `find_alternatives` | Topic-matched and description-based alternative discovery |
 
 ### Resources
@@ -88,8 +92,8 @@ This opens a browser UI where you can call tools, inspect schemas, and see raw J
 ## dart_mcp compatibility
 
 | pubdev_context | dart_mcp |
-| ----------- | -------- |
-| `0.1.x`     | `^0.5.1` |
+| -------------- | -------- |
+| `0.1.x`        | `^0.5.1` |
 
 ## License
 

@@ -2,7 +2,7 @@ name: pubdev_context
 description: >-
   A pub.dev intelligence MCP server for Dart and Flutter developers.
   Search, evaluate, compare, and inspect pub.dev packages from any AI agent.
-version: 0.1.1-pre1
+version: 0.1.1-pre2
 homepage: https://github.com/PhilippHGerber/agentic_dart
 repository: https://github.com/PhilippHGerber/agentic_dart/tree/main/packages/pubdev_context
 issue_tracker: https://github.com/PhilippHGerber/agentic_dart/issues
