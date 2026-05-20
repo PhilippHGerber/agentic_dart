@@ -113,6 +113,41 @@ final getChangelogTool = Tool(
   ),
 );
 
+// ─── search_api_symbols ───────────────────────────────────────────────────────
+
+/// The `search_api_symbols` [Tool] definition registered with the MCP server.
+final searchApiSymbolsTool = Tool(
+  name: 'search_api_symbols',
+  description:
+      'Search the dartdoc API symbol index of a pub.dev package. '
+      'Returns a ranked list of DartdocSymbol records: exact name matches appear '
+      'before description-only matches. '
+      'Use the type parameter to narrow results to a specific symbol kind. '
+      'Use get_package first to verify the package name.',
+  inputSchema: ObjectSchema(
+    required: ['package', 'query'],
+    properties: {
+      'package': Schema.string(description: 'The pub.dev package name.'),
+      'query': Schema.string(
+        description: 'Search term matched against symbol names and descriptions.',
+      ),
+      'type': Schema.string(
+        description:
+            'Filter by dartdoc symbol kind. '
+            'Known values: class, mixin, enum, function, constant, method, property, '
+            'extension, accessor, constructor, typedef, library. '
+            'Omit to return all matching symbol kinds. '
+            'Unknown values are accepted without error.',
+      ),
+      'limit': Schema.int(
+        description: 'Maximum number of results to return (default 10, max 25).',
+        minimum: 1,
+        maximum: 25,
+      ),
+    },
+  ),
+);
+
 // ─── compare_packages ─────────────────────────────────────────────────────────
 
 /// The `compare_packages` [Tool] definition registered with the MCP server.

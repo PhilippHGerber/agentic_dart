@@ -47,6 +47,7 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   searchCache: ResponseCache<List<PackageSummary>>(),
   packageCache: ResponseCache<PackageDetail>(),
   changelogCache: ResponseCache<List<ChangelogEntry>>(),
+  apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
 );
 
 /// Builds a [PubMcpServer] that shuts down cleanly at end of test without a

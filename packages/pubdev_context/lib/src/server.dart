@@ -20,6 +20,7 @@ import 'data/pub_client.dart';
 import 'tools/compare_packages.dart';
 import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
+import 'tools/search_api_symbols.dart';
 import 'tools/search_packages.dart';
 import 'tools/tool_definitions.dart';
 import 'version.dart';
@@ -36,8 +37,10 @@ base class PubMcpServer extends MCPServer
   /// [config] controls the initial log level and other server-wide settings.
   /// [client] is the pub.dev HTTP gateway. [searchCache] is the shared TTL
   /// store for search results, [packageCache] for individual package lookups
-  /// (shared by `get_package` and `compare_packages`), and [changelogCache]
-  /// for parsed changelog entry lists; callers own their lifecycles.
+  /// (shared by `get_package` and `compare_packages`), [changelogCache] for
+  /// parsed changelog entry lists, and [apiIndexCache] for dartdoc symbol
+  /// indexes (shared by `search_api_symbols` and the package resource handler);
+  /// callers own their lifecycles.
   PubMcpServer(
     super.channel, {
     required PubMcpConfig config,
@@ -45,10 +48,12 @@ base class PubMcpServer extends MCPServer
     required ResponseCache<List<PackageSummary>> searchCache,
     required ResponseCache<PackageDetail> packageCache,
     required ResponseCache<List<ChangelogEntry>> changelogCache,
+    required ResponseCache<List<DartdocSymbol>> apiIndexCache,
   }) : _client = client,
        _searchCache = searchCache,
        _packageCache = packageCache,
        _changelogCache = changelogCache,
+       _apiIndexCache = apiIndexCache,
        super.fromStreamChannel(
          implementation: Implementation(
            name: 'pubdev_context',
@@ -63,6 +68,7 @@ base class PubMcpServer extends MCPServer
   final ResponseCache<List<PackageSummary>> _searchCache;
   final ResponseCache<PackageDetail> _packageCache;
   final ResponseCache<List<ChangelogEntry>> _changelogCache;
+  final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
 
   @override
   FutureOr<InitializeResult> initialize(InitializeRequest request) async {
@@ -109,6 +115,14 @@ base class PubMcpServer extends MCPServer
     );
     registerTool(comparePackagesTool, comparePackagesHandler.call);
     log(LoggingLevel.debug, 'registered tool: compare_packages');
+
+    final searchApiSymbolsHandler = SearchApiSymbolsHandler(
+      client: _client,
+      cache: _apiIndexCache,
+      log: log,
+    );
+    registerTool(searchApiSymbolsTool, searchApiSymbolsHandler.call);
+    log(LoggingLevel.debug, 'registered tool: search_api_symbols');
   }
 
   static LoggingLevel _toLoggingLevel(LogLevel level) => switch (level) {

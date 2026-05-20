@@ -40,6 +40,7 @@ Future<void> main() async {
     searchCache: ResponseCache<List<PackageSummary>>(),
     packageCache: ResponseCache<PackageDetail>(),
     changelogCache: ResponseCache<List<ChangelogEntry>>(),
+    apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
   );
 
   // Connect an MCP client and initialise.
