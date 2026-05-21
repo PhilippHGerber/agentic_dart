@@ -1,6 +1,6 @@
 docs/
 benchmark/
-
+coverage/
 AGENTS.md
 CLAUDE.md
 CONTEXT.md
