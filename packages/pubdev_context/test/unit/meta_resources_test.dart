@@ -20,13 +20,13 @@ class _MockHttpClient extends Mock implements http.Client {}
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-final _kDartVersionJson = jsonEncode({
+final String _kDartVersionJson = jsonEncode({
   'version': '3.5.0',
   'date': '2024-07-10',
   'revision': 'abc123def456',
 });
 
-final _kFlutterReleasesJson = jsonEncode({
+final String _kFlutterReleasesJson = jsonEncode({
   'current_release': {'beta': 'oldhash', 'stable': 'def456hash'},
   'releases': [
     {'hash': 'oldhash', 'version': '3.23.0', 'channel': 'beta'},

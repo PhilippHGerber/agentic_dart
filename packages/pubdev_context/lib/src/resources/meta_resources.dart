@@ -257,21 +257,39 @@ final class MetaResourcesHandler {
     }
 
     final dartData = jsonDecode(dartResponse.body) as Map<String, Object?>;
-    final dartVersion = dartData['version'] as String;
+    final dartVersionObject = dartData['version'];
+    if (dartVersionObject is! String) {
+      throw Exception('Dart VERSION payload is missing a valid version string.');
+    }
 
     final flutterData = jsonDecode(flutterResponse.body) as Map<String, Object?>;
-    final currentRelease = flutterData['current_release'] as Map<String, Object?>;
-    final stableHash = currentRelease['stable'] as String;
-    final releases = (flutterData['releases'] as List<Object?>).cast<Map<String, Object?>>();
+    final currentReleaseObject = flutterData['current_release'];
+    if (currentReleaseObject is! Map<String, Object?>) {
+      throw Exception('Flutter releases payload is missing current_release data.');
+    }
+    final stableHashObject = currentReleaseObject['stable'];
+    if (stableHashObject is! String) {
+      throw Exception('Flutter releases payload is missing current_release.stable hash.');
+    }
+
+    final releasesObject = flutterData['releases'];
+    if (releasesObject is! List<Object?>) {
+      throw Exception('Flutter releases payload is missing releases list.');
+    }
+    final releases = releasesObject.whereType<Map<String, Object?>>().toList();
+    final stableHash = stableHashObject;
     final stableRelease = releases.firstWhere(
       (r) => r['hash'] == stableHash,
       orElse: () => throw Exception(
         'Flutter stable release with hash $stableHash not found in releases list.',
       ),
     );
-    final flutterVersion = stableRelease['version'] as String;
+    final flutterVersionObject = stableRelease['version'];
+    if (flutterVersionObject is! String) {
+      throw Exception('Flutter release payload is missing a valid version string.');
+    }
 
-    return jsonEncode({'dart': dartVersion, 'flutter': flutterVersion});
+    return jsonEncode({'dart': dartVersionObject, 'flutter': flutterVersionObject});
   }
 
   static ReadResourceResult _textResult(String uri, String text, String mimeType) =>

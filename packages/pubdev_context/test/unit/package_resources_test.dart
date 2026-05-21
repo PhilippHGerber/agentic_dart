@@ -1,3 +1,5 @@
+// ignore_for_file: missing_whitespace_between_adjacent_strings for html fixtures
+
 /// Unit tests for [PackageResourcesHandler].
 library;
 
@@ -43,14 +45,15 @@ const _kReadmeHtml =
     '</body></html>';
 
 /// Minimal stub HTML that looks like a pub.dev package example page.
-const _kExampleHtml = '<html><body>'
-    ' <div class="detail-tabs-content">'
-    ' <section class="tab-content detail-tab-example-content -active markdown-body">'
-    ' <p class="-monospace"><a href="https://github.com/dart-lang/http/blob/master/pkgs/http/example/main.dart">example/main.dart</a></p>'
-    ' <pre><code class="language-dart">main() { print(\'example\'); }</code></pre>'
-    ' </section>'
-    ' </div>'
-    ' </body></html>';
+const _kExampleHtml =
+    '<html><body>'
+    '<div class="detail-tabs-content">'
+    '<section class="tab-content detail-tab-example-content -active markdown-body">'
+    '<p class="-monospace"><a href="https://github.com/dart-lang/http/blob/master/pkgs/http/example/main.dart">example/main.dart</a></p>'
+    '<pre><code class="language-dart">main() { print(\'example\'); }</code></pre>'
+    '</section>'
+    '</div>'
+    '</body></html>';
 
 // ─── Stub helpers ─────────────────────────────────────────────────────────────
 
@@ -719,16 +722,17 @@ void main() {
         activeMaintenance: true,
       );
       final dioSummary = httpSummary.copyWith(name: 'dio');
-      searchCache.set(
-        'search:http:5:1::relevance:',
-        Future.value([httpSummary]),
-        kSearchResultsTtl,
-      );
-      searchCache.set(
-        'search:dio:5:1::relevance:',
-        Future.value([dioSummary]),
-        kSearchResultsTtl,
-      );
+      searchCache
+        ..set(
+          'search:http:5:1::relevance:',
+          Future.value([httpSummary]),
+          kSearchResultsTtl,
+        )
+        ..set(
+          'search:dio:5:1::relevance:',
+          Future.value([dioSummary]),
+          kSearchResultsTtl,
+        );
 
       final names = <String>{};
       for (final future in searchCache.entries.values) {

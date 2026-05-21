@@ -68,7 +68,7 @@ const _kPackageNotFound = DomainError(
 /// Handles MCP resource reads for the `pub://package/{name}/` namespace.
 ///
 /// Register [kReadmeTemplate], [kExampleTemplate], and [kApiTemplate] with
-/// [addResourceTemplate] and pass [handleReadResource] as the handler for all:
+/// addResourceTemplate and pass [handleReadResource] as the handler for all:
 ///
 /// ```dart
 /// addResourceTemplate(
@@ -121,7 +121,7 @@ final class PackageResourcesHandler {
 
   /// [ResourceTemplate] descriptor for the `pub://package/{name}/readme` resource.
   ///
-  /// Register this with [addResourceTemplate] alongside [handleReadResource].
+  /// Register this with addResourceTemplate alongside [handleReadResource].
   static final kReadmeTemplate = ResourceTemplate(
     uriTemplate: kReadmeUriTemplate,
     name: 'Package README',
@@ -133,7 +133,7 @@ final class PackageResourcesHandler {
 
   /// [ResourceTemplate] descriptor for the `pub://package/{name}/example` resource.
   ///
-  /// Register this with [addResourceTemplate] alongside [handleReadResource].
+  /// Register this with addResourceTemplate alongside [handleReadResource].
   static final kExampleTemplate = ResourceTemplate(
     uriTemplate: kExampleUriTemplate,
     name: 'Package example',
@@ -145,7 +145,7 @@ final class PackageResourcesHandler {
 
   /// [ResourceTemplate] descriptor for the `pub://package/{name}/api` resource.
   ///
-  /// Register this with [addResourceTemplate] alongside [handleReadResource].
+  /// Register this with addResourceTemplate alongside [handleReadResource].
   /// The cache key for this resource is `api_index:<name>`, identical to the one
   /// used by [SearchApiSymbolsHandler], so both modules warm each other's cache.
   static final kApiTemplate = ResourceTemplate(

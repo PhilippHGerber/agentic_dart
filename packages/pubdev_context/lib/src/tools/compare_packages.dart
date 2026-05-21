@@ -30,7 +30,7 @@ const _kInterRequestDelay = Duration(milliseconds: 100);
 
 /// Handles calls to the `compare_packages` MCP tool.
 ///
-/// Constructor dependencies are [client], [cache], and [log]. The [cache]
+/// Constructor dependencies are `client`, `cache`, and `log`. The `cache`
 /// should be the same [ResponseCache] instance shared with `GetPackageHandler`
 /// so that prior `get_package` calls are reused. All packages are fetched
 /// sequentially; each consecutive pair is separated by at least
