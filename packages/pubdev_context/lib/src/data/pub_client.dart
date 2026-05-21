@@ -362,8 +362,9 @@ final class PubDevClient {
     );
     return switch (result) {
       PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) =>
-        PubDevSuccess(HtmlToMarkdown.convert(value, isolateClass: 'desc markdown', maxChars: 500)),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(
+        HtmlToMarkdown.convert(value, isolateClass: 'desc markdown', maxChars: 500),
+      ),
     };
   }
 
@@ -386,8 +387,9 @@ final class PubDevClient {
           ),
         ),
       PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) =>
-        PubDevSuccess(HtmlToMarkdown.convert(value, isolateTag: 'main')),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(
+        HtmlToMarkdown.convert(value, isolateTag: 'main'),
+      ),
     };
   }
 
@@ -402,9 +404,40 @@ final class PubDevClient {
     );
     return switch (result) {
       PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) =>
-        PubDevSuccess(HtmlToMarkdown.convert(value, isolateClass: 'desc markdown')),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(
+        HtmlToMarkdown.convert(value, isolateClass: 'desc markdown'),
+      ),
     };
+  }
+
+  /// Returns the package example text for [name] from the rendered example page.
+  ///
+  /// Fetches `GET /packages/{name}/example` and extracts plain text from the
+  /// example section of the rendered HTML without truncation. Returns
+  /// [DomainErrors.exampleNotFound] when the page contains no example section.
+  Future<PubDevResult<String>> getExample(String name) async {
+    final result = await _retry.execute(() => _getRaw('$_kBaseUrl/packages/$name/example'));
+    return switch (result) {
+      PubDevFailure<String>(:final error) => PubDevFailure(error),
+      PubDevSuccess<String>(:final value) => _exampleResult(value),
+    };
+  }
+
+  static PubDevResult<String> _exampleResult(String html) {
+    final example = HtmlToMarkdown.convert(
+      html,
+      isolateClass: 'tab-content detail-tab-example-content -active markdown-body',
+    );
+    if (example.isEmpty) {
+      return const PubDevFailure(
+        DomainError(
+          error: DomainErrors.exampleNotFound,
+          message: 'Package example not found.',
+          suggestion: 'Check whether the package publishes an example tab on pub.dev.',
+        ),
+      );
+    }
+    return PubDevSuccess(example);
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────

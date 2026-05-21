@@ -279,6 +279,13 @@ void main() {
         expect(uris, contains('pub://meta/sdk-versions'));
       });
 
+      test('lists pub://package/{name}/example after initialization', () async {
+        await doInitialize();
+        final templates = await serverConnection.listResourceTemplates();
+        final uris = templates.resourceTemplates.map((r) => r.uriTemplate).toList();
+        expect(uris, contains('pub://package/{name}/example'));
+      });
+
       test('pub://meta/scoring resource has a non-empty name', () async {
         await doInitialize();
         final resources = await serverConnection.listResources(ListResourcesRequest());
@@ -291,6 +298,15 @@ void main() {
         final resources = await serverConnection.listResources(ListResourcesRequest());
         final resource = resources.resources.firstWhere(
           (r) => r.uri == 'pub://meta/sdk-versions',
+        );
+        expect(resource.name, isNotEmpty);
+      });
+
+      test('pub://package/{name}/example resource has a non-empty name', () async {
+        await doInitialize();
+        final templates = await serverConnection.listResourceTemplates();
+        final resource = templates.resourceTemplates.firstWhere(
+          (r) => r.uriTemplate == 'pub://package/{name}/example',
         );
         expect(resource.name, isNotEmpty);
       });

@@ -416,6 +416,46 @@ void main() {
     });
   });
 
+  // ─── getExample ─────────────────────────────────────────────────────────────
+
+  group('PubDevClient.getExample', () {
+    late _MockHttpClient mock;
+    const html = '<html><body>'
+        ' <div class="detail-tabs-content">'
+        ' <section class="tab-content detail-tab-example-content -active markdown-body">'
+        ' <p class="-monospace"><a href="https://github.com/dart-lang/http/blob/master/pkgs/http/example/main.dart">example/main.dart</a></p>'
+        ' <pre><code class="language-dart">main() { print(\'example\'); }</code></pre>'
+        ' </section>'
+        ' </div>'
+        ' </body></html>';
+
+    setUp(() {
+      mock = _setUp();
+      _stubGet(mock, '/packages/http/example', _json(html));
+    });
+
+    test('returns PubDevSuccess', () async {
+      expect(await _client(mock).getExample('http'), isA<PubDevSuccess<String>>());
+    });
+
+    test('extracted text contains the example code', () async {
+      final example = ((await _client(mock).getExample('http')) as PubDevSuccess<String>).value;
+      expect(example, contains("main() { print('example'); }"));
+    });
+
+    test('returns example_not_found when the example section is absent', () async {
+      _stubGet(mock, '/packages/missing/example', _json('<html><body></body></html>'));
+      final result = await _client(mock).getExample('missing');
+      expect((result as PubDevFailure<String>).error.error, equals(DomainErrors.exampleNotFound));
+    });
+
+    test('returns package_not_found on 404', () async {
+      _stubGet(mock, '/packages/nope/example', _json('', status: 404));
+      final result = await _client(mock).getExample('nope');
+      expect((result as PubDevFailure<String>).error.error, equals(DomainErrors.packageNotFound));
+    });
+  });
+
   // ─── unexpected_response ────────────────────────────────────────────────────
 
   group('PubDevClient — malformed JSON responses', () {

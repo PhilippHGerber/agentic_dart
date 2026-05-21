@@ -111,10 +111,11 @@ base class PubMcpServer extends MCPServer
 
   /// Handles `completion/complete` requests for resource template parameters.
   ///
-  /// For the `{name}` parameter of both [PackageResourcesHandler.kReadmeTemplate]
-  /// and [PackageResourcesHandler.kApiTemplate], returns matching package names
-  /// from the most recently cached `search_packages` results. No HTTP call is
-  /// issued during autocomplete — cached entries only.
+  /// For the `{name}` parameter of [PackageResourcesHandler.kReadmeTemplate],
+  /// [PackageResourcesHandler.kExampleTemplate], and [PackageResourcesHandler.kApiTemplate],
+  /// returns matching package names from the most recently cached
+  /// `search_packages` results. No HTTP call is issued during autocomplete —
+  /// cached entries only.
   ///
   /// Returns an empty [Completion] for all other references or argument names.
   @override
@@ -127,6 +128,7 @@ base class PubMcpServer extends MCPServer
     final resourceRef = ref as ResourceTemplateReference;
     final isPackageTemplate =
         resourceRef.uri == PackageResourcesHandler.kReadmeTemplate.uriTemplate ||
+        resourceRef.uri == PackageResourcesHandler.kExampleTemplate.uriTemplate ||
         resourceRef.uri == PackageResourcesHandler.kApiTemplate.uriTemplate;
 
     if (!isPackageTemplate || request.argument.name != 'name') {
@@ -219,6 +221,9 @@ base class PubMcpServer extends MCPServer
     );
     addResourceTemplate(PackageResourcesHandler.kReadmeTemplate, handler.handleReadResource);
     log(LoggingLevel.debug, 'registered resource template: $kReadmeUriTemplate');
+
+    addResourceTemplate(PackageResourcesHandler.kExampleTemplate, handler.handleReadResource);
+    log(LoggingLevel.debug, 'registered resource template: $kExampleUriTemplate');
 
     addResourceTemplate(PackageResourcesHandler.kApiTemplate, handler.handleReadResource);
     log(LoggingLevel.debug, 'registered resource template: $kApiUriTemplate');

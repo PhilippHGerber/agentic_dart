@@ -42,6 +42,16 @@ const _kReadmeHtml =
     '</div>'
     '</body></html>';
 
+/// Minimal stub HTML that looks like a pub.dev package example page.
+const _kExampleHtml = '<html><body>'
+    ' <div class="detail-tabs-content">'
+    ' <section class="tab-content detail-tab-example-content -active markdown-body">'
+    ' <p class="-monospace"><a href="https://github.com/dart-lang/http/blob/master/pkgs/http/example/main.dart">example/main.dart</a></p>'
+    ' <pre><code class="language-dart">main() { print(\'example\'); }</code></pre>'
+    ' </section>'
+    ' </div>'
+    ' </body></html>';
+
 // ─── Stub helpers ─────────────────────────────────────────────────────────────
 
 void _stubDocsPage(
@@ -58,6 +68,22 @@ void _stubDocsPage(
               u.toString().contains('/documentation/$packageName/latest/') &&
               !u.toString().contains('index.json'),
         ),
+      ),
+      headers: any(named: 'headers'),
+    ),
+  ).thenAnswer((_) async => statusCode == 200 ? _ok(body) : _status(statusCode));
+}
+
+void _stubExamplePage(
+  _MockHttpClient mock, {
+  int statusCode = 200,
+  String packageName = 'http',
+  String body = _kExampleHtml,
+}) {
+  when(
+    () => mock.get(
+      any(
+        that: predicate<Uri>((u) => u.toString().contains('/packages/$packageName/example')),
       ),
       headers: any(named: 'headers'),
     ),
@@ -94,6 +120,9 @@ List<DartdocSymbol> _fixtureSymbols() {
 
 ReadResourceRequest _readmeRequest(String packageName) =>
     ReadResourceRequest(uri: 'pub://package/$packageName/readme');
+
+ReadResourceRequest _exampleRequest(String packageName) =>
+    ReadResourceRequest(uri: 'pub://package/$packageName/example');
 
 ReadResourceRequest _apiRequest(String packageName) =>
     ReadResourceRequest(uri: 'pub://package/$packageName/api');
@@ -148,6 +177,14 @@ void main() {
       expect(PackageResourcesHandler.kReadmeTemplate.mimeType, equals('text/markdown'));
     });
 
+    test('kExampleTemplate has uri template pub://package/{name}/example', () {
+      expect(PackageResourcesHandler.kExampleTemplate.uriTemplate, equals(kExampleUriTemplate));
+    });
+
+    test('kExampleTemplate has MIME type text/markdown', () {
+      expect(PackageResourcesHandler.kExampleTemplate.mimeType, equals('text/markdown'));
+    });
+
     test('kApiTemplate has uri template pub://package/{name}/api', () {
       expect(PackageResourcesHandler.kApiTemplate.uriTemplate, equals(kApiUriTemplate));
     });
@@ -177,6 +214,13 @@ void main() {
     test('returns null when the package name segment is empty for readme', () async {
       final result = await buildHandler().handleReadResource(
         ReadResourceRequest(uri: 'pub://package//readme'),
+      );
+      expect(result, isNull);
+    });
+
+    test('returns null when the package name segment is empty for example', () async {
+      final result = await buildHandler().handleReadResource(
+        ReadResourceRequest(uri: 'pub://package//example'),
       );
       expect(result, isNull);
     });
@@ -232,6 +276,89 @@ void main() {
           .where((m) => m.$1 == LoggingLevel.debug)
           .map((m) => m.$2.toString());
       expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
+    });
+  });
+
+  // ─── Example resource: cache miss ────────────────────────────────────────────
+
+  group('example resource on cache miss', () {
+    test('returns a non-null ReadResourceResult', () async {
+      _stubExamplePage(mockHttp);
+      final result = await buildHandler().handleReadResource(_exampleRequest('http'));
+      expect(result, isNotNull);
+    });
+
+    test('content MIME type is text/markdown', () async {
+      _stubExamplePage(mockHttp);
+      final result = await buildHandler().handleReadResource(_exampleRequest('http'));
+      expect(_mimeType(result!), equals('text/markdown'));
+    });
+
+    test('content text contains the example code', () async {
+      _stubExamplePage(mockHttp);
+      final result = await buildHandler().handleReadResource(_exampleRequest('http'));
+      expect(_text(result!), contains("main() { print('example'); }"));
+    });
+
+    test('content URI matches the request URI', () async {
+      _stubExamplePage(mockHttp);
+      final result = await buildHandler().handleReadResource(_exampleRequest('http'));
+      expect(result!.contents.first.uri, equals('pub://package/http/example'));
+    });
+
+    test('logs an info message containing the package name', () async {
+      _stubExamplePage(mockHttp);
+      await buildHandler().handleReadResource(_exampleRequest('http'));
+      final infoLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.info)
+          .map((m) => m.$2.toString());
+      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
+    });
+  });
+
+  // ─── Example resource: cache hit ─────────────────────────────────────────────
+
+  group('example resource on cache hit', () {
+    test('makes only one HTTP call when called twice for the same package', () async {
+      _stubExamplePage(mockHttp);
+      final handler = buildHandler();
+      await handler.handleReadResource(_exampleRequest('http'));
+      fakeNow = fakeNow.add(const Duration(minutes: 30));
+      await handler.handleReadResource(_exampleRequest('http'));
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>((u) => u.toString().contains('/packages/http/example')),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
+    });
+
+    test('makes zero HTTP calls when the example cache is pre-populated', () async {
+      readmeCache.set('example:http', Future.value('Pre-loaded example text.'), kReadmeTtl);
+      await buildHandler().handleReadResource(_exampleRequest('http'));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test('returns the pre-populated cache content', () async {
+      readmeCache.set('example:http', Future.value('Pre-loaded example text.'), kReadmeTtl);
+      final result = await buildHandler().handleReadResource(_exampleRequest('http'));
+      expect(_text(result!), equals('Pre-loaded example text.'));
+    });
+  });
+
+  // ─── Example resource: empty page ────────────────────────────────────────────
+
+  group('example resource on empty page', () {
+    test('returns example_not_found in the error payload', () async {
+      _stubExamplePage(
+        mockHttp,
+        packageName: 'missing',
+        body: '<html><body><div>No example</div></body></html>',
+      );
+      final result = await buildHandler().handleReadResource(_exampleRequest('missing'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.exampleNotFound));
     });
   });
 
@@ -425,7 +552,7 @@ void main() {
         final symbolsHandler = SearchApiSymbolsHandler(
           client: client,
           cache: apiCache,
-          log: (_, __) {},
+          log: (_, _) {},
         );
         await symbolsHandler.call(
           CallToolRequest(
@@ -462,7 +589,7 @@ void main() {
         final symbolsHandler = SearchApiSymbolsHandler(
           client: client,
           cache: apiCache,
-          log: (_, __) {},
+          log: (_, _) {},
         );
         await symbolsHandler.call(
           CallToolRequest(
@@ -502,15 +629,35 @@ void main() {
 
   group('client error propagation for readme resource', () {
     test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
-      _stubDocsPage(mockHttp, statusCode: 429, packageName: 'http');
+      _stubDocsPage(mockHttp, statusCode: 429);
       final result = await buildHandler().handleReadResource(_readmeRequest('http'));
       expect(_errorPayload(result!)['error'], equals(DomainErrors.rateLimited));
     });
 
     test('returns a service_unavailable error payload on HTTP 503', () async {
-      _stubDocsPage(mockHttp, statusCode: 503, packageName: 'http');
+      _stubDocsPage(mockHttp, statusCode: 503);
       final result = await buildHandler().handleReadResource(_readmeRequest('http'));
       expect(_errorPayload(result!)['error'], equals(DomainErrors.serviceUnavailable));
+    });
+  });
+
+  group('client error propagation for example resource', () {
+    test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
+      _stubExamplePage(mockHttp, statusCode: 429);
+      final result = await buildHandler().handleReadResource(_exampleRequest('http'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.rateLimited));
+    });
+
+    test('returns a service_unavailable error payload on HTTP 503', () async {
+      _stubExamplePage(mockHttp, statusCode: 503);
+      final result = await buildHandler().handleReadResource(_exampleRequest('http'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.serviceUnavailable));
+    });
+
+    test('returns package_not_found in the error payload on 404', () async {
+      _stubExamplePage(mockHttp, statusCode: 404, packageName: 'missing');
+      final result = await buildHandler().handleReadResource(_exampleRequest('missing'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
     });
   });
 
@@ -556,7 +703,7 @@ void main() {
     });
 
     test('package names can be extracted from all cached search entries', () async {
-      final httpSummary = PackageSummary(
+      const httpSummary = PackageSummary(
         name: 'http',
         version: '1.6.0',
         description: 'HTTP client',
@@ -564,9 +711,9 @@ void main() {
         pubPoints: 0,
         popularity: 0,
         verified: false,
-        sdks: const [],
-        platforms: const [],
-        topics: const [],
+        sdks: [],
+        platforms: [],
+        topics: [],
         isFlutterFavorite: false,
         daysSinceUpdate: 0,
         activeMaintenance: true,
@@ -593,7 +740,7 @@ void main() {
     });
 
     test('filtering by partial prefix returns only matching package names', () async {
-      final httpSummary = PackageSummary(
+      const httpSummary = PackageSummary(
         name: 'http',
         version: '1.6.0',
         description: 'HTTP client',
@@ -601,9 +748,9 @@ void main() {
         pubPoints: 0,
         popularity: 0,
         verified: false,
-        sdks: const [],
-        platforms: const [],
-        topics: const [],
+        sdks: [],
+        platforms: [],
+        topics: [],
         isFlutterFavorite: false,
         daysSinceUpdate: 0,
         activeMaintenance: true,
@@ -616,7 +763,7 @@ void main() {
         kSearchResultsTtl,
       );
 
-      final partial = 'http';
+      const partial = 'http';
       final names = <String>{};
       for (final future in searchCache.entries.values) {
         final results = await future;

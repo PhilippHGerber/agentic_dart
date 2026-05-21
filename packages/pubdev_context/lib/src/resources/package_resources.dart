@@ -1,7 +1,8 @@
 /// Resource handlers for the pub://package/{name}/ namespace.
 ///
-/// Serves two parameterised [ResourceTemplate]s:
+/// Serves three parameterised [ResourceTemplate]s:
 ///   - `pub://package/{name}/readme`  — full README (text/markdown, 60 min TTL)
+///   - `pub://package/{name}/example` — package example (text/markdown, 60 min TTL)
 ///   - `pub://package/{name}/api`     — dartdoc index.json symbols
 ///                                      (application/json, 60 min TTL)
 ///
@@ -24,6 +25,7 @@ import '../cache/memory_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
+import '../server.dart' show PubMcpServer;
 import '../tools/search_api_symbols.dart';
 
 /// Cache-key prefix for README entries.
@@ -31,8 +33,16 @@ import '../tools/search_api_symbols.dart';
 /// Full key format: `$kReadmeCachePrefix:<packageName>`.
 const kReadmeCachePrefix = 'readme';
 
+/// Cache-key prefix for example entries.
+///
+/// Full key format: `$kExampleCachePrefix:<packageName>`.
+const kExampleCachePrefix = 'example';
+
 /// URI template string for the package README resource.
 const kReadmeUriTemplate = 'pub://package/{name}/readme';
+
+/// URI template string for the package example resource.
+const kExampleUriTemplate = 'pub://package/{name}/example';
 
 /// URI template string for the package API index resource.
 const kApiUriTemplate = 'pub://package/{name}/api';
@@ -41,6 +51,7 @@ const kApiUriTemplate = 'pub://package/{name}/api';
 
 const _kPackagePrefix = 'pub://package/';
 const _kReadmeSuffix = '/readme';
+const _kExampleSuffix = '/example';
 const _kApiSuffix = '/api';
 
 // ── Shared error value ────────────────────────────────────────────────────────
@@ -56,12 +67,16 @@ const _kPackageNotFound = DomainError(
 
 /// Handles MCP resource reads for the `pub://package/{name}/` namespace.
 ///
-/// Register both [kReadmeTemplate] and [kApiTemplate] with [addResourceTemplate]
-/// and pass [handleReadResource] as the handler for both:
+/// Register [kReadmeTemplate], [kExampleTemplate], and [kApiTemplate] with
+/// [addResourceTemplate] and pass [handleReadResource] as the handler for all:
 ///
 /// ```dart
 /// addResourceTemplate(
 ///   PackageResourcesHandler.kReadmeTemplate,
+///   handler.handleReadResource,
+/// );
+/// addResourceTemplate(
+///   PackageResourcesHandler.kExampleTemplate,
 ///   handler.handleReadResource,
 /// );
 /// addResourceTemplate(
@@ -83,9 +98,9 @@ final class PackageResourcesHandler {
   /// Creates a [PackageResourcesHandler].
   ///
   /// [client] is the pub.dev HTTP gateway. [readmeCache] is the shared TTL store
-  /// for full README strings cached with [kReadmeTtl]. [apiIndexCache] must be
-  /// the same instance used by [SearchApiSymbolsHandler] to enable shared cache
-  /// warm-up — both modules use the key prefix [kApiIndexCachePrefix].
+  /// for full README and example strings cached with [kReadmeTtl]. [apiIndexCache]
+  /// must be the same instance used by [SearchApiSymbolsHandler] to enable shared
+  /// cache warm-up — both modules use the key prefix [kApiIndexCachePrefix].
   /// [log] receives structured events at the appropriate [LoggingLevel].
   const PackageResourcesHandler({
     required PubDevClient client,
@@ -116,6 +131,18 @@ final class PackageResourcesHandler {
     mimeType: 'text/markdown',
   );
 
+  /// [ResourceTemplate] descriptor for the `pub://package/{name}/example` resource.
+  ///
+  /// Register this with [addResourceTemplate] alongside [handleReadResource].
+  static final kExampleTemplate = ResourceTemplate(
+    uriTemplate: kExampleUriTemplate,
+    name: 'Package example',
+    description:
+        'Example code for a pub.dev package, extracted from the example tab. '
+        'Cached for 60 minutes.',
+    mimeType: 'text/markdown',
+  );
+
   /// [ResourceTemplate] descriptor for the `pub://package/{name}/api` resource.
   ///
   /// Register this with [addResourceTemplate] alongside [handleReadResource].
@@ -133,7 +160,7 @@ final class PackageResourcesHandler {
 
   // ── Read handler ───────────────────────────────────────────────────────────
 
-  /// Handles a [ReadResourceRequest] for either the `readme` or `api` resource.
+  /// Handles a [ReadResourceRequest] for the `readme`, `example`, or `api` resource.
   ///
   /// Returns `null` when [ReadResourceRequest.uri] does not match either template,
   /// letting the server try subsequent handlers. Returns a [ReadResourceResult] on
@@ -145,10 +172,13 @@ final class PackageResourcesHandler {
     final readmeName = _parseName(uri, _kReadmeSuffix);
     if (readmeName != null) return _handleReadme(request, readmeName);
 
+    final exampleName = _parseName(uri, _kExampleSuffix);
+    if (exampleName != null) return _handleExample(request, exampleName);
+
     final apiName = _parseName(uri, _kApiSuffix);
     if (apiName != null) return _handleApi(request, apiName);
 
-    return Future.value(null);
+    return Future.value();
   }
 
   // ── Private: README ────────────────────────────────────────────────────────
@@ -177,6 +207,42 @@ final class PackageResourcesHandler {
     );
 
     _log(LoggingLevel.info, 'readme resource: HTTP request name=$name');
+
+    final result = await future;
+    return switch (result) {
+      PubDevSuccess(:final value) => _readmeResult(request.uri, value),
+      PubDevFailure(:final error) when error.error == DomainErrors.packageNotFound =>
+        _domainErrorResult(request.uri, _kPackageNotFound),
+      PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
+    };
+  }
+
+  // ── Private: example ──────────────────────────────────────────────────────
+
+  Future<ReadResourceResult> _handleExample(ReadResourceRequest request, String name) async {
+    final cacheKey = '$kExampleCachePrefix:$name';
+
+    final cached = _readmeCache.get(cacheKey);
+    if (cached != null) {
+      _log(LoggingLevel.debug, 'example resource: cache hit key=$cacheKey');
+      return _readmeResult(request.uri, await cached);
+    }
+
+    _log(LoggingLevel.debug, 'example resource: cache miss key=$cacheKey');
+
+    final future = _client.getExample(name);
+    _readmeCache.set(
+      cacheKey,
+      future.then(
+        (r) => switch (r) {
+          PubDevSuccess(:final value) => value,
+          PubDevFailure() => '',
+        },
+      ),
+      kReadmeTtl,
+    );
+
+    _log(LoggingLevel.info, 'example resource: HTTP request name=$name');
 
     final result = await future;
     return switch (result) {

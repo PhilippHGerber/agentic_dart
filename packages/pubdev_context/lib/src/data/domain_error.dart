@@ -33,6 +33,9 @@ abstract final class DomainErrors {
 
   /// The requested symbol documentation page was not found.
   static const symbolNotFound = 'symbol_not_found';
+
+  /// The requested package example page was not found or is empty.
+  static const exampleNotFound = 'example_not_found';
 }
 
 /// A structured error value returned when a pub.dev API operation fails.

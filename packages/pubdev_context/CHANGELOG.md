@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `pub://meta/scoring` resource — plain-text explanation of pub.dev's 160-point scoring system; embedded at compile time
 - `pub://meta/sdk-versions` resource — current stable Dart and Flutter SDK versions as a `{ dart, flutter }` JSON object
 - `pub://package/{name}/readme` resource template — full package README as `text/markdown`
+- `pub://package/{name}/example` resource template — package example code as `text/markdown`
 - `pub://package/{name}/api` resource template — dartdoc symbol index as `application/json`
 - Autocomplete for the `{name}` parameter in resource templates — returns matching package names from cached search results
 - `get_symbol_documentation` tool — full dartdoc page for a specific API symbol as plain text
