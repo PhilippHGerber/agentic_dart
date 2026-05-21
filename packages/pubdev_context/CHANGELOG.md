@@ -3,7 +3,7 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0] - 2026-05-21
 
 ### Added
 
@@ -13,12 +13,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `get_symbol_documentation` tool — full dartdoc page for a specific API symbol as plain text
 - `list_package_source_files` tool — file paths in a package tarball with optional `directory` and `fileExtension` filters; shares the 1-hour cache entry with `get_package_source_file`
 - `get_package_source_file` tool — raw content of a single source file from the pub.dev package tarball; resolves version automatically when omitted; returns closest-filename suggestions on `source_file_not_found`
-
-
 - `add-and-setup-package` prompt — guides the LLM through reading a package README, explaining its purpose, writing boilerplate initialisation code, and listing native platform setup steps
 - `analyze-upgrade-impact` prompt — guides the LLM through retrieving changelog entries, identifying breaking changes between two versions, and rewriting affected source code
 - `evaluate-alternatives` prompt — guides the LLM through searching for packages matching a use case, comparing the top results, and producing a recommendation with a markdown comparison matrix
-
 - `pub://meta/scoring` resource — plain-text explanation of pub.dev's 160-point scoring system; embedded at compile time
 - `pub://meta/sdk-versions` resource — current stable Dart and Flutter SDK versions as a `{ dart, flutter }` JSON object
 - `pub://package/{name}/readme` resource template — full package README as `text/markdown`
@@ -39,4 +36,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 | pubdev_context | dart_mcp |
 | ----------- | -------- |
+| `0.2.x`     | `^0.5.1` |
 | `0.1.x`     | `^0.5.1` |

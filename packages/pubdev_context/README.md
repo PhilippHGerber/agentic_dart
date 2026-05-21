@@ -40,13 +40,35 @@ dart pub global activate pubdev_context
 
 ## Tools
 
-| Tool                | Description                                                            |
-| ------------------- | ---------------------------------------------------------------------- |
-| `search_packages`   | Search pub.dev by keyword, SDK, platform, and sort order               |
-| `get_package`       | Full metadata for one package — scores, constraints, deps, README      |
-| `get_changelog`     | Recent version history with computed `breaking` flags                  |
-| `compare_packages`  | Side-by-side comparison matrix for 2–5 packages                        |
-| `search_api_symbols`| Search the dartdoc symbol index of a package by name or description    |
+| Tool                        | Description                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| `search_packages`           | Search pub.dev by keyword, SDK, platform, and sort order                       |
+| `get_package`               | Full metadata for one package — scores, constraints, deps, README              |
+| `get_changelog`             | Recent version history with computed `breaking` flags                          |
+| `compare_packages`          | Side-by-side comparison matrix for 2–5 packages                                |
+| `search_api_symbols`        | Search the dartdoc symbol index of a package by name or description            |
+| `get_symbol_documentation`  | Full dartdoc page for a specific API symbol as plain text                      |
+| `list_package_source_files` | File paths in a package tarball with optional directory and extension filters  |
+| `get_package_source_file`   | Raw content of a single source file from the pub.dev tarball                   |
+
+## Resources
+
+| URI                               | Description                                              |
+| --------------------------------- | -------------------------------------------------------- |
+| `pub://meta/scoring`              | pub.dev 160-point scoring system reference               |
+| `pub://meta/sdk-versions`         | Current stable Dart and Flutter SDK versions             |
+| `pub://package/{name}/readme`     | Full package README as `text/markdown`                   |
+| `pub://package/{name}/example`    | Package example code as `text/markdown`                  |
+| `pub://package/{name}/api`        | dartdoc symbol index as `application/json`               |
+| `pub://package/{name}/changelog`  | Full changelog as `text/markdown`                        |
+
+## Prompts
+
+| Prompt                    | Description                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| `add-and-setup-package`   | Guides through reading a README, writing boilerplate, and native setup steps          |
+| `analyze-upgrade-impact`  | Retrieves changelog entries, identifies breaking changes, and rewrites affected code  |
+| `evaluate-alternatives`   | Searches packages, compares top results, and produces a recommendation matrix         |
 
 ## Configuration
 
@@ -65,34 +87,11 @@ npx @modelcontextprotocol/inspector pubdev_context
 
 Opens a browser UI where you can call tools, inspect schemas, and see raw JSON-RPC responses.
 
-## Roadmap
-
-### Tools
-
-| Tool                | Description                                               |
-| ------------------- | --------------------------------------------------------- |
-| `find_alternatives` | Topic-matched and description-based alternative discovery |
-
-### Resources
-
-| URI                           | Description                                    |
-| ----------------------------- | ---------------------------------------------- |
-| `pub://meta/scoring`          | pub.dev 160-point scoring system reference     |
-| `pub://meta/sdk-versions`     | Current stable Dart and Flutter SDK versions   |
-| `pub://package/{name}/readme` | Full package README                            |
-| `pub://package/{name}/api`    | dartdoc symbol index — all public API elements |
-
-### Prompts
-
-| Prompt                    | Parameters                              | Description                      |
-| ------------------------- | --------------------------------------- | -------------------------------- |
-| `evaluate_package`        | `name`, `use_case`                      | Guided single-package evaluation |
-| `select_package_for_task` | `task_description`, `sdk?`, `platform?` | Guided package selection         |
-
 ## dart_mcp compatibility
 
 | pubdev_context | dart_mcp |
 | -------------- | -------- |
+| `0.2.x`        | `^0.5.1` |
 | `0.1.x`        | `^0.5.1` |
 
 ## License
