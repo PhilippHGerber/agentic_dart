@@ -1,0 +1,5 @@
+# Example resource content comes from HTML scraping, not tarball extraction
+
+The `pub://package/{name}/example` resource fetches `https://pub.dev/packages/{name}/example` and strips HTML tags to extract the example content — the same approach used by `getFullReadme` for the README resource. The alternative was downloading the package `.tar.gz` from the `archive_url` field and extracting the `example/` directory in-memory.
+
+Tarball extraction would give raw, unrendered source files and enable a whole class of future tools (`get_package_metadata`, `read_package_file`). We rejected it for the example resource specifically because it requires a new `archive`/`gzip` dependency, a binary cache layer, and path-sanitisation logic — a disproportionate cost for a single resource. HTML scraping is zero-dependency, consistent with the existing README pattern, and meets the acceptance criteria (agents get the example code). If tarball extraction is added later as its own milestone, the example resource can be migrated then.

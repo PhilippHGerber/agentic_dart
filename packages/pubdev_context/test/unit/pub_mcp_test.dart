@@ -49,6 +49,7 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   changelogCache: ResponseCache<List<ChangelogEntry>>(),
   apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
   readmeCache: ResponseCache<String>(),
+  symbolDocCache: ResponseCache<String>(),
   metaCache: ResponseCache<String>(),
 );
 
@@ -244,6 +245,20 @@ void main() {
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_changelog');
         expect(tool.inputSchema.required, contains('name'));
+      });
+
+      test('lists get_symbol_documentation after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('get_symbol_documentation'));
+      });
+
+      test('get_symbol_documentation input schema marks package and href as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'get_symbol_documentation');
+        expect(tool.inputSchema.required, containsAll(['package', 'href']));
       });
     });
 

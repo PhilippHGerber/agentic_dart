@@ -33,6 +33,9 @@ const Duration kApiDocsTtl = Duration(hours: 1);
 /// TTL applied to README entries.
 const Duration kReadmeTtl = Duration(hours: 1);
 
+/// TTL applied to symbol documentation page entries.
+const Duration kSymbolDocTtl = Duration(hours: 1);
+
 /// TTL applied to meta-resource entries (scoring, SDK versions).
 const Duration kMetaResourcesTtl = Duration(hours: 24);
 

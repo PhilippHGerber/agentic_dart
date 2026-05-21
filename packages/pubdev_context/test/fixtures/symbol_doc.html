@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Client class - http library - Dart API</title></head>
+<body>
+<nav>
+  <ol>
+    <li><a href="/packages/http">http</a></li>
+    <li>Client class</li>
+  </ol>
+</nav>
+<main>
+<h1>Client class</h1>
+<section class="desc">
+<p>The <strong>abstract</strong> base class for an <em>HTTP</em> client.</p>
+<p>A <code>Client</code> sends HTTP requests and receives HTTP responses.
+Every <code>Client</code> should be closed after use to release resources.</p>
+<p>Do not use <del>HttpClient</del> directly; use this class instead.</p>
+<pre><code>abstract class Client</code></pre>
+</section>
+<section class="summary">
+<h2>Constructors</h2>
+<dl>
+<dt><code>Client()</code></dt>
+<dd>Creates a new HTTP client.</dd>
+</dl>
+<h2>Properties</h2>
+<dl>
+<dt><code>userAgent</code> -&gt;<code>String</code></dt>
+<dd>The user-agent header sent with each request.</dd>
+</dl>
+<h2>Methods</h2>
+<dl>
+<dt><code>get(Uri url, {Map&lt;<wbr>String, String&gt;? headers})</code> -&gt;<code>Future&lt;<wbr>Response&gt;</code></dt>
+<dd>Sends an HTTP GET request with the given headers to the given URL.</dd>
+<dt><code>close()</code> -&gt;<code>void</code></dt>
+<dd>Closes the client and cleans up any resources associated with it.</dd>
+</dl>
+<h3>Subclasses</h3>
+<p>See <b>IOClient</b> for a <i>native</i> implementation.</p>
+</section>
+</main>
+<footer>http 1.2.3</footer>
+</body>
+</html>

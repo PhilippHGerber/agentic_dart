@@ -23,6 +23,7 @@ import 'resources/package_resources.dart';
 import 'tools/compare_packages.dart';
 import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
+import 'tools/get_symbol_documentation.dart';
 import 'tools/search_api_symbols.dart';
 import 'tools/search_packages.dart';
 import 'tools/tool_definitions.dart';
@@ -42,8 +43,9 @@ base class PubMcpServer extends MCPServer
   /// store for search results, [packageCache] for individual package lookups
   /// (shared by `get_package` and `compare_packages`), [changelogCache] for
   /// parsed changelog entry lists, [apiIndexCache] for dartdoc symbol indexes
-  /// (shared by `search_api_symbols` and the package resource handler), and
-  /// [readmeCache] for full package README strings, [metaCache] for the
+  /// (shared by `search_api_symbols` and the package resource handler),
+  /// [readmeCache] for full package README strings, [symbolDocCache] for
+  /// individual symbol documentation pages, and [metaCache] for the
   /// `pub://meta/` resource responses; callers own their lifecycles. An optional
   /// [metaHttpClient] may be supplied to override the HTTP client used by the
   /// meta resource handler (useful in tests).
@@ -56,6 +58,7 @@ base class PubMcpServer extends MCPServer
     required ResponseCache<List<ChangelogEntry>> changelogCache,
     required ResponseCache<List<DartdocSymbol>> apiIndexCache,
     required ResponseCache<String> readmeCache,
+    required ResponseCache<String> symbolDocCache,
     required ResponseCache<String> metaCache,
     http.Client? metaHttpClient,
   }) : _client = client,
@@ -64,6 +67,7 @@ base class PubMcpServer extends MCPServer
        _changelogCache = changelogCache,
        _apiIndexCache = apiIndexCache,
        _readmeCache = readmeCache,
+       _symbolDocCache = symbolDocCache,
        _metaCache = metaCache,
        _metaHttp = metaHttpClient ?? http.Client(),
        _metaHttpOwned = metaHttpClient == null,
@@ -83,6 +87,7 @@ base class PubMcpServer extends MCPServer
   final ResponseCache<List<ChangelogEntry>> _changelogCache;
   final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
   final ResponseCache<String> _readmeCache;
+  final ResponseCache<String> _symbolDocCache;
   final ResponseCache<String> _metaCache;
   final http.Client _metaHttp;
 
@@ -185,6 +190,14 @@ base class PubMcpServer extends MCPServer
     );
     registerTool(searchApiSymbolsTool, searchApiSymbolsHandler.call);
     log(LoggingLevel.debug, 'registered tool: search_api_symbols');
+
+    final getSymbolDocHandler = GetSymbolDocumentationHandler(
+      client: _client,
+      cache: _symbolDocCache,
+      log: log,
+    );
+    registerTool(getSymbolDocumentationTool, getSymbolDocHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_symbol_documentation');
   }
 
   void _registerResources() {

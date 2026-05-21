@@ -130,6 +130,13 @@ Object? _content(_McpProcess _, Map<String, Object?> result) {
   return jsonDecode(first['text']! as String);
 }
 
+/// Returns the raw text from the first content item of a `tools/call` result.
+String _text(Map<String, Object?> result) {
+  final content = result['content']! as List<Object?>;
+  final first = content.first! as Map<String, Object?>;
+  return first['text']! as String;
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 void main() {
@@ -207,6 +214,10 @@ void main() {
 
     test('includes compare_packages', () {
       expect(toolNames, contains('compare_packages'));
+    });
+
+    test('includes get_symbol_documentation', () {
+      expect(toolNames, contains('get_symbol_documentation'));
     });
   });
 
@@ -290,6 +301,38 @@ void main() {
     test('each entry has a breaking field', () {
       final first = entries.first! as Map<String, Object?>;
       expect(first, contains('breaking'));
+    });
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  // ─── get_symbol_documentation ────────────────────────────────────────────────
+
+  group('get_symbol_documentation', () {
+    late Map<String, Object?> result;
+    late String text;
+
+    setUpAll(() async {
+      result = await mcp.callTool('get_symbol_documentation', {
+        'package': 'http',
+        'href': 'http/Client-class.html',
+      });
+      text = _text(result);
+    });
+
+    test('result is not an error', () {
+      expect(result['isError'], isNot(true));
+    });
+
+    test('returns non-empty text content', () {
+      expect(text, isNotEmpty);
+    });
+
+    test('strips HTML tags from the returned content', () {
+      expect(text, isNot(contains('<html')));
+      expect(text, isNot(contains('<body')));
+    });
+
+    test('contains recognisable symbol content', () {
+      expect(text, contains('Client'));
     });
   }, timeout: const Timeout(Duration(seconds: 30)));
 

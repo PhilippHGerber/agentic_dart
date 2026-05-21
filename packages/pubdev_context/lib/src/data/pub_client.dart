@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'domain_error.dart';
+import 'html_to_markdown.dart';
 import 'models.dart';
 
 // ─── RetryPolicy ─────────────────────────────────────────────────────────────
@@ -213,7 +214,7 @@ final class PubDevClient {
     String? readmeExcerpt;
     try {
       final html = await _getRaw('$_kBaseUrl/documentation/$name/latest/');
-      readmeExcerpt = _extractReadmeExcerpt(html);
+      readmeExcerpt = HtmlToMarkdown.convert(html, isolateClass: 'desc markdown', maxChars: 500);
     } on HttpStatusException {
       // README is optional — unavailable docs are not a fatal error.
     }
@@ -347,7 +348,7 @@ final class PubDevClient {
     );
     return switch (result) {
       PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) => PubDevSuccess(_extractChangelogText(value)),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(HtmlToMarkdown.convert(value)),
     };
   }
 
@@ -361,7 +362,32 @@ final class PubDevClient {
     );
     return switch (result) {
       PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) => PubDevSuccess(_extractReadmeExcerpt(value)),
+      PubDevSuccess<String>(:final value) =>
+        PubDevSuccess(HtmlToMarkdown.convert(value, isolateClass: 'desc markdown', maxChars: 500)),
+    };
+  }
+
+  /// Returns the plain-text content of a dartdoc symbol page for [package].
+  ///
+  /// Fetches `GET /documentation/{package}/latest/{href}` and strips HTML.
+  /// The [href] must come from a prior [getApiIndex] call. Returns
+  /// [DomainErrors.symbolNotFound] when the page resolves to HTTP 404.
+  Future<PubDevResult<String>> getSymbolDoc(String package, String href) async {
+    final url = '$_kBaseUrl/documentation/$package/latest/$href';
+    final result = await _retry.execute(() => _getRaw(url));
+    return switch (result) {
+      PubDevFailure<String>(:final error) when error.error == DomainErrors.packageNotFound =>
+        const PubDevFailure(
+          DomainError(
+            error: DomainErrors.symbolNotFound,
+            message: 'Symbol documentation page not found.',
+            suggestion:
+                'Verify the href came from search_api_symbols and the package has dartdoc output.',
+          ),
+        ),
+      PubDevFailure<String>(:final error) => PubDevFailure(error),
+      PubDevSuccess<String>(:final value) =>
+        PubDevSuccess(HtmlToMarkdown.convert(value, isolateTag: 'main')),
     };
   }
 
@@ -376,7 +402,8 @@ final class PubDevClient {
     );
     return switch (result) {
       PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) => PubDevSuccess(_extractFullReadme(value)),
+      PubDevSuccess<String>(:final value) =>
+        PubDevSuccess(HtmlToMarkdown.convert(value, isolateClass: 'desc markdown')),
     };
   }
 
@@ -434,77 +461,6 @@ final class PubDevClient {
     final info = (infoResult as PubDevSuccess<Map<String, Object?>>).value;
     final score = (scoreResult as PubDevSuccess<Map<String, Object?>>).value;
     return PackageSummary.fromPackageAndScore(info, score);
-  }
-
-  /// Converts the pub.dev changelog HTML page to plain text with `## version`
-  /// headings so the caller can split on standard Keep-a-Changelog patterns.
-  ///
-  /// `<h2>` tags become `\n## ` prefixes; `<li>` tags become `\n- ` bullets;
-  /// all remaining tags and HTML entities are stripped or decoded.
-  static String _extractChangelogText(String html) {
-    return html
-        .replaceAll(RegExp('<h2[^>]*>'), '\n## ')
-        .replaceAll('</h2>', '\n')
-        .replaceAll(RegExp('<li[^>]*>'), '\n- ')
-        .replaceAll('</li>', '')
-        .replaceAll(RegExp('<[^>]+>'), '')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'")
-        .replaceAll('&#39;', "'")
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll(RegExp('&[a-z]+;|&#[0-9]+;', caseSensitive: false), ' ')
-        .replaceAll(RegExp(r'[ \t]+'), ' ')
-        .replaceAll(RegExp(r'\r\n|\r'), '\n')
-        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
-        .trim();
-  }
-
-  static String _extractReadmeExcerpt(String html) {
-    const marker = 'class="desc markdown';
-    final markerIdx = html.indexOf(marker);
-    if (markerIdx == -1) return '';
-    final tagEnd = html.indexOf('>', markerIdx);
-    if (tagEnd == -1) return '';
-    final contentEnd = (tagEnd + 3001).clamp(0, html.length);
-    final content = html.substring(tagEnd + 1, contentEnd);
-    final text = content
-        .replaceAll(RegExp('<[^>]*>'), ' ')
-        .replaceAll(RegExp('[&][a-z]+;', caseSensitive: false), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (text.length > 500) return '${text.substring(0, 497)}...';
-    return text;
-  }
-
-  /// Extracts the full README text from a rendered documentation page.
-  ///
-  /// Finds the markdown content section and strips HTML tags without any
-  /// length truncation. Returns an empty string when no markdown section
-  /// is found in [html].
-  static String _extractFullReadme(String html) {
-    const marker = 'class="desc markdown';
-    final markerIdx = html.indexOf(marker);
-    if (markerIdx == -1) return '';
-    final tagEnd = html.indexOf('>', markerIdx);
-    if (tagEnd == -1) return '';
-    final content = html.substring(tagEnd + 1);
-    return content
-        .replaceAll(RegExp('<[^>]*>'), ' ')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'")
-        .replaceAll('&#39;', "'")
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll(RegExp('&[a-z]+;|&#[0-9]+;', caseSensitive: false), ' ')
-        .replaceAll(RegExp(r'[ \t]+'), ' ')
-        .replaceAll(RegExp(r'\r\n|\r'), '\n')
-        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
-        .trim();
   }
 
   static String? _mapSort(String sort) => switch (sort) {

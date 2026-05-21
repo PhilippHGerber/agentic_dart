@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `pub://package/{name}/readme` resource template — full package README as `text/markdown`
 - `pub://package/{name}/api` resource template — dartdoc symbol index as `application/json`
 - Autocomplete for the `{name}` parameter in resource templates — returns matching package names from cached search results
+- `get_symbol_documentation` tool — full dartdoc page for a specific API symbol as plain text
 
 ## [0.1.0] - 2026-05-11
 

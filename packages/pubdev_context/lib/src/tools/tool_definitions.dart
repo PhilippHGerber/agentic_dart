@@ -148,6 +148,29 @@ final searchApiSymbolsTool = Tool(
   ),
 );
 
+// ─── get_symbol_documentation ─────────────────────────────────────────────────
+
+/// The `get_symbol_documentation` [Tool] definition registered with the MCP server.
+final getSymbolDocumentationTool = Tool(
+  name: 'get_symbol_documentation',
+  description:
+      'Fetch the full dartdoc page for a specific API symbol from pub.dev. '
+      'Call search_api_symbols first to obtain the package name and href for the symbol. '
+      'Pass the href from that result directly to this tool to read the full signature, '
+      'parameters, and doc comment as plain text.',
+  inputSchema: ObjectSchema(
+    required: ['package', 'href'],
+    properties: {
+      'package': Schema.string(description: 'The pub.dev package name.'),
+      'href': Schema.string(
+        description:
+            'Relative documentation path returned by search_api_symbols '
+            '(e.g. "http/Client-class.html").',
+      ),
+    },
+  ),
+);
+
 // ─── compare_packages ─────────────────────────────────────────────────────────
 
 /// The `compare_packages` [Tool] definition registered with the MCP server.

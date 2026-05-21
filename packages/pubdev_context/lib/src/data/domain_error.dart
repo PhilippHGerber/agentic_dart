@@ -30,6 +30,9 @@ abstract final class DomainErrors {
 
   /// A supplied parameter value is outside the accepted range or format.
   static const invalidInput = 'invalid_input';
+
+  /// The requested symbol documentation page was not found.
+  static const symbolNotFound = 'symbol_not_found';
 }
 
 /// A structured error value returned when a pub.dev API operation fails.
