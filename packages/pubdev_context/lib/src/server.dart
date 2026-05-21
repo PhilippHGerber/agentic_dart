@@ -42,13 +42,14 @@ base class PubMcpServer extends MCPServer
   /// [client] is the pub.dev HTTP gateway. [searchCache] is the shared TTL
   /// store for search results, [packageCache] for individual package lookups
   /// (shared by `get_package` and `compare_packages`), [changelogCache] for
-  /// parsed changelog entry lists, [apiIndexCache] for dartdoc symbol indexes
-  /// (shared by `search_api_symbols` and the package resource handler),
-  /// [readmeCache] for full package README strings, [symbolDocCache] for
-  /// individual symbol documentation pages, and [metaCache] for the
-  /// `pub://meta/` resource responses; callers own their lifecycles. An optional
-  /// [metaHttpClient] may be supplied to override the HTTP client used by the
-  /// meta resource handler (useful in tests).
+  /// parsed changelog entry lists, [changelogRawCache] for raw changelog
+  /// markdown text served by the `pub://package/{name}/changelog` resource,
+  /// [apiIndexCache] for dartdoc symbol indexes (shared by `search_api_symbols`
+  /// and the package resource handler), [readmeCache] for full package README
+  /// strings, [symbolDocCache] for individual symbol documentation pages, and
+  /// [metaCache] for the `pub://meta/` resource responses; callers own their
+  /// lifecycles. An optional [metaHttpClient] may be supplied to override the
+  /// HTTP client used by the meta resource handler (useful in tests).
   PubMcpServer(
     super.channel, {
     required PubMcpConfig config,
@@ -56,6 +57,7 @@ base class PubMcpServer extends MCPServer
     required ResponseCache<List<PackageSummary>> searchCache,
     required ResponseCache<PackageDetail> packageCache,
     required ResponseCache<List<ChangelogEntry>> changelogCache,
+    required ResponseCache<String> changelogRawCache,
     required ResponseCache<List<DartdocSymbol>> apiIndexCache,
     required ResponseCache<String> readmeCache,
     required ResponseCache<String> symbolDocCache,
@@ -65,6 +67,7 @@ base class PubMcpServer extends MCPServer
        _searchCache = searchCache,
        _packageCache = packageCache,
        _changelogCache = changelogCache,
+       _changelogRawCache = changelogRawCache,
        _apiIndexCache = apiIndexCache,
        _readmeCache = readmeCache,
        _symbolDocCache = symbolDocCache,
@@ -85,6 +88,7 @@ base class PubMcpServer extends MCPServer
   final ResponseCache<List<PackageSummary>> _searchCache;
   final ResponseCache<PackageDetail> _packageCache;
   final ResponseCache<List<ChangelogEntry>> _changelogCache;
+  final ResponseCache<String> _changelogRawCache;
   final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
   final ResponseCache<String> _readmeCache;
   final ResponseCache<String> _symbolDocCache;
@@ -129,6 +133,7 @@ base class PubMcpServer extends MCPServer
     final isPackageTemplate =
         resourceRef.uri == PackageResourcesHandler.kReadmeTemplate.uriTemplate ||
         resourceRef.uri == PackageResourcesHandler.kExampleTemplate.uriTemplate ||
+        resourceRef.uri == PackageResourcesHandler.kChangelogTemplate.uriTemplate ||
         resourceRef.uri == PackageResourcesHandler.kApiTemplate.uriTemplate;
 
     if (!isPackageTemplate || request.argument.name != 'name') {
@@ -216,6 +221,7 @@ base class PubMcpServer extends MCPServer
     final handler = PackageResourcesHandler(
       client: _client,
       readmeCache: _readmeCache,
+      changelogCache: _changelogRawCache,
       apiIndexCache: _apiIndexCache,
       log: log,
     );
@@ -224,6 +230,9 @@ base class PubMcpServer extends MCPServer
 
     addResourceTemplate(PackageResourcesHandler.kExampleTemplate, handler.handleReadResource);
     log(LoggingLevel.debug, 'registered resource template: $kExampleUriTemplate');
+
+    addResourceTemplate(PackageResourcesHandler.kChangelogTemplate, handler.handleReadResource);
+    log(LoggingLevel.debug, 'registered resource template: $kChangelogUriTemplate');
 
     addResourceTemplate(PackageResourcesHandler.kApiTemplate, handler.handleReadResource);
     log(LoggingLevel.debug, 'registered resource template: $kApiUriTemplate');

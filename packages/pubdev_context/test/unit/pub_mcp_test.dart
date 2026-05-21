@@ -47,6 +47,7 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   searchCache: ResponseCache<List<PackageSummary>>(),
   packageCache: ResponseCache<PackageDetail>(),
   changelogCache: ResponseCache<List<ChangelogEntry>>(),
+  changelogRawCache: ResponseCache<String>(),
   apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
   readmeCache: ResponseCache<String>(),
   symbolDocCache: ResponseCache<String>(),
@@ -286,6 +287,13 @@ void main() {
         expect(uris, contains('pub://package/{name}/example'));
       });
 
+      test('lists pub://package/{name}/changelog after initialization', () async {
+        await doInitialize();
+        final templates = await serverConnection.listResourceTemplates();
+        final uris = templates.resourceTemplates.map((r) => r.uriTemplate).toList();
+        expect(uris, contains('pub://package/{name}/changelog'));
+      });
+
       test('pub://meta/scoring resource has a non-empty name', () async {
         await doInitialize();
         final resources = await serverConnection.listResources(ListResourcesRequest());
@@ -307,6 +315,15 @@ void main() {
         final templates = await serverConnection.listResourceTemplates();
         final resource = templates.resourceTemplates.firstWhere(
           (r) => r.uriTemplate == 'pub://package/{name}/example',
+        );
+        expect(resource.name, isNotEmpty);
+      });
+
+      test('pub://package/{name}/changelog resource has a non-empty name', () async {
+        await doInitialize();
+        final templates = await serverConnection.listResourceTemplates();
+        final resource = templates.resourceTemplates.firstWhere(
+          (r) => r.uriTemplate == 'pub://package/{name}/changelog',
         );
         expect(resource.name, isNotEmpty);
       });

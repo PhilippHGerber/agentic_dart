@@ -42,7 +42,9 @@ void main() {
 
   group('definition lists', () {
     test('dt becomes list item', () {
-      final result = HtmlToMarkdown.convert('<dl><dt><code>close()</code></dt><dd>Closes the client.</dd></dl>');
+      final result = HtmlToMarkdown.convert(
+        '<dl><dt><code>close()</code></dt><dd>Closes the client.</dd></dl>',
+      );
       expect(result, contains('- `close()`'));
       expect(result, contains('Closes the client.'));
     });

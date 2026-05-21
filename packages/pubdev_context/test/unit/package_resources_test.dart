@@ -55,6 +55,15 @@ const _kExampleHtml =
     '</div>'
     '</body></html>';
 
+/// Minimal stub HTML that looks like a pub.dev changelog page.
+const _kChangelogHtml =
+    '<html><body>'
+    '<div class="markdown-body">'
+    '<h2>1.0.0</h2>'
+    '<ul><li>Initial release.</li></ul>'
+    '</div>'
+    '</body></html>';
+
 // ─── Stub helpers ─────────────────────────────────────────────────────────────
 
 void _stubDocsPage(
@@ -87,6 +96,22 @@ void _stubExamplePage(
     () => mock.get(
       any(
         that: predicate<Uri>((u) => u.toString().contains('/packages/$packageName/example')),
+      ),
+      headers: any(named: 'headers'),
+    ),
+  ).thenAnswer((_) async => statusCode == 200 ? _ok(body) : _status(statusCode));
+}
+
+void _stubChangelogPage(
+  _MockHttpClient mock, {
+  int statusCode = 200,
+  String packageName = 'http',
+  String body = _kChangelogHtml,
+}) {
+  when(
+    () => mock.get(
+      any(
+        that: predicate<Uri>((u) => u.toString().contains('/packages/$packageName/changelog')),
       ),
       headers: any(named: 'headers'),
     ),
@@ -130,6 +155,9 @@ ReadResourceRequest _exampleRequest(String packageName) =>
 ReadResourceRequest _apiRequest(String packageName) =>
     ReadResourceRequest(uri: 'pub://package/$packageName/api');
 
+ReadResourceRequest _changelogRequest(String packageName) =>
+    ReadResourceRequest(uri: 'pub://package/$packageName/changelog');
+
 /// Decodes the first content item of [result] as a JSON error payload.
 Map<String, Object?> _errorPayload(ReadResourceResult result) =>
     jsonDecode((result.contents.first as TextResourceContents).text) as Map<String, Object?>;
@@ -147,12 +175,14 @@ void main() {
   late PubDevClient client;
   late DateTime fakeNow;
   late ResponseCache<String> readmeCache;
+  late ResponseCache<String> changelogCache;
   late ResponseCache<List<DartdocSymbol>> apiCache;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   PackageResourcesHandler buildHandler() => PackageResourcesHandler(
     client: client,
     readmeCache: readmeCache,
+    changelogCache: changelogCache,
     apiIndexCache: apiCache,
     log: (level, data) => loggedMessages.add((level, data)),
   );
@@ -163,6 +193,7 @@ void main() {
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
     readmeCache = ResponseCache(clock: () => fakeNow);
+    changelogCache = ResponseCache(clock: () => fakeNow);
     apiCache = ResponseCache(clock: () => fakeNow);
     loggedMessages.clear();
   });
@@ -195,6 +226,17 @@ void main() {
     test('kApiTemplate has MIME type application/json', () {
       expect(PackageResourcesHandler.kApiTemplate.mimeType, equals('application/json'));
     });
+
+    test('kChangelogTemplate has uri template pub://package/{name}/changelog', () {
+      expect(
+        PackageResourcesHandler.kChangelogTemplate.uriTemplate,
+        equals(kChangelogUriTemplate),
+      );
+    });
+
+    test('kChangelogTemplate has MIME type text/markdown', () {
+      expect(PackageResourcesHandler.kChangelogTemplate.mimeType, equals('text/markdown'));
+    });
   });
 
   // ─── URI routing ─────────────────────────────────────────────────────────────
@@ -209,7 +251,7 @@ void main() {
 
     test('returns null for a URI with an unrecognised resource suffix', () async {
       final result = await buildHandler().handleReadResource(
-        ReadResourceRequest(uri: 'pub://package/http/changelog'),
+        ReadResourceRequest(uri: 'pub://package/http/unknown'),
       );
       expect(result, isNull);
     });
@@ -224,6 +266,13 @@ void main() {
     test('returns null when the package name segment is empty for example', () async {
       final result = await buildHandler().handleReadResource(
         ReadResourceRequest(uri: 'pub://package//example'),
+      );
+      expect(result, isNull);
+    });
+
+    test('returns null when the package name segment is empty for changelog', () async {
+      final result = await buildHandler().handleReadResource(
+        ReadResourceRequest(uri: 'pub://package//changelog'),
       );
       expect(result, isNull);
     });
@@ -432,6 +481,133 @@ void main() {
     test('result is not null even when the package is not found', () async {
       _stubDocsPage(mockHttp, statusCode: 404, packageName: 'missing');
       final result = await buildHandler().handleReadResource(_readmeRequest('missing'));
+      expect(result, isNotNull);
+    });
+  });
+
+  // ─── Changelog resource: cache miss ──────────────────────────────────────────
+
+  group('changelog resource on cache miss', () {
+    test('returns a non-null ReadResourceResult', () async {
+      _stubChangelogPage(mockHttp);
+      final result = await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(result, isNotNull);
+    });
+
+    test('content MIME type is text/markdown', () async {
+      _stubChangelogPage(mockHttp);
+      final result = await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(_mimeType(result!), equals('text/markdown'));
+    });
+
+    test('content text contains changelog version heading', () async {
+      _stubChangelogPage(mockHttp);
+      final result = await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(_text(result!), contains('1.0.0'));
+    });
+
+    test('content URI matches the request URI', () async {
+      _stubChangelogPage(mockHttp);
+      final result = await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(result!.contents.first.uri, equals('pub://package/http/changelog'));
+    });
+
+    test('logs an info message containing the package name', () async {
+      _stubChangelogPage(mockHttp);
+      await buildHandler().handleReadResource(_changelogRequest('http'));
+      final infoLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.info)
+          .map((m) => m.$2.toString());
+      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
+    });
+
+    test('logs a debug cache-miss message', () async {
+      _stubChangelogPage(mockHttp);
+      await buildHandler().handleReadResource(_changelogRequest('http'));
+      final debugLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.debug)
+          .map((m) => m.$2.toString());
+      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
+    });
+  });
+
+  // ─── Changelog resource: cache hit ───────────────────────────────────────────
+
+  group('changelog resource on cache hit', () {
+    test('makes only one HTTP call when called twice for the same package', () async {
+      _stubChangelogPage(mockHttp);
+      final handler = buildHandler();
+      await handler.handleReadResource(_changelogRequest('http'));
+      fakeNow = fakeNow.add(const Duration(minutes: 30));
+      await handler.handleReadResource(_changelogRequest('http'));
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>((u) => u.toString().contains('/packages/http/changelog')),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
+    });
+
+    test('logs a debug cache-hit message on the second call', () async {
+      _stubChangelogPage(mockHttp);
+      final handler = buildHandler();
+      await handler.handleReadResource(_changelogRequest('http'));
+      loggedMessages.clear();
+      fakeNow = fakeNow.add(const Duration(minutes: 30));
+      await handler.handleReadResource(_changelogRequest('http'));
+      final debugLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.debug)
+          .map((m) => m.$2.toString());
+      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
+    });
+
+    test('makes zero HTTP calls when the changelog cache is pre-populated', () async {
+      changelogCache.set(
+        'changelog:http',
+        Future.value('# Pre-loaded changelog'),
+        kChangelogRawTtl,
+      );
+      await buildHandler().handleReadResource(_changelogRequest('http'));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test('returns the pre-populated cache content', () async {
+      changelogCache.set(
+        'changelog:http',
+        Future.value('# Pre-loaded changelog'),
+        kChangelogRawTtl,
+      );
+      final result = await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(_text(result!), equals('# Pre-loaded changelog'));
+    });
+
+    test('changelog cache uses the changelog:<name> cache key prefix', () async {
+      _stubChangelogPage(mockHttp);
+      await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(changelogCache.get('changelog:http'), isNotNull);
+    });
+  });
+
+  // ─── Changelog resource: 404 ─────────────────────────────────────────────────
+
+  group('changelog resource on 404', () {
+    test('returns package_not_found in the error payload', () async {
+      _stubChangelogPage(mockHttp, statusCode: 404, packageName: 'missing');
+      final result = await buildHandler().handleReadResource(_changelogRequest('missing'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
+    });
+
+    test('error payload contains a suggestion', () async {
+      _stubChangelogPage(mockHttp, statusCode: 404, packageName: 'missing');
+      final result = await buildHandler().handleReadResource(_changelogRequest('missing'));
+      expect(_errorPayload(result!), contains('suggestion'));
+    });
+
+    test('result is not null even when the package is not found', () async {
+      _stubChangelogPage(mockHttp, statusCode: 404, packageName: 'missing');
+      final result = await buildHandler().handleReadResource(_changelogRequest('missing'));
       expect(result, isNotNull);
     });
   });
@@ -660,6 +836,26 @@ void main() {
     test('returns package_not_found in the error payload on 404', () async {
       _stubExamplePage(mockHttp, statusCode: 404, packageName: 'missing');
       final result = await buildHandler().handleReadResource(_exampleRequest('missing'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
+    });
+  });
+
+  group('client error propagation for changelog resource', () {
+    test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
+      _stubChangelogPage(mockHttp, statusCode: 429);
+      final result = await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.rateLimited));
+    });
+
+    test('returns a service_unavailable error payload on HTTP 503', () async {
+      _stubChangelogPage(mockHttp, statusCode: 503);
+      final result = await buildHandler().handleReadResource(_changelogRequest('http'));
+      expect(_errorPayload(result!)['error'], equals(DomainErrors.serviceUnavailable));
+    });
+
+    test('returns package_not_found in the error payload on 404', () async {
+      _stubChangelogPage(mockHttp, statusCode: 404, packageName: 'missing');
+      final result = await buildHandler().handleReadResource(_changelogRequest('missing'));
       expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
     });
   });

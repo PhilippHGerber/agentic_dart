@@ -1,3 +1,5 @@
+// ignore_for_file: missing_whitespace_between_adjacent_strings for html fixtures
+
 /// Unit tests for [PubDevClient].
 library;
 
@@ -420,14 +422,15 @@ void main() {
 
   group('PubDevClient.getExample', () {
     late _MockHttpClient mock;
-    const html = '<html><body>'
-        ' <div class="detail-tabs-content">'
-        ' <section class="tab-content detail-tab-example-content -active markdown-body">'
-        ' <p class="-monospace"><a href="https://github.com/dart-lang/http/blob/master/pkgs/http/example/main.dart">example/main.dart</a></p>'
-        ' <pre><code class="language-dart">main() { print(\'example\'); }</code></pre>'
-        ' </section>'
-        ' </div>'
-        ' </body></html>';
+    const html =
+        '<html><body>'
+        '<div class="detail-tabs-content">'
+        '<section class="tab-content detail-tab-example-content -active markdown-body">'
+        '<p class="-monospace"><a href="https://github.com/dart-lang/http/blob/master/pkgs/http/example/main.dart">example/main.dart</a></p>'
+        '<pre><code class="language-dart">main() { print(\'example\'); }</code></pre>'
+        '</section>'
+        '</div>'
+        '</body></html>';
 
     setUp(() {
       mock = _setUp();

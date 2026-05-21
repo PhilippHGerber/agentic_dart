@@ -24,8 +24,11 @@ const Duration kSearchResultsTtl = Duration(minutes: 5);
 /// TTL applied to package-metadata entries.
 const Duration kPackageMetadataTtl = Duration(minutes: 15);
 
-/// TTL applied to changelog entries.
+/// TTL applied to changelog entries (parsed `ChangelogEntry` lists).
 const Duration kChangelogTtl = Duration(minutes: 15);
+
+/// TTL applied to raw changelog text entries (the `pub://package/{name}/changelog` resource).
+const Duration kChangelogRawTtl = Duration(hours: 1);
 
 /// TTL applied to API-documentation index (`index.json`) entries.
 const Duration kApiDocsTtl = Duration(hours: 1);

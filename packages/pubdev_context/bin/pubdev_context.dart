@@ -42,6 +42,7 @@ Future<void> main(List<String> args) async {
   final searchCache = ResponseCache<List<PackageSummary>>();
   final packageCache = ResponseCache<PackageDetail>();
   final changelogCache = ResponseCache<List<ChangelogEntry>>();
+  final changelogRawCache = ResponseCache<String>();
   final apiIndexCache = ResponseCache<List<DartdocSymbol>>();
   final readmeCache = ResponseCache<String>();
   final symbolDocCache = ResponseCache<String>();
@@ -54,6 +55,7 @@ Future<void> main(List<String> args) async {
     searchCache: searchCache,
     packageCache: packageCache,
     changelogCache: changelogCache,
+    changelogRawCache: changelogRawCache,
     apiIndexCache: apiIndexCache,
     readmeCache: readmeCache,
     symbolDocCache: symbolDocCache,

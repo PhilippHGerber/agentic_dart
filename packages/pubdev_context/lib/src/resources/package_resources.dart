@@ -1,10 +1,11 @@
 /// Resource handlers for the pub://package/{name}/ namespace.
 ///
-/// Serves three parameterised [ResourceTemplate]s:
-///   - `pub://package/{name}/readme`  — full README (text/markdown, 60 min TTL)
-///   - `pub://package/{name}/example` — package example (text/markdown, 60 min TTL)
-///   - `pub://package/{name}/api`     — dartdoc index.json symbols
-///                                      (application/json, 60 min TTL)
+/// Serves four parameterised [ResourceTemplate]s:
+///   - `pub://package/{name}/readme`     — full README (text/markdown, 60 min TTL)
+///   - `pub://package/{name}/example`    — package example (text/markdown, 60 min TTL)
+///   - `pub://package/{name}/changelog`  — full changelog (text/markdown, 60 min TTL)
+///   - `pub://package/{name}/api`        — dartdoc index.json symbols
+///                                         (application/json, 60 min TTL)
 ///
 /// The `api` resource shares its cache key format with [SearchApiSymbolsHandler]
 /// (`api_index:<name>`) so that a warm symbol-search cache also satisfies this
@@ -38,11 +39,19 @@ const kReadmeCachePrefix = 'readme';
 /// Full key format: `$kExampleCachePrefix:<packageName>`.
 const kExampleCachePrefix = 'example';
 
+/// Cache-key prefix for raw changelog text entries.
+///
+/// Full key format: `$kChangelogCachePrefix:<packageName>`.
+const kChangelogCachePrefix = 'changelog';
+
 /// URI template string for the package README resource.
 const kReadmeUriTemplate = 'pub://package/{name}/readme';
 
 /// URI template string for the package example resource.
 const kExampleUriTemplate = 'pub://package/{name}/example';
+
+/// URI template string for the package changelog resource.
+const kChangelogUriTemplate = 'pub://package/{name}/changelog';
 
 /// URI template string for the package API index resource.
 const kApiUriTemplate = 'pub://package/{name}/api';
@@ -52,6 +61,7 @@ const kApiUriTemplate = 'pub://package/{name}/api';
 const _kPackagePrefix = 'pub://package/';
 const _kReadmeSuffix = '/readme';
 const _kExampleSuffix = '/example';
+const _kChangelogSuffix = '/changelog';
 const _kApiSuffix = '/api';
 
 // ── Shared error value ────────────────────────────────────────────────────────
@@ -67,8 +77,9 @@ const _kPackageNotFound = DomainError(
 
 /// Handles MCP resource reads for the `pub://package/{name}/` namespace.
 ///
-/// Register [kReadmeTemplate], [kExampleTemplate], and [kApiTemplate] with
-/// addResourceTemplate and pass [handleReadResource] as the handler for all:
+/// Register [kReadmeTemplate], [kExampleTemplate], [kChangelogTemplate], and
+/// [kApiTemplate] with addResourceTemplate and pass [handleReadResource] as the
+/// handler for all:
 ///
 /// ```dart
 /// addResourceTemplate(
@@ -80,6 +91,10 @@ const _kPackageNotFound = DomainError(
 ///   handler.handleReadResource,
 /// );
 /// addResourceTemplate(
+///   PackageResourcesHandler.kChangelogTemplate,
+///   handler.handleReadResource,
+/// );
+/// addResourceTemplate(
 ///   PackageResourcesHandler.kApiTemplate,
 ///   handler.handleReadResource,
 /// );
@@ -88,32 +103,43 @@ const _kPackageNotFound = DomainError(
 /// The `readme` resource fetches `GET /documentation/{name}/latest/` via
 /// [PubDevClient.getFullReadme] and caches the result with [kReadmeTtl].
 ///
+/// The `changelog` resource fetches `GET /packages/{name}/changelog` via
+/// [PubDevClient.getChangelog] and caches the raw markdown text with
+/// [kChangelogRawTtl] under key `changelog:<name>`. This is separate from the
+/// parsed `ChangelogEntry` list cached by `GetChangelogHandler`.
+///
 /// The `api` resource reads the dartdoc symbol index via [PubDevClient.getApiIndex]
 /// and caches it under the same key used by [SearchApiSymbolsHandler]
 /// (`api_index:<name>`), so both modules warm each other's cache.
 ///
-/// Both resources return a [ReadResourceResult] whose content uses a structured
+/// All resources return a [ReadResourceResult] whose content uses a structured
 /// JSON [DomainError] payload for `package_not_found` and other failure cases.
 final class PackageResourcesHandler {
   /// Creates a [PackageResourcesHandler].
   ///
   /// [client] is the pub.dev HTTP gateway. [readmeCache] is the shared TTL store
-  /// for full README and example strings cached with [kReadmeTtl]. [apiIndexCache]
-  /// must be the same instance used by [SearchApiSymbolsHandler] to enable shared
+  /// for full README and example strings cached with [kReadmeTtl].
+  /// [changelogCache] is a dedicated store for raw changelog markdown strings
+  /// cached with [kChangelogRawTtl] — it is separate from the parsed
+  /// `ChangelogEntry` cache used by `GetChangelogHandler`. [apiIndexCache] must
+  /// be the same instance used by [SearchApiSymbolsHandler] to enable shared
   /// cache warm-up — both modules use the key prefix [kApiIndexCachePrefix].
   /// [log] receives structured events at the appropriate [LoggingLevel].
   const PackageResourcesHandler({
     required PubDevClient client,
     required ResponseCache<String> readmeCache,
+    required ResponseCache<String> changelogCache,
     required ResponseCache<List<DartdocSymbol>> apiIndexCache,
     required void Function(LoggingLevel, Object) log,
   }) : _client = client,
        _readmeCache = readmeCache,
+       _changelogCache = changelogCache,
        _apiIndexCache = apiIndexCache,
        _log = log;
 
   final PubDevClient _client;
   final ResponseCache<String> _readmeCache;
+  final ResponseCache<String> _changelogCache;
   final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
   final void Function(LoggingLevel, Object) _log;
 
@@ -143,6 +169,21 @@ final class PackageResourcesHandler {
     mimeType: 'text/markdown',
   );
 
+  /// [ResourceTemplate] descriptor for the `pub://package/{name}/changelog` resource.
+  ///
+  /// Register this with addResourceTemplate alongside [handleReadResource].
+  /// The cached entry stores raw changelog markdown text under `changelog:<name>`
+  /// and is separate from the parsed `ChangelogEntry` cache used by
+  /// `GetChangelogHandler`.
+  static final kChangelogTemplate = ResourceTemplate(
+    uriTemplate: kChangelogUriTemplate,
+    name: 'Package changelog',
+    description:
+        'Full CHANGELOG.md for a pub.dev package, converted from the rendered '
+        'HTML changelog page. Cached for 60 minutes.',
+    mimeType: 'text/markdown',
+  );
+
   /// [ResourceTemplate] descriptor for the `pub://package/{name}/api` resource.
   ///
   /// Register this with addResourceTemplate alongside [handleReadResource].
@@ -160,9 +201,10 @@ final class PackageResourcesHandler {
 
   // ── Read handler ───────────────────────────────────────────────────────────
 
-  /// Handles a [ReadResourceRequest] for the `readme`, `example`, or `api` resource.
+  /// Handles a [ReadResourceRequest] for the `readme`, `example`, `changelog`,
+  /// or `api` resource.
   ///
-  /// Returns `null` when [ReadResourceRequest.uri] does not match either template,
+  /// Returns `null` when [ReadResourceRequest.uri] does not match any template,
   /// letting the server try subsequent handlers. Returns a [ReadResourceResult] on
   /// success or when a structured [DomainError] (e.g. `package_not_found` on HTTP
   /// 404) is produced.
@@ -174,6 +216,9 @@ final class PackageResourcesHandler {
 
     final exampleName = _parseName(uri, _kExampleSuffix);
     if (exampleName != null) return _handleExample(request, exampleName);
+
+    final changelogName = _parseName(uri, _kChangelogSuffix);
+    if (changelogName != null) return _handleChangelog(request, changelogName);
 
     final apiName = _parseName(uri, _kApiSuffix);
     if (apiName != null) return _handleApi(request, apiName);
@@ -243,6 +288,42 @@ final class PackageResourcesHandler {
     );
 
     _log(LoggingLevel.info, 'example resource: HTTP request name=$name');
+
+    final result = await future;
+    return switch (result) {
+      PubDevSuccess(:final value) => _readmeResult(request.uri, value),
+      PubDevFailure(:final error) when error.error == DomainErrors.packageNotFound =>
+        _domainErrorResult(request.uri, _kPackageNotFound),
+      PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
+    };
+  }
+
+  // ── Private: changelog ────────────────────────────────────────────────────
+
+  Future<ReadResourceResult> _handleChangelog(ReadResourceRequest request, String name) async {
+    final cacheKey = '$kChangelogCachePrefix:$name';
+
+    final cached = _changelogCache.get(cacheKey);
+    if (cached != null) {
+      _log(LoggingLevel.debug, 'changelog resource: cache hit key=$cacheKey');
+      return _readmeResult(request.uri, await cached);
+    }
+
+    _log(LoggingLevel.debug, 'changelog resource: cache miss key=$cacheKey');
+
+    final future = _client.getChangelog(name);
+    _changelogCache.set(
+      cacheKey,
+      future.then(
+        (r) => switch (r) {
+          PubDevSuccess(:final value) => value,
+          PubDevFailure() => '',
+        },
+      ),
+      kChangelogRawTtl,
+    );
+
+    _log(LoggingLevel.info, 'changelog resource: HTTP request name=$name');
 
     final result = await future;
     return switch (result) {
