@@ -329,6 +329,65 @@ void main() {
       });
     });
 
+    // ─── Prompt registration ─────────────────────────────────────────────────────
+
+    group('prompt registration', () {
+      test('lists add-and-setup-package after initialization', () async {
+        await doInitialize();
+        final result = await serverConnection.listPrompts(ListPromptsRequest());
+        final names = result.prompts.map((p) => p.name).toList();
+        expect(names, contains('add-and-setup-package'));
+      });
+
+      test('lists analyze-upgrade-impact after initialization', () async {
+        await doInitialize();
+        final result = await serverConnection.listPrompts(ListPromptsRequest());
+        final names = result.prompts.map((p) => p.name).toList();
+        expect(names, contains('analyze-upgrade-impact'));
+      });
+
+      test('lists evaluate-alternatives after initialization', () async {
+        await doInitialize();
+        final result = await serverConnection.listPrompts(ListPromptsRequest());
+        final names = result.prompts.map((p) => p.name).toList();
+        expect(names, contains('evaluate-alternatives'));
+      });
+
+      test('add-and-setup-package marks package_name as required', () async {
+        await doInitialize();
+        final result = await serverConnection.listPrompts(ListPromptsRequest());
+        final prompt = result.prompts.firstWhere((p) => p.name == 'add-and-setup-package');
+        final arg = prompt.arguments!.firstWhere((a) => a.name == 'package_name');
+        expect(arg.required, isTrue);
+      });
+
+      test('analyze-upgrade-impact marks all three arguments as required', () async {
+        await doInitialize();
+        final result = await serverConnection.listPrompts(ListPromptsRequest());
+        final prompt = result.prompts.firstWhere((p) => p.name == 'analyze-upgrade-impact');
+        final required = prompt.arguments!.where((a) => a.required == true).map((a) => a.name);
+        expect(required, containsAll(['package_name', 'from_version', 'to_version']));
+      });
+
+      test('evaluate-alternatives marks use_case as required', () async {
+        await doInitialize();
+        final result = await serverConnection.listPrompts(ListPromptsRequest());
+        final prompt = result.prompts.firstWhere((p) => p.name == 'evaluate-alternatives');
+        final arg = prompt.arguments!.firstWhere((a) => a.name == 'use_case');
+        expect(arg.required, isTrue);
+      });
+
+      test('evaluate-alternatives marks sdk and platform as optional', () async {
+        await doInitialize();
+        final result = await serverConnection.listPrompts(ListPromptsRequest());
+        final prompt = result.prompts.firstWhere((p) => p.name == 'evaluate-alternatives');
+        final sdkArg = prompt.arguments!.firstWhere((a) => a.name == 'sdk');
+        final platformArg = prompt.arguments!.firstWhere((a) => a.name == 'platform');
+        expect(sdkArg.required, isFalse);
+        expect(platformArg.required, isFalse);
+      });
+    });
+
     // ─── handleComplete ──────────────────────────────────────────────────────────
 
     group('handleComplete', () {

@@ -18,6 +18,7 @@ import 'cache/memory_cache.dart';
 import 'config/config.dart';
 import 'data/models.dart';
 import 'data/pub_client.dart';
+import 'prompts/prompts.dart';
 import 'resources/meta_resources.dart';
 import 'resources/package_resources.dart';
 import 'tools/compare_packages.dart';
@@ -103,6 +104,7 @@ base class PubMcpServer extends MCPServer
     final result = await super.initialize(request);
     _registerTools();
     _registerResources();
+    _registerPrompts();
     log(LoggingLevel.info, 'pubdev_context server initialized');
     return result;
   }
@@ -236,6 +238,17 @@ base class PubMcpServer extends MCPServer
 
     addResourceTemplate(PackageResourcesHandler.kApiTemplate, handler.handleReadResource);
     log(LoggingLevel.debug, 'registered resource template: $kApiUriTemplate');
+  }
+
+  void _registerPrompts() {
+    addPrompt(kAddAndSetupPackagePrompt, const AddAndSetupPackageHandler().call);
+    log(LoggingLevel.debug, 'registered prompt: add-and-setup-package');
+
+    addPrompt(kAnalyzeUpgradeImpactPrompt, const AnalyzeUpgradeImpactHandler().call);
+    log(LoggingLevel.debug, 'registered prompt: analyze-upgrade-impact');
+
+    addPrompt(kEvaluateAlternativesPrompt, const EvaluateAlternativesHandler().call);
+    log(LoggingLevel.debug, 'registered prompt: evaluate-alternatives');
   }
 
   static LoggingLevel _toLoggingLevel(LogLevel level) => switch (level) {
