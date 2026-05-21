@@ -20,7 +20,8 @@ import '../data/domain_error.dart';
 /// Prompt definition for [AddAndSetupPackageHandler].
 final kAddAndSetupPackagePrompt = Prompt(
   name: 'add-and-setup-package',
-  description: 'Guides an LLM through reading a package README, explaining its '
+  description:
+      'Guides an LLM through reading a package README, explaining its '
       'core purpose, writing boilerplate initialisation code, and listing any '
       'native platform setup steps.',
   arguments: [
@@ -35,7 +36,8 @@ final kAddAndSetupPackagePrompt = Prompt(
 /// Prompt definition for [AnalyzeUpgradeImpactHandler].
 final kAnalyzeUpgradeImpactPrompt = Prompt(
   name: 'analyze-upgrade-impact',
-  description: 'Guides an LLM through identifying breaking changes in a package '
+  description:
+      'Guides an LLM through identifying breaking changes in a package '
       'upgrade and rewriting any affected source code to comply with the new API.',
   arguments: [
     PromptArgument(
@@ -59,7 +61,8 @@ final kAnalyzeUpgradeImpactPrompt = Prompt(
 /// Prompt definition for [EvaluateAlternativesHandler].
 final kEvaluateAlternativesPrompt = Prompt(
   name: 'evaluate-alternatives',
-  description: 'Guides an LLM through discovering packages that match a use '
+  description:
+      'Guides an LLM through discovering packages that match a use '
       'case, comparing the top results, and producing a recommendation with a '
       'markdown comparison matrix.',
   arguments: [
@@ -104,8 +107,7 @@ const _kMissingToVersion = DomainError(
 const _kMissingUseCase = DomainError(
   error: DomainErrors.invalidInput,
   message: 'The use_case argument is required.',
-  suggestion:
-      'Supply a description of the task or feature the package must support as use_case.',
+  suggestion: 'Supply a description of the task or feature the package must support as use_case.',
 );
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -155,7 +157,8 @@ final class AddAndSetupPackageHandler {
         PromptMessage(
           role: Role.user,
           content: TextContent(
-            text: 'List any native platform setup required '
+            text:
+                'List any native platform setup required '
                 '(for example AndroidManifest.xml or Info.plist changes) '
                 'exactly as described in the README.',
           ),
@@ -203,7 +206,8 @@ final class AnalyzeUpgradeImpactHandler {
         PromptMessage(
           role: Role.user,
           content: TextContent(
-            text: 'Call get_changelog for $name with from_version set to '
+            text:
+                'Call get_changelog for $name with from_version set to '
                 '$fromVersion to retrieve only changelog entries newer than '
                 'the current version.',
           ),
@@ -211,14 +215,16 @@ final class AnalyzeUpgradeImpactHandler {
         PromptMessage(
           role: Role.user,
           content: TextContent(
-            text: 'Identify and list all breaking changes between '
+            text:
+                'Identify and list all breaking changes between '
                 'version $fromVersion and $toVersion.',
           ),
         ),
         PromptMessage(
           role: Role.user,
           content: TextContent(
-            text: 'If source code is available in context, scan it for '
+            text:
+                'If source code is available in context, scan it for '
                 'references to $name and rewrite it to comply with the '
                 '$toVersion API.',
           ),
@@ -277,7 +283,8 @@ final class EvaluateAlternativesHandler {
         PromptMessage(
           role: Role.user,
           content: TextContent(
-            text: 'Produce a reasoned recommendation with a markdown comparison '
+            text:
+                'Produce a reasoned recommendation with a markdown comparison '
                 'matrix showing package name, pub points, popularity, and '
                 'platform support.',
           ),

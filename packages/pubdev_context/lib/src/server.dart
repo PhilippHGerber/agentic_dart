@@ -24,7 +24,9 @@ import 'resources/package_resources.dart';
 import 'tools/compare_packages.dart';
 import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
+import 'tools/get_package_source_file.dart';
 import 'tools/get_symbol_documentation.dart';
+import 'tools/list_package_source_files.dart';
 import 'tools/search_api_symbols.dart';
 import 'tools/search_packages.dart';
 import 'tools/tool_definitions.dart';
@@ -62,6 +64,7 @@ base class PubMcpServer extends MCPServer
     required ResponseCache<List<DartdocSymbol>> apiIndexCache,
     required ResponseCache<String> readmeCache,
     required ResponseCache<String> symbolDocCache,
+    required ResponseCache<Map<String, String>> sourceFilesCache,
     required ResponseCache<String> metaCache,
     http.Client? metaHttpClient,
   }) : _client = client,
@@ -72,6 +75,7 @@ base class PubMcpServer extends MCPServer
        _apiIndexCache = apiIndexCache,
        _readmeCache = readmeCache,
        _symbolDocCache = symbolDocCache,
+       _sourceFilesCache = sourceFilesCache,
        _metaCache = metaCache,
        _metaHttp = metaHttpClient ?? http.Client(),
        _metaHttpOwned = metaHttpClient == null,
@@ -93,6 +97,7 @@ base class PubMcpServer extends MCPServer
   final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
   final ResponseCache<String> _readmeCache;
   final ResponseCache<String> _symbolDocCache;
+  final ResponseCache<Map<String, String>> _sourceFilesCache;
   final ResponseCache<String> _metaCache;
   final http.Client _metaHttp;
 
@@ -207,6 +212,22 @@ base class PubMcpServer extends MCPServer
     );
     registerTool(getSymbolDocumentationTool, getSymbolDocHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_symbol_documentation');
+
+    final getSourceFileHandler = GetPackageSourceFileHandler(
+      client: _client,
+      cache: _sourceFilesCache,
+      log: log,
+    );
+    registerTool(getPackageSourceFileTool, getSourceFileHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_package_source_file');
+
+    final listSourceFilesHandler = ListPackageSourceFilesHandler(
+      client: _client,
+      cache: _sourceFilesCache,
+      log: log,
+    );
+    registerTool(listPackageSourceFilesTool, listSourceFilesHandler.call);
+    log(LoggingLevel.debug, 'registered tool: list_package_source_files');
   }
 
   void _registerResources() {

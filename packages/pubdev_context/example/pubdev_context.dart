@@ -44,6 +44,7 @@ Future<void> main() async {
     apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
     readmeCache: ResponseCache<String>(),
     symbolDocCache: ResponseCache<String>(),
+    sourceFilesCache: ResponseCache<Map<String, String>>(),
     metaCache: ResponseCache<String>(),
   );
 

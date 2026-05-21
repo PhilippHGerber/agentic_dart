@@ -12,6 +12,7 @@ analyzer:
     - "test/validation/fixtures/**"
     - "bin/cache/**"
     - "lib/generated_plugin_registrant.dart"
+    - "packages/pubdev_context/lib/src/version.dart"
 
   errors:
     unused_import: warning

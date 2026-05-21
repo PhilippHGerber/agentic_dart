@@ -46,6 +46,7 @@ Future<void> main(List<String> args) async {
   final apiIndexCache = ResponseCache<List<DartdocSymbol>>();
   final readmeCache = ResponseCache<String>();
   final symbolDocCache = ResponseCache<String>();
+  final sourceFilesCache = ResponseCache<Map<String, String>>();
   final metaCache = ResponseCache<String>();
 
   final server = PubMcpServer(
@@ -59,6 +60,7 @@ Future<void> main(List<String> args) async {
     apiIndexCache: apiIndexCache,
     readmeCache: readmeCache,
     symbolDocCache: symbolDocCache,
+    sourceFilesCache: sourceFilesCache,
     metaCache: metaCache,
   );
 

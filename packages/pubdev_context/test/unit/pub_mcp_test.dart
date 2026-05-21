@@ -51,6 +51,7 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
   readmeCache: ResponseCache<String>(),
   symbolDocCache: ResponseCache<String>(),
+  sourceFilesCache: ResponseCache<Map<String, String>>(),
   metaCache: ResponseCache<String>(),
 );
 

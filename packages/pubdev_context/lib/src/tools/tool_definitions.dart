@@ -171,6 +171,72 @@ final getSymbolDocumentationTool = Tool(
   ),
 );
 
+// ─── get_package_source_file ──────────────────────────────────────────────────
+
+/// The `get_package_source_file` [Tool] definition registered with the MCP server.
+final getPackageSourceFileTool = Tool(
+  name: 'get_package_source_file',
+  description:
+      'Return the content of a single source file from a pub.dev package tarball. '
+      'Use this when get_symbol_documentation does not expose implementation details '
+      'such as thrown exceptions, internal branching logic, or undocumented invariants. '
+      'The dartdoc href from search_api_symbols gives a directional hint about the '
+      'source directory. On source_file_not_found, the suggestion field lists closest '
+      'filename matches or directs you to call list_package_source_files.',
+  inputSchema: ObjectSchema(
+    required: ['name', 'path'],
+    properties: {
+      'name': Schema.string(description: 'The pub.dev package name.'),
+      'path': Schema.string(
+        description:
+            'File path relative to the package root '
+            '(e.g. "lib/src/server/prompts_support.dart"). '
+            'Leading slash is stripped automatically. ".." segments are rejected.',
+      ),
+      'version': Schema.string(
+        description:
+            'A specific version string (e.g. "1.2.0"). '
+            'Omit to use the latest published version.',
+      ),
+    },
+  ),
+);
+
+// ─── list_package_source_files ────────────────────────────────────────────────
+
+/// The `list_package_source_files` [Tool] definition registered with the MCP server.
+final listPackageSourceFilesTool = Tool(
+  name: 'list_package_source_files',
+  description:
+      'List file paths available in a pub.dev package tarball. '
+      'Use directory and fileExtension to narrow results. '
+      'The full file map is cached for 1 hour — listing after get_package_source_file '
+      'for the same package version is free. '
+      'Call this when get_package_source_file returns source_file_not_found and '
+      'the closest-match suggestion is not sufficient.',
+  inputSchema: ObjectSchema(
+    required: ['name'],
+    properties: {
+      'name': Schema.string(description: 'The pub.dev package name.'),
+      'version': Schema.string(
+        description:
+            'A specific version string (e.g. "1.2.0"). '
+            'Omit to use the latest published version.',
+      ),
+      'directory': Schema.string(
+        description:
+            'Optional path prefix filter (e.g. "lib/src/server/"). '
+            'Trailing slash is added automatically if absent.',
+      ),
+      'fileExtension': Schema.string(
+        description:
+            'Optional extension filter (e.g. ".dart"). '
+            'AND-combined with directory when both are supplied.',
+      ),
+    },
+  ),
+);
+
 // ─── compare_packages ─────────────────────────────────────────────────────────
 
 /// The `compare_packages` [Tool] definition registered with the MCP server.

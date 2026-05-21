@@ -36,6 +36,9 @@ abstract final class DomainErrors {
 
   /// The requested package example page was not found or is empty.
   static const exampleNotFound = 'example_not_found';
+
+  /// The requested source file was not found in the package tarball.
+  static const sourceFileNotFound = 'source_file_not_found';
 }
 
 /// A structured error value returned when a pub.dev API operation fails.

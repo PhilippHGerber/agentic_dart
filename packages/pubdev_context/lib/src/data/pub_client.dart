@@ -8,6 +8,7 @@ library;
 import 'dart:async' show TimeoutException;
 import 'dart:convert';
 
+import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 
 import 'domain_error.dart';
@@ -423,6 +424,47 @@ final class PubDevClient {
     };
   }
 
+  /// Downloads and extracts the package tarball for [name] at [version].
+  ///
+  /// Fetches `GET /api/packages/{name}/versions/{version}/archive.tar.gz`,
+  /// decompresses the gzip layer, decodes the tar archive, and returns a
+  /// `Map<String, String>` from file path (relative to the package root) to
+  /// file content. Directory entries are excluded from the map.
+  ///
+  /// Returns [DomainErrors.packageNotFound] when the tarball endpoint returns
+  /// HTTP 404. Other transient failures are retried by the [RetryPolicy].
+  Future<PubDevResult<Map<String, String>>> getPackageSourceFiles(
+    String name,
+    String version,
+  ) async {
+    final url = '$_kBaseUrl/api/packages/$name/versions/$version/archive.tar.gz';
+    final result = await _retry.execute(() => _getRawBytes(url));
+    if (result case PubDevFailure<List<int>>(:final error)) {
+      return PubDevFailure(error);
+    }
+
+    final bytes = (result as PubDevSuccess<List<int>>).value;
+    try {
+      final decompressed = const GZipDecoder().decodeBytes(bytes);
+      final archive = TarDecoder().decodeBytes(decompressed);
+      final files = <String, String>{};
+      for (final entry in archive) {
+        if (!entry.isFile) continue;
+        final content = utf8.decode(entry.content, allowMalformed: true);
+        files[entry.name] = content;
+      }
+      return PubDevSuccess(files);
+    } on Object {
+      return const PubDevFailure(
+        DomainError(
+          error: DomainErrors.unexpectedResponse,
+          message: 'Failed to decode the package tarball.',
+          suggestion: 'Try again later or check the pub.dev status page.',
+        ),
+      );
+    }
+  }
+
   static PubDevResult<String> _exampleResult(String html) {
     final example = HtmlToMarkdown.convert(
       html,
@@ -479,6 +521,14 @@ final class PubDevClient {
         .get(Uri.parse(url), headers: const {'Accept': _kAccept})
         .timeout(_timeout);
     if (response.statusCode == 200) return response.body;
+    throw HttpStatusException(response.statusCode);
+  }
+
+  Future<List<int>> _getRawBytes(String url) async {
+    final response = await _http
+        .get(Uri.parse(url), headers: const {'Accept': _kAccept})
+        .timeout(_timeout);
+    if (response.statusCode == 200) return response.bodyBytes;
     throw HttpStatusException(response.statusCode);
   }
 

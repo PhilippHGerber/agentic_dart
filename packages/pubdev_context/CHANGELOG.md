@@ -11,6 +11,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `get_changelog` tool — parsed changelog as a newest-first list of entries with `breaking` flags; supports `from_version` lower bound and `version_limit` cap
 - `compare_packages` tool — side-by-side `ComparisonMatrix` for 2–5 packages; partial failures are reported per package without blocking the remaining columns
 - `get_symbol_documentation` tool — full dartdoc page for a specific API symbol as plain text
+- `list_package_source_files` tool — file paths in a package tarball with optional `directory` and `fileExtension` filters; shares the 1-hour cache entry with `get_package_source_file`
+- `get_package_source_file` tool — raw content of a single source file from the pub.dev package tarball; resolves version automatically when omitted; returns closest-filename suggestions on `source_file_not_found`
+
 
 - `add-and-setup-package` prompt — guides the LLM through reading a package README, explaining its purpose, writing boilerplate initialisation code, and listing native platform setup steps
 - `analyze-upgrade-impact` prompt — guides the LLM through retrieving changelog entries, identifying breaking changes between two versions, and rewriting affected source code
