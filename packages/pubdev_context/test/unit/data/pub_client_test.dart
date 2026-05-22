@@ -3,6 +3,7 @@
 /// Unit tests for [PubDevClient].
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -503,6 +504,62 @@ void main() {
       when(mock.close).thenReturn(null);
       _client(mock).close();
       verify(mock.close).called(1);
+    });
+  });
+
+  // ─── Semaphore — concurrency limiter ────────────────────────────────────────
+
+  group('PubDevClient — concurrency limiter', () {
+    test('never exceeds maxConcurrency requests in flight', () async {
+      final mock = _setUp();
+      var inFlight = 0;
+      var peak = 0;
+      final resume = Completer<void>();
+
+      when(
+        () => mock.get(any(), headers: any(named: 'headers')),
+      ).thenAnswer((_) async {
+        inFlight++;
+        if (inFlight > peak) peak = inFlight;
+        await resume.future;
+        inFlight--;
+        return _jsonFile('package_score.json');
+      });
+
+      final client = PubDevClient(
+        httpClient: mock,
+        retryPolicy: _instant,
+        maxConcurrency: 2,
+      );
+
+      // Fire 5 concurrent requests — all block on resume
+      final futures = List.generate(5, (_) => client.getScore('http'));
+
+      // Yield to the event loop so all futures proceed to their suspension point
+      await Future<void>.delayed(Duration.zero);
+
+      expect(peak, lessThanOrEqualTo(2));
+
+      resume.complete();
+      await Future.wait(futures);
+    });
+
+    test('all requests complete when maxConcurrency is high', () async {
+      final mock = _setUp();
+      when(
+        () => mock.get(any(), headers: any(named: 'headers')),
+      ).thenAnswer((_) async => _jsonFile('package_score.json'));
+
+      final client = PubDevClient(
+        httpClient: mock,
+        retryPolicy: _instant,
+        maxConcurrency: 20,
+      );
+
+      final results = await Future.wait(
+        List.generate(10, (_) => client.getScore('http')),
+      );
+      expect(results.every((r) => r is PubDevSuccess<PackageScore>), isTrue);
     });
   });
 

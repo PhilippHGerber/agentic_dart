@@ -5,7 +5,7 @@
 /// this module; every public method returns a typed [PubDevResult].
 library;
 
-import 'dart:async' show TimeoutException;
+import 'dart:async' show Completer, TimeoutException;
 import 'dart:convert';
 
 import 'package:archive/archive.dart';
@@ -147,6 +147,35 @@ class HttpStatusException implements Exception {
   final int statusCode;
 }
 
+// ─── Semaphore ────────────────────────────────────────────────────────────────
+
+/// Counter-based async lock that caps how many operations run concurrently.
+final class _Semaphore {
+  _Semaphore(this.maxConcurrency) : _count = maxConcurrency;
+
+  final int maxConcurrency;
+  int _count;
+  final _waiters = <Completer<void>>[];
+
+  Future<void> acquire() async {
+    if (_count > 0) {
+      _count--;
+      return;
+    }
+    final waiter = Completer<void>();
+    _waiters.add(waiter);
+    await waiter.future;
+  }
+
+  void release() {
+    if (_waiters.isNotEmpty) {
+      _waiters.removeAt(0).complete();
+    } else {
+      _count++;
+    }
+  }
+}
+
 // ─── PubDevClient ─────────────────────────────────────────────────────────────
 
 const _kBaseUrl = 'https://pub.dev';
@@ -175,13 +204,16 @@ final class PubDevClient {
     http.Client? httpClient,
     RetryPolicy? retryPolicy,
     Duration requestTimeout = const Duration(seconds: 10),
+    int maxConcurrency = 5,
   }) : _http = httpClient ?? http.Client(),
        _retry = retryPolicy ?? RetryPolicy(),
-       _timeout = requestTimeout;
+       _timeout = requestTimeout,
+       _semaphore = _Semaphore(maxConcurrency);
 
   final http.Client _http;
   final RetryPolicy _retry;
   final Duration _timeout;
+  final _Semaphore _semaphore;
 
   /// Closes the underlying HTTP client and releases its resources.
   ///
@@ -517,19 +549,29 @@ final class PubDevClient {
   }
 
   Future<String> _getRaw(String url) async {
-    final response = await _http
-        .get(Uri.parse(url), headers: const {'Accept': _kAccept})
-        .timeout(_timeout);
-    if (response.statusCode == 200) return response.body;
-    throw HttpStatusException(response.statusCode);
+    await _semaphore.acquire();
+    try {
+      final response = await _http
+          .get(Uri.parse(url), headers: const {'Accept': _kAccept})
+          .timeout(_timeout);
+      if (response.statusCode == 200) return response.body;
+      throw HttpStatusException(response.statusCode);
+    } finally {
+      _semaphore.release();
+    }
   }
 
   Future<List<int>> _getRawBytes(String url) async {
-    final response = await _http
-        .get(Uri.parse(url), headers: const {'Accept': _kAccept})
-        .timeout(_timeout);
-    if (response.statusCode == 200) return response.bodyBytes;
-    throw HttpStatusException(response.statusCode);
+    await _semaphore.acquire();
+    try {
+      final response = await _http
+          .get(Uri.parse(url), headers: const {'Accept': _kAccept})
+          .timeout(_timeout);
+      if (response.statusCode == 200) return response.bodyBytes;
+      throw HttpStatusException(response.statusCode);
+    } finally {
+      _semaphore.release();
+    }
   }
 
   Future<PackageSummary?> _fetchSummary(String name) async {
