@@ -1,4 +1,4 @@
-/// Unit tests for [SearchApiSymbolsHandler].
+/// Unit tests for [BrowseApiSymbolsHandler].
 library;
 
 import 'dart:convert';
@@ -11,7 +11,7 @@ import 'package:pubdev_context/src/cache/memory_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
-import 'package:pubdev_context/src/tools/search_api_symbols.dart';
+import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
 import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -54,9 +54,9 @@ List<DartdocSymbol> _fixtureSymbols() {
   return json.whereType<Map<String, Object?>>().map(DartdocSymbol.fromJson).toList();
 }
 
-/// Creates a [CallToolRequest] for `search_api_symbols` with the given [args].
+/// Creates a [CallToolRequest] for `browse_api_symbols` with the given [args].
 CallToolRequest _request(Map<String, Object?> args) =>
-    CallToolRequest(name: 'search_api_symbols', arguments: args);
+    CallToolRequest(name: 'browse_api_symbols', arguments: args);
 
 /// Decodes the first content item of [result] as a JSON list of symbols.
 List<Map<String, Object?>> _symbols(CallToolResult result) =>
@@ -77,7 +77,7 @@ void main() {
   late ResponseCache<List<DartdocSymbol>> cache;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
-  SearchApiSymbolsHandler buildHandler() => SearchApiSymbolsHandler(
+  BrowseApiSymbolsHandler buildHandler() => BrowseApiSymbolsHandler(
     client: client,
     cache: cache,
     log: (level, data) => loggedMessages.add((level, data)),

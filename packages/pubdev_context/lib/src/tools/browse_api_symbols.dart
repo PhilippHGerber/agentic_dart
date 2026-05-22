@@ -1,4 +1,4 @@
-/// Handler for the `search_api_symbols` MCP tool.
+/// Handler for the `browse_api_symbols` MCP tool.
 ///
 /// Searches the dartdoc symbol index (`index.json`) of a pub.dev package for
 /// matching API symbols, ranking exact [DartdocSymbol.name] matches before
@@ -27,25 +27,25 @@ import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 
-/// Cache-key prefix used by both [SearchApiSymbolsHandler] and the package
+/// Cache-key prefix used by both [BrowseApiSymbolsHandler] and the package
 /// resource handler (issue 11) to share the dartdoc symbol index cache.
 ///
 /// Full key format: `$kApiIndexCachePrefix:<packageName>`.
 const kApiIndexCachePrefix = 'api_index';
 
-/// Handles calls to the `search_api_symbols` MCP tool.
+/// Handles calls to the `browse_api_symbols` MCP tool.
 ///
 /// Consults `cache` before issuing HTTP requests; stores results with
 /// [kApiDocsTtl]. Logs cache hits at [LoggingLevel.debug] and HTTP requests
 /// at [LoggingLevel.info] via `log`.
-final class SearchApiSymbolsHandler {
-  /// Creates a [SearchApiSymbolsHandler].
+final class BrowseApiSymbolsHandler {
+  /// Creates a [BrowseApiSymbolsHandler].
   ///
   /// [client] is the pub.dev HTTP gateway. [cache] is the shared TTL store
   /// for dartdoc symbol indexes; pass the same instance to the package resource
   /// handler so both modules warm each other's cache. [log] receives structured
   /// log events at the appropriate [LoggingLevel].
-  const SearchApiSymbolsHandler({
+  const BrowseApiSymbolsHandler({
     required PubDevClient client,
     required ResponseCache<List<DartdocSymbol>> cache,
     required void Function(LoggingLevel, Object) log,
@@ -57,7 +57,7 @@ final class SearchApiSymbolsHandler {
   final ResponseCache<List<DartdocSymbol>> _cache;
   final void Function(LoggingLevel, Object) _log;
 
-  /// Handles a [CallToolRequest] for `search_api_symbols`.
+  /// Handles a [CallToolRequest] for `browse_api_symbols`.
   ///
   /// Validates `limit` against the 25-result cap, consults the cache, and
   /// delegates to [PubDevClient.getApiIndex]. Exact [DartdocSymbol.name]
@@ -82,18 +82,18 @@ final class SearchApiSymbolsHandler {
       );
     }
 
-    _log(LoggingLevel.info, 'search_api_symbols: package=$package query=$query limit=$limit');
+    _log(LoggingLevel.info, 'browse_api_symbols: package=$package query=$query limit=$limit');
 
     final cacheKey = '$kApiIndexCachePrefix:$package';
 
     final cached = _cache.get(cacheKey);
     if (cached != null) {
-      _log(LoggingLevel.debug, 'search_api_symbols: cache hit key=$cacheKey');
+      _log(LoggingLevel.debug, 'browse_api_symbols: cache hit key=$cacheKey');
       final symbols = await cached;
       return _buildResponse(symbols, query, type, limit);
     }
 
-    _log(LoggingLevel.debug, 'search_api_symbols: cache miss key=$cacheKey');
+    _log(LoggingLevel.debug, 'browse_api_symbols: cache miss key=$cacheKey');
 
     final future = _client.getApiIndex(package);
 
@@ -108,7 +108,7 @@ final class SearchApiSymbolsHandler {
       kApiDocsTtl,
     );
 
-    _log(LoggingLevel.info, 'search_api_symbols: HTTP request package=$package');
+    _log(LoggingLevel.info, 'browse_api_symbols: HTTP request package=$package');
 
     final result = await future;
 

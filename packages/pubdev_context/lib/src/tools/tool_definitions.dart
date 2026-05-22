@@ -18,7 +18,7 @@ const kServerInstructions =
     'You have access to the pub.dev Dart and Flutter package registry. '
     'Never guess a package name — always call search_packages first when the exact name is uncertain. '
     'Package discovery: search_packages → get_package → pub://package/{name}/readme. '
-    'API exploration: search_api_symbols (one symbol at a time) → get_symbol_documentation → get_package_source_file if implementation details are missing. '
+    'API exploration: browse_api_symbols (one symbol at a time) → get_symbol_documentation → get_package_source_file if implementation details are missing. '
     'Upgrade analysis: get_changelog with from_version set → inspect breaking flags → rewrite affected code. '
     'Package comparison: search_packages → compare_packages on the top candidates. '
     'Every error response carries a machine-readable code and a suggestion field. Read suggestion before retrying. '
@@ -137,12 +137,13 @@ final getChangelogTool = Tool(
   ),
 );
 
-// ─── search_api_symbols ───────────────────────────────────────────────────────
+// ─── browse_api_symbols ───────────────────────────────────────────────────────
 
-/// The `search_api_symbols` [Tool] definition registered with the MCP server.
-final searchApiSymbolsTool = Tool(
-  name: 'search_api_symbols',
+/// The `browse_api_symbols` [Tool] definition registered with the MCP server.
+final browseApiSymbolsTool = Tool(
+  name: 'browse_api_symbols',
   description:
+      'Use this only when you do not yet know the symbol name. When the name is already known, call `get_symbol_documentation` directly. '
       'Search for one symbol name at a time — multi-term queries like "PromptsSupport addPrompt" will not match. '
       'Use the href from the result to call get_symbol_documentation for the full signature and doc comment. '
       'Use type to narrow results when you know the symbol kind (class, method, enum, etc.). '
@@ -181,18 +182,19 @@ final searchApiSymbolsTool = Tool(
 final getSymbolDocumentationTool = Tool(
   name: 'get_symbol_documentation',
   description:
-      'Call search_api_symbols first to get the href, then pass it directly here to read the full signature and doc comment. '
+      'Call this to read the full signature and doc comment for a known symbol. '
+      'If the symbol name is unknown, call browse_api_symbols first to get the href, then pass it here. '
       'Use this to understand parameter types, return types, and usage notes for an API symbol. '
       'If the doc comment does not cover thrown exceptions or internal behavior, call get_package_source_file next.',
   inputSchema: ObjectSchema(
     required: ['package', 'href'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name, same as used in search_api_symbols.',
+        description: 'The pub.dev package name, same as used in browse_api_symbols.',
       ),
       'href': Schema.string(
         description:
-            'Relative documentation path from the href field in a search_api_symbols result '
+            'Relative documentation path from the href field in a browse_api_symbols result '
             '(e.g. "http/Client-class.html"). Pass it without modification.',
       ),
     },
@@ -207,7 +209,7 @@ final getPackageSourceFileTool = Tool(
   description:
       'Call this when get_symbol_documentation does not expose implementation details '
       'such as thrown exceptions, internal branching logic, or undocumented invariants. '
-      'Derive the file path from the href returned by search_api_symbols. '
+      'Derive the file path from the href returned by browse_api_symbols. '
       'On source_file_not_found, read the suggestion field — it lists the closest filename matches. '
       'If the suggestion is not sufficient, call list_package_source_files to browse the full file tree.',
   inputSchema: ObjectSchema(
@@ -218,7 +220,7 @@ final getPackageSourceFileTool = Tool(
         description:
             'File path relative to the package root '
             '(e.g. "lib/src/server/prompts_support.dart"). '
-            'Derive it from the search_api_symbols href. '
+            'Derive it from the browse_api_symbols href. '
             'Leading slash is stripped automatically. ".." segments are rejected.',
       ),
       'version': Schema.string(

@@ -52,6 +52,14 @@ _Avoid_: tool, handler, implementation
 The single shared HTML-to-Markdown converter (`lib/src/data/html_to_markdown.dart`). All five pub.dev HTML extraction paths — symbol docs, changelog, full README, README excerpt, and package example — delegate here. Output is structured Markdown (headings, fenced code blocks, lists) optimised for LLM token efficiency and information density. Callers vary only the section-isolation parameters (`isolateTag`, `isolateClass`) and optional `maxChars` truncation. Tag-to-Markdown rules are defined once.
 _Avoid_: HTML extractor, HTML parser, HTML stripper, plain-text extractor
 
+**AstSnapshot**:
+The parsed, unresolved representation of a single Dart source file, produced by `parseString()` from `package:analyzer`. Used by `get_method_body` and `get_throw_statements` for structural extraction (method bodies, throw statements) without cross-file type resolution. Cached separately from the raw source text under `ast:<name>:<version>:<filepath>` with a 1-hour TTL.
+_Avoid_: AST, parsed file, analyzer result, resolved AST
+
+**SymbolResolution**:
+The internal two-pass lookup performed by `get_symbol_documentation` that maps a human-readable symbol name to a dartdoc `href` using the cached API index (`api_index:<package>`). Pass 1: exact match on the `name` field. Pass 2 (when pass 1 is ambiguous or empty): suffix match on `qualifiedName` with the library prefix stripped, allowing agents to pass qualified forms such as `"Client.send"` to disambiguate from `"BaseClient.send"`. When multiple matches survive both passes, the class-level entry is preferred; if exactly one class entry exists, it is used silently. A `DomainError` with an `alternatives` field is returned when multiple class entries exist, or when no class entry exists and multiple matches remain. Never exposed to the LLM agent — the agent supplies a name or qualified name, not an `href`.
+_Avoid_: href lookup, index search, symbol search
+
 ## Relationships
 
 - A **PackageDetail** is a strict superset of **PackageSummary** data

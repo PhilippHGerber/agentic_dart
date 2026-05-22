@@ -7,7 +7,7 @@
 ///   - `pub://package/{name}/api`        — dartdoc index.json symbols
 ///                                         (application/json, 60 min TTL)
 ///
-/// The `api` resource shares its cache key format with [SearchApiSymbolsHandler]
+/// The `api` resource shares its cache key format with [BrowseApiSymbolsHandler]
 /// (`api_index:<name>`) so that a warm symbol-search cache also satisfies this
 /// resource and vice versa.
 ///
@@ -27,7 +27,7 @@ import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 import '../server.dart' show PubMcpServer;
-import '../tools/search_api_symbols.dart';
+import '../tools/browse_api_symbols.dart';
 
 /// Cache-key prefix for README entries.
 ///
@@ -109,7 +109,7 @@ const _kPackageNotFound = DomainError(
 /// parsed `ChangelogEntry` list cached by `GetChangelogHandler`.
 ///
 /// The `api` resource reads the dartdoc symbol index via [PubDevClient.getApiIndex]
-/// and caches it under the same key used by [SearchApiSymbolsHandler]
+/// and caches it under the same key used by [BrowseApiSymbolsHandler]
 /// (`api_index:<name>`), so both modules warm each other's cache.
 ///
 /// All resources return a [ReadResourceResult] whose content uses a structured
@@ -122,7 +122,7 @@ final class PackageResourcesHandler {
   /// [changelogCache] is a dedicated store for raw changelog markdown strings
   /// cached with [kChangelogRawTtl] — it is separate from the parsed
   /// `ChangelogEntry` cache used by `GetChangelogHandler`. [apiIndexCache] must
-  /// be the same instance used by [SearchApiSymbolsHandler] to enable shared
+  /// be the same instance used by [BrowseApiSymbolsHandler] to enable shared
   /// cache warm-up — both modules use the key prefix [kApiIndexCachePrefix].
   /// [log] receives structured events at the appropriate [LoggingLevel].
   const PackageResourcesHandler({
@@ -190,14 +190,14 @@ final class PackageResourcesHandler {
   ///
   /// Register this with addResourceTemplate alongside [handleReadResource].
   /// The cache key for this resource is `api_index:<name>`, identical to the one
-  /// used by [SearchApiSymbolsHandler], so both modules warm each other's cache.
+  /// used by [BrowseApiSymbolsHandler], so both modules warm each other's cache.
   static final kApiTemplate = ResourceTemplate(
     uriTemplate: kApiUriTemplate,
     name: 'Package API index',
     description:
         'Read this only when you need the raw dartdoc symbol index — '
-        'prefer search_api_symbols for filtered, ranked symbol lookup. '
-        'Use it for bulk symbol scanning or when search_api_symbols pagination is insufficient.',
+        'prefer browse_api_symbols for filtered, ranked symbol lookup. '
+        'Use it for bulk symbol scanning or when browse_api_symbols pagination is insufficient.',
     mimeType: 'application/json',
   );
 

@@ -14,7 +14,7 @@ import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/resources/package_resources.dart';
-import 'package:pubdev_context/src/tools/search_api_symbols.dart';
+import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
 import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ void _stubIndexJson(
   );
 }
 
-/// Parses the dartdoc fixture symbols from disk — mirrors what [SearchApiSymbolsHandler]
+/// Parses the dartdoc fixture symbols from disk — mirrors what [BrowseApiSymbolsHandler]
 /// stores in cache after a successful HTTP response.
 List<DartdocSymbol> _fixtureSymbols() {
   final json = jsonDecode(_readFixture('index_json.json')) as List<Object?>;
@@ -722,20 +722,20 @@ void main() {
 
   // ─── Shared cache key ─────────────────────────────────────────────────────────
 
-  group('shared cache key between PackageResourcesHandler and SearchApiSymbolsHandler', () {
+  group('shared cache key between PackageResourcesHandler and BrowseApiSymbolsHandler', () {
     test(
-      'api resource makes zero HTTP calls when SearchApiSymbolsHandler has warmed the cache',
+      'api resource makes zero HTTP calls when BrowseApiSymbolsHandler has warmed the cache',
       () async {
-        // Warm the cache via SearchApiSymbolsHandler (issue 09).
+        // Warm the cache via BrowseApiSymbolsHandler (issue 09).
         _stubIndexJson(mockHttp);
-        final symbolsHandler = SearchApiSymbolsHandler(
+        final symbolsHandler = BrowseApiSymbolsHandler(
           client: client,
           cache: apiCache,
           log: (_, _) {},
         );
         await symbolsHandler.call(
           CallToolRequest(
-            name: 'search_api_symbols',
+            name: 'browse_api_symbols',
             arguments: {'package': 'http', 'query': ''},
           ),
         );
@@ -743,7 +743,7 @@ void main() {
         // Now read the API resource — should use the warm cache.
         await buildHandler().handleReadResource(_apiRequest('http'));
 
-        // Only one HTTP request was made in total (from SearchApiSymbolsHandler).
+        // Only one HTTP request was made in total (from BrowseApiSymbolsHandler).
         verify(
           () => mockHttp.get(
             any(
@@ -758,21 +758,21 @@ void main() {
     );
 
     test(
-      'SearchApiSymbolsHandler makes zero HTTP calls when PackageResourcesHandler has warmed the cache',
+      'BrowseApiSymbolsHandler makes zero HTTP calls when PackageResourcesHandler has warmed the cache',
       () async {
         // Warm the cache via PackageResourcesHandler.
         _stubIndexJson(mockHttp);
         await buildHandler().handleReadResource(_apiRequest('http'));
 
-        // Now call SearchApiSymbolsHandler — should use the warm cache.
-        final symbolsHandler = SearchApiSymbolsHandler(
+        // Now call BrowseApiSymbolsHandler — should use the warm cache.
+        final symbolsHandler = BrowseApiSymbolsHandler(
           client: client,
           cache: apiCache,
           log: (_, _) {},
         );
         await symbolsHandler.call(
           CallToolRequest(
-            name: 'search_api_symbols',
+            name: 'browse_api_symbols',
             arguments: {'package': 'http', 'query': 'client'},
           ),
         );

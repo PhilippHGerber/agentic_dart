@@ -2,7 +2,7 @@
 ///
 /// Fetches the full dartdoc page for a specific API symbol and returns its
 /// content as plain text. The `href` input must come from a prior
-/// `search_api_symbols` call — this tool is the second step in the
+/// `browse_api_symbols` call — this tool is the second step in the
 /// symbol-exploration workflow.
 ///
 /// Cache key format: `symbol_doc:<package>:<href>` (see [kSymbolDocCachePrefix]).
@@ -97,7 +97,7 @@ final class GetSymbolDocumentationHandler {
   static const _kSymbolNotFound = DomainError(
     error: DomainErrors.symbolNotFound,
     message: 'Symbol documentation page not found.',
-    suggestion: 'Verify the href came from search_api_symbols and the package has dartdoc output.',
+    suggestion: 'Verify the href came from browse_api_symbols and the package has dartdoc output.',
   );
 
   static CallToolResult _successResult(String text) =>

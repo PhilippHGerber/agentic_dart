@@ -239,8 +239,8 @@ void main() {
       expect(toolNames, contains('get_symbol_documentation'));
     });
 
-    test('includes search_api_symbols', () {
-      expect(toolNames, contains('search_api_symbols'));
+    test('includes browse_api_symbols', () {
+      expect(toolNames, contains('browse_api_symbols'));
     });
   });
 
@@ -332,13 +332,13 @@ void main() {
     });
   }, timeout: const Timeout(Duration(seconds: 30)));
 
-  // ─── search_api_symbols ───────────────────────────────────────────────────────
+  // ─── browse_api_symbols ───────────────────────────────────────────────────────
 
-  group('search_api_symbols', () {
+  group('browse_api_symbols', () {
     late List<Object?> symbols;
 
     setUpAll(() async {
-      final result = await mcp.callTool('search_api_symbols', {
+      final result = await mcp.callTool('browse_api_symbols', {
         'package': 'http',
         'query': 'Client',
       });

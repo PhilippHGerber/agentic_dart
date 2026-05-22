@@ -416,7 +416,7 @@ final class PubDevClient {
             error: DomainErrors.symbolNotFound,
             message: 'Symbol documentation page not found.',
             suggestion:
-                'Verify the href came from search_api_symbols and the package has dartdoc output.',
+                'Verify the href came from browse_api_symbols and the package has dartdoc output.',
           ),
         ),
       PubDevFailure<String>(:final error) => PubDevFailure(error),

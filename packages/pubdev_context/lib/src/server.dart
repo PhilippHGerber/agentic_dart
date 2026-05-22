@@ -22,13 +22,13 @@ import 'data/pub_client.dart';
 import 'prompts/prompts.dart';
 import 'resources/meta_resources.dart';
 import 'resources/package_resources.dart';
+import 'tools/browse_api_symbols.dart';
 import 'tools/compare_packages.dart';
 import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
 import 'tools/get_package_source_file.dart';
 import 'tools/get_symbol_documentation.dart';
 import 'tools/list_package_source_files.dart';
-import 'tools/search_api_symbols.dart';
 import 'tools/search_packages.dart';
 import 'tools/tool_definitions.dart';
 import 'version.dart';
@@ -48,7 +48,7 @@ base class PubMcpServer extends MCPServer
   /// (shared by `get_package` and `compare_packages`), [changelogCache] for
   /// parsed changelog entry lists, [changelogRawCache] for raw changelog
   /// markdown text served by the `pub://package/{name}/changelog` resource,
-  /// [apiIndexCache] for dartdoc symbol indexes (shared by `search_api_symbols`
+  /// [apiIndexCache] for dartdoc symbol indexes (shared by `browse_api_symbols`
   /// and the package resource handler), [readmeCache] for full package README
   /// strings, [symbolDocCache] for individual symbol documentation pages, and
   /// [metaCache] for the `pub://meta/` resource responses; callers own their
@@ -198,13 +198,13 @@ base class PubMcpServer extends MCPServer
     registerTool(comparePackagesTool, comparePackagesHandler.call);
     log(LoggingLevel.debug, 'registered tool: compare_packages');
 
-    final searchApiSymbolsHandler = SearchApiSymbolsHandler(
+    final browseApiSymbolsHandler = BrowseApiSymbolsHandler(
       client: _client,
       cache: _apiIndexCache,
       log: log,
     );
-    registerTool(searchApiSymbolsTool, searchApiSymbolsHandler.call);
-    log(LoggingLevel.debug, 'registered tool: search_api_symbols');
+    registerTool(browseApiSymbolsTool, browseApiSymbolsHandler.call);
+    log(LoggingLevel.debug, 'registered tool: browse_api_symbols');
 
     final getSymbolDocHandler = GetSymbolDocumentationHandler(
       client: _client,

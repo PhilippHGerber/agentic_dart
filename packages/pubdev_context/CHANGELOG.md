@@ -3,6 +3,12 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Tool `search_api_symbols` renamed to `browse_api_symbols`. The new name reflects the tool's role as a pure discovery aid for when the symbol name is unknown;
+
 ## [0.3.0] - 2026-05-22
 
 ### Added
