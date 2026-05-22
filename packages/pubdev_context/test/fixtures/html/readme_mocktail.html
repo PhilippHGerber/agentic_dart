@@ -1,0 +1,323 @@
+<section class="tab-content detail-tab-readme-content -active markdown-body"><h1 id="-mocktail" class="hash-header">🍹 mocktail <a href="#-mocktail" class="hash-link">#</a></h1>
+<p><a href="https://pub.dev/packages/mocktail"><img src="https://external-images.pub.dev/Rl44G%2BI0XZ8I31NKFrfArMtRlu8xsrYhC%2BD25g5Vvr8%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fpub%2Fv%2Fmocktail.svg" alt="Pub"></a>
+<a href="https://github.com/felangel/mocktail/actions" rel="ugc"><img src="https://external-images.pub.dev/X78j8KKzgy4He1DQ5jVaqjJBD9RO9XW4m9MrLPcFbp0%3D/1779408000000/https%3A%2F%2Fgithub.com%2Ffelangel%2Fmocktail%2Factions%2Fworkflows%2Fmocktail.yaml%2Fbadge.svg" alt="mocktail"></a>
+<a href="https://github.com/felangel/mocktail/actions" rel="ugc"><img src="https://external-images.pub.dev/6S5U5BXol7OIRp%2FZEcnDqfceu%2Br9UR6o1cWDJRCZA4A%3D/1779408000000/https%3A%2F%2Fraw.githubusercontent.com%2Ffelangel%2Fmocktail%2Fmain%2Fcoverage_badge.svg" alt="coverage"></a>
+<a href="https://opensource.org/licenses/MIT" rel="ugc"><img src="https://external-images.pub.dev/gpDjWDbr1VL3uDlc0074hVsW4mIkZ1MfmfNlkKFwwwQ%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fbadge%2Flicense-MIT-purple.svg" alt="License: MIT"></a></p>
+<hr>
+<p>Mock library for Dart inspired by <a href="https://pub.dev/packages/mockito">mockito</a>.</p>
+<p>Mocktail focuses on providing a familiar, simple API for creating mocks in Dart (with null-safety) without the need for manual mocks or code generation.</p>
+<h2 id="creating-a-mock" class="hash-header">Creating a Mock <a href="#creating-a-mock" class="hash-link">#</a></h2>
+<pre><code class="language-dart">import 'package:mocktail/mocktail.dart';
+
+// A Real Cat class
+class Cat {
+  String sound() =&gt; 'meow!';
+  bool likes(String food, {bool isHungry = false}) =&gt; false;
+  final int lives = 9;
+}
+
+// A Mock Cat class
+class MockCat extends Mock implements Cat {}
+
+void main() {
+  // Create a Mock Cat instance
+  final cat = MockCat();
+}
+</code></pre>
+<h2 id="stub-and-verify-behavior" class="hash-header">Stub and Verify Behavior <a href="#stub-and-verify-behavior" class="hash-link">#</a></h2>
+<p>The <code>MockCat</code> instance can then be used to stub and verify calls.</p>
+<pre><code class="language-dart">// Stub the `sound` method.
+when(() =&gt; cat.sound()).thenReturn('meow');
+
+// Verify no interactions have occurred.
+verifyNever(() =&gt; cat.sound());
+
+// Interact with the mock cat instance.
+cat.sound();
+
+// Verify the interaction occurred.
+verify(() =&gt; cat.sound()).called(1);
+
+// When mocktail verifies an invocation, it is then excluded from further verifications.
+verifyNever(() =&gt; cat.sound());
+
+// Interact with the mock instance again.
+cat.sound();
+
+// The verification count is 1 since there was only 1 invocation since the last verification.
+verify(() =&gt; cat.sound()).called(1);
+</code></pre>
+<h2 id="additional-usage" class="hash-header">Additional Usage <a href="#additional-usage" class="hash-link">#</a></h2>
+<pre><code class="language-dart">// Stub a method before interacting with the mock.
+when(() =&gt; cat.sound()).thenReturn('purrr!');
+expect(cat.sound(), 'purrr!');
+
+// You can interact with the mock multiple times.
+expect(cat.sound(), 'purrr!');
+
+// You can change the stub.
+when(() =&gt; cat.sound()).thenReturn('meow!');
+expect(cat.sound(), 'meow');
+
+// You can stub getters.
+when(() =&gt; cat.lives).thenReturn(10);
+expect(cat.lives, 10);
+
+// You can stub a method for specific arguments.
+when(() =&gt; cat.likes('fish', isHungry: false)).thenReturn(true);
+expect(cat.likes('fish', isHungry: false), isTrue);
+
+// You can verify the interaction for specific arguments.
+verify(() =&gt; cat.likes('fish', isHungry: false)).called(1);
+
+// Or alternatively use any(that: ...) to use a matcher.
+verify(() =&gt; cat.likes(any(that: isA&lt;String&gt;().having((food) =&gt; food, 'name', 'fish')))).called(1);
+
+// You can stub a method using argument matcher: `any`.
+// When stubbing a positional argument, use `any()`.
+// When stubbing a named argument, use `any(named: '&lt;argName&gt;`)`.
+// A custom matcher can be provided using `any(that: customMatcher)`.
+when(() =&gt; cat.likes(any(), isHungry: any(named: 'isHungry', that: isFalse)).thenReturn(true);
+expect(cat.likes('fish', isHungry: false), isTrue);
+
+// You can stub a method to throw.
+when(() =&gt; cat.sound()).thenThrow(Exception('oops'));
+expect(() =&gt; cat.sound(), throwsA(isA&lt;Exception&gt;()));
+
+// You can calculate stubs dynamically.
+final sounds = ['purrr', 'meow'];
+when(() =&gt; cat.sound()).thenAnswer((_) =&gt; sounds.removeAt(0));
+expect(cat.sound(), 'purrr');
+expect(cat.sound(), 'meow');
+
+// You can capture any argument.
+when(() =&gt; cat.likes('fish')).thenReturn(true);
+expect(cat.likes('fish'), isTrue);
+final captured = verify(() =&gt; cat.likes(captureAny())).captured;
+expect(captured.last, equals(['fish']));
+
+// You can capture a specific argument based on a matcher.
+when(() =&gt; cat.likes(any())).thenReturn(true);
+expect(cat.likes('fish'), isTrue);
+expect(cat.likes('dog food'), isTrue);
+final captured = verify(() =&gt; cat.likes(captureAny(that: startsWith('d')))).captured;
+expect(captured.last, equals(['dog food']));
+</code></pre>
+<h2 id="resetting-mocks" class="hash-header">Resetting Mocks <a href="#resetting-mocks" class="hash-link">#</a></h2>
+<pre><code class="language-dart">reset(cat); // Reset stubs and interactions
+</code></pre>
+<h2 id="how-it-works" class="hash-header">How it works <a href="#how-it-works" class="hash-link">#</a></h2>
+<p>Mocktail uses closures to handle catching <code>TypeError</code> instances which would otherwise propagate and cause test failures when stubbing/verifying non-nullable return types. Check out <a href="https://github.com/felangel/mocktail/issues/24" rel="ugc">#24</a> for more information.</p>
+<p>In order to support argument matchers such as <code>any</code> and <code>captureAny</code> mocktail has to register default fallback values to return when the argument matchers are used. Out of the box, it automatically handles all primitive types, however, when using argument matchers in place of custom types developers must use <code>registerFallbackValue</code> to provide a default return value. It is only required to call <code>registerFallbackValue</code> once per type so it is recommended to place all <code>registerFallbackValue</code> calls within <code>setUpAll</code>.</p>
+<pre><code class="language-dart">class Food {...}
+
+class Cat {
+  bool likes(Food food) {...}
+}
+
+...
+
+class MockCat extends Mock implements Cat {}
+
+class FakeFood extends Fake implements Food {}
+
+void main() {
+  setUpAll(() {
+    registerFallbackValue(FakeFood());
+  });
+
+  test('...', () {
+    final cat = MockCat();
+    when(() =&gt; cat.likes(any()).thenReturn(true);
+    ...
+  });
+}
+</code></pre>
+<h2 id="faqs" class="hash-header">FAQs <a href="#faqs" class="hash-link">#</a></h2>
+<h4 id="why-am-i-getting-an-invalid_implementation_override-error-when-trying-to-fake-certain-classes-like-themedata-and-colorscheme">Why am I getting an invalid_implementation_override error when trying to Fake certain classes like ThemeData and ColorScheme?</h4>
+<p><a href="https://github.com/felangel/mocktail/issues/59" rel="ugc">Relevant Issue</a></p>
+<p>This is likely due to differences in the function signature of <code>toString</code> for the class and can be resolved
+using a mixin as demonstrated below:</p>
+<pre><code class="language-dart">mixin DiagnosticableToStringMixin on Object {
+  @override
+  String toString({DiagnosticLevel minLevel = DiagnosticLevel.info}) {
+    return super.toString();
+  }
+}
+
+class FakeThemeData extends Fake
+  with DiagnosticableToStringMixin
+  implements ThemeData {}
+</code></pre>
+<h4 id="why-cant-i-stubverify-extension-methods-properly">Why can't I stub/verify extension methods properly?</h4>
+<p><a href="https://github.com/felangel/mocktail/issues/58" rel="ugc">Relevant Issue</a></p>
+<p>Extension methods cannot be stubbed/verified as they are treated like static methods. This means that calls go directly to the extension method without caring about the instance. As a result, stubs and verify calls to extensions always result in an invocation of the real extension method.</p>
+<p>Instead of stubbing/verifying extension methods directly, prefer to stub/verify public members on the instance with which the extension methods interact.</p>
+<h4 id="why-am-i-seeing-error-type-null-is-not-a-subtype-of-type-futurevoid">Why am I seeing error: type 'Null' is not a subtype of type 'Future</h4>
+<p><a href="https://github.com/felangel/mocktail/issues/78" rel="ugc">Relevant Issue</a></p>
+<p>By default when a class extends <code>Mock</code> any unstubbed methods return <code>null</code>.</p>
+<p>For example, take the following class:</p>
+<pre><code class="language-dart">class Person {
+  Future&lt;void&gt; sleep() {
+    await Future&lt;void&gt;.delayed(Duration(hours: 8));
+  }
+}
+</code></pre>
+<p>We can create a <code>MockPerson</code> like:</p>
+<pre><code class="language-dart">class MockPerson extends Mock implements Person {}
+</code></pre>
+<p>If we have code that invokes <code>sleep</code> on <code>MockPerson</code> we will get a <code>TypeError</code>:</p>
+<pre><code class="language-sh">type 'Null' is not a subtype of type 'Future&lt;void&gt;'
+</code></pre>
+<p>This is because we did not stub <code>sleep</code> so when <code>sleep</code> is called on an instance of <code>MockPerson</code>, <code>mocktail</code> returns <code>null</code> which is not compatible with <code>Future&lt;void&gt;</code>.</p>
+<p>To address this, we must explicitly stub <code>sleep</code> like:</p>
+<pre><code class="language-dart">final person = MockPerson();
+when(() =&gt; person.sleep()).thenAnswer((_) async {});
+</code></pre>
+<h4 id="why-is-my-method-throwing-a-typeerror-when-stubbing-using-any">Why is my method throwing a <code>TypeError</code> when stubbing using <code>any()</code>?</h4>
+<p><a href="https://github.com/felangel/mocktail/issues/162" rel="ugc">Relevant Issue</a></p>
+<p>By default when a class extends <code>Mock</code> any unstubbed methods return <code>null</code>. When stubbing using <code>any()</code> the type must be inferable. However, when a method has a generic type argument it might not be able to infer the type and as a result, the generic would fallback to <code>dynamic</code> causing the method to act as if it was unstubbed.</p>
+<p>For example, take the following class and its method:</p>
+<pre><code class="language-dart">class Cache {
+  bool set&lt;T&gt;(String key, T value) {
+    return true;
+  }
+}
+</code></pre>
+<p>The following stub will be equivalent to calling <code>set&lt;dynamic&gt;(...)</code>:</p>
+<pre><code class="language-dart">// The type `T` of `any&lt;T&gt;()` is inferred to be `dynamic`.
+when(() =&gt; cache.set(any(), any())).thenReturn((_) =&gt; true);
+</code></pre>
+<p>To address this, we must explicitly stub <code>set</code> with a type:</p>
+<pre><code class="language-dart">final cache = MockCache();
+when(() =&gt; cache.set&lt;int&gt;(any(), any())).thenReturn((_) =&gt; true);
+cache.set&lt;int&gt;('key', 1);
+verify(() =&gt; cache.set&lt;int&gt;(any(), any())).called(1);
+</code></pre>
+<p>The type doesn't need to be applied to <code>set&lt;T&gt;()</code>, any explicit type that allows <code>any&lt;T&gt;()</code> infer its type will allow the method to be stubbed for that type:</p>
+<pre><code class="language-dart">when(() =&gt; cache.set(any(), any&lt;int&gt;())).thenReturn((_) =&gt; true);
+</code></pre>
+<h2 id="migrating-from-mockito" class="hash-header">Migrating from Mockito <a href="#migrating-from-mockito" class="hash-link">#</a></h2>
+<p>Mocktail's API is very similar to Mockito making the migration as smooth as possible.</p>
+<p>The key differences are:</p>
+<ol>
+<li><strong>No code generation</strong> — remove <code>@GenerateMocks</code>, <code>build_runner</code>, and generated <code>.mocks.dart</code> files.</li>
+<li><strong>Wrap calls in closures</strong> — stub and verify with <code>() =&gt; mock.method()</code> instead of <code>mock.method()</code></li>
+<li><strong>Unified matchers</strong> — <code>any()</code>, <code>any(named:)</code>, <code>any(that:)</code> replace <code>anyString</code>, <code>anyInt</code>, <code>argThat</code>, etc.</li>
+</ol>
+<h3 id="quick-reference" class="hash-header">Quick Reference <a href="#quick-reference" class="hash-link">#</a></h3>
+<table>
+<thead>
+<tr>
+<th><code>mockito</code></th>
+<th><code>mocktail</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@GenerateMocks([Cat])</code> + <code>build_runner</code></td>
+<td><code>class MockCat extends Mock implements Cat {}</code></td>
+</tr>
+<tr>
+<td><code>MockitoAnnotations.initMocks(this)</code></td>
+<td><em>(not needed)</em></td>
+</tr>
+<tr>
+<td><code>when(mock.sound()).thenReturn('meow')</code></td>
+<td><code>when(() =&gt; mock.sound()).thenReturn('meow')</code></td>
+</tr>
+<tr>
+<td><code>when(mock.sound()).thenAnswer((_) =&gt; 'purr')</code></td>
+<td><code>when(() =&gt; mock.sound()).thenAnswer((_) =&gt; 'purr')</code></td>
+</tr>
+<tr>
+<td><code>when(mock.sound()).thenThrow(Exception())</code></td>
+<td><code>when(() =&gt; mock.sound()).thenThrow(Exception())</code></td>
+</tr>
+<tr>
+<td><code>when(mock.fetch(any()))</code></td>
+<td><code>when(() =&gt; mock.fetch(any()))</code></td>
+</tr>
+<tr>
+<td><code>when(mock.fetch(anyNamed('url')))</code></td>
+<td><code>when(() =&gt; mock.fetch(any(named: 'url')))</code></td>
+</tr>
+<tr>
+<td><code>when(mock.fetch(argThat(startsWith('http'))))</code></td>
+<td><code>when(() =&gt; mock.fetch(any(that: startsWith('http'))))</code></td>
+</tr>
+<tr>
+<td><code>verify(mock.sound()).called(1)</code></td>
+<td><code>verify(() =&gt; mock.sound()).called(1)</code></td>
+</tr>
+<tr>
+<td><code>verifyNever(mock.sound())</code></td>
+<td><code>verifyNever(() =&gt; mock.sound())</code></td>
+</tr>
+<tr>
+<td><code>verifyInOrder([mock.a(), mock.b()])</code></td>
+<td><code>verifyInOrder([() =&gt; mock.a(), () =&gt; mock.b()])</code></td>
+</tr>
+<tr>
+<td><code>verify(mock.fetch(captureAny)).captured</code></td>
+<td><code>verify(() =&gt; mock.fetch(captureAny())).captured</code></td>
+</tr>
+<tr>
+<td><code>verify(mock.fetch(captureThat(isNotNull)))</code></td>
+<td><code>verify(() =&gt; mock.fetch(captureAny(that: isNotNull)))</code></td>
+</tr>
+<tr>
+<td><code>reset(mock)</code></td>
+<td><code>reset(mock)</code></td>
+</tr>
+<tr>
+<td><code>resetMockitoState()</code></td>
+<td><code>resetMocktailState()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="sample-migration" class="hash-header">Sample Migration <a href="#sample-migration" class="hash-link">#</a></h3>
+<p><strong>Before (mockito)</strong></p>
+<pre><code class="language-dart">import 'package:mockito/annotations.dart';
+import 'package:mockito/mockito.dart';
+import 'cat_test.mocks.dart';
+
+@GenerateMocks([Cat])
+void main() {
+  test('sounds', () {
+    final Cat cat = MockCat();
+    when(cat.sound()).thenReturn('meow');
+    expect(cat.sound(), 'meow');
+    verify(cat.sound()).called(1);
+  });
+
+  test('eat with matcher', () {
+    final Cat cat = MockCat();
+    when(cat.eat(argThat(startsWith('fish')))).thenAnswer((_) async =&gt; 'yum');
+    expect(cat.eat('fishy'), completion(equals('yum')));
+    verify(cat.eat('fishy')).called(1);
+  });
+}
+</code></pre>
+<p><strong>After (mocktail)</strong></p>
+<pre><code class="language-dart">import 'package:mocktail/mocktail.dart';
+
+class MockCat extends Mock implements Cat {}
+
+void main() {
+  test('sounds', () {
+    final Cat cat = MockCat();
+    when(() =&gt; cat.sound()).thenReturn('meow');
+    expect(cat.sound(), 'meow');
+    verify(() =&gt; cat.sound()).called(1);
+  });
+
+  test('eat with matcher', () {
+    final Cat cat = MockCat();
+    when(() =&gt; cat.eat(any(that: startsWith('fish')))).thenAnswer((_) async =&gt; 'yum');
+    expect(cat.eat('fishy'), completion(equals('yum')));
+    verify(() =&gt; cat.eat('fishy')).called(1);
+  });
+}
+</code></pre>
+</section>

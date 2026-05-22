@@ -188,6 +188,31 @@ void main() {
       final result = HtmlToMarkdown.convert('<p>some content</p>', isolateClass: 'desc markdown');
       expect(result, isEmpty);
     });
+
+    test('matches when element has extra classes beyond the query', () {
+      const html = '<div class="desc markdown active"><p>README content</p></div>';
+      final result = HtmlToMarkdown.convert(html, isolateClass: 'desc markdown');
+      expect(result, contains('README content'));
+    });
+
+    test('returns only the matched element content, not what follows', () {
+      const html = '<div class="desc markdown"><p>target</p></div><p>after</p>';
+      final result = HtmlToMarkdown.convert(html, isolateClass: 'desc markdown');
+      expect(result, contains('target'));
+      expect(result, isNot(contains('after')));
+    });
+
+    test('isolates example-path class string correctly', () {
+      const html =
+          '<div class="tab-content detail-tab-example-content -active markdown-body">'
+          ' <p>example content</p>'
+          ' </div>';
+      final result = HtmlToMarkdown.convert(
+        html,
+        isolateClass: 'tab-content detail-tab-example-content -active markdown-body',
+      );
+      expect(result, contains('example content'));
+    });
   });
 
   // ─── Truncation ─────────────────────────────────────────────────────────────

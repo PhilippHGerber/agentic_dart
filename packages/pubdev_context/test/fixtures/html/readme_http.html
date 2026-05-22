@@ -1,0 +1,374 @@
+<section class="tab-content detail-tab-readme-content -active markdown-body"><p><a href="https://pub.dev/packages/http"><img src="https://external-images.pub.dev/su%2Bj7lG79NO2rAoPqzZ8nz7s5qmC8gFbitwt%2FO0QqQ4%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fpub%2Fv%2Fhttp.svg" alt="pub package"></a>
+<a href="https://pub.dev/packages/http/publisher"><img src="https://external-images.pub.dev/6kJvDP%2BA9EovGsugP9MUci7ZNuMbMiTxM1%2Fp%2BLFLhlA%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fpub%2Fpublisher%2Fhttp.svg" alt="package publisher"></a></p>
+<p>A composable, Future-based library for making HTTP requests.</p>
+<p>This package contains a set of high-level functions and classes that make it
+easy to consume HTTP resources. It's multi-platform (mobile, desktop, and
+browser) and supports multiple implementations.</p>
+<h2 id="using" class="hash-header">Using <a href="#using" class="hash-link">#</a></h2>
+<p>The easiest way to use this library is via the top-level functions. They allow
+you to make individual HTTP requests with minimal hassle:</p>
+<pre><code class="language-dart">import 'package:http/http.dart' as http;
+
+var url = Uri.https('example.com', 'whatsit/create');
+var response = await http.post(url, body: {'name': 'doodle', 'color': 'blue'});
+print('Response status: ${response.statusCode}');
+print('Response body: ${response.body}');
+
+print(await http.read(Uri.https('example.com', 'foobar.txt')));
+</code></pre>
+<div class="markdown-alert markdown-alert-note">
+<p class="markdown-alert-title">Note</p>
+<p>Flutter applications may require
+<a href="https://docs.flutter.dev/data-and-backend/networking#platform-notes" rel="ugc">additional configuration</a>
+to make HTTP requests.</p>
+</div>
+<p>If you're making multiple requests to the same server, you can keep open a
+persistent connection by using a <a href="https://pub.dev/documentation/http/latest/http/Client-class.html">Client</a> rather than making one-off requests.
+If you do this, make sure to close the client when you're done:</p>
+<pre><code class="language-dart">var client = http.Client();
+try {
+  var response = await client.post(
+      Uri.https('example.com', 'whatsit/create'),
+      body: {'name': 'doodle', 'color': 'blue'});
+  var decodedResponse = jsonDecode(utf8.decode(response.bodyBytes)) as Map;
+  var uri = Uri.parse(decodedResponse['uri'] as String);
+  print(await client.get(uri));
+} finally {
+  client.close();
+}
+</code></pre>
+<div class="markdown-alert markdown-alert-tip">
+<p class="markdown-alert-title">Tip</p>
+<p>For detailed background information and practical usage examples, see:</p>
+<ul>
+<li><a href="https://dart.dev/tutorials/server/fetch-data">Dart Development: Fetch data from the internet</a></li>
+<li><a href="https://docs.flutter.dev/cookbook/networking/fetch-data" rel="ugc">Flutter Cookbook: Fetch data from the internet</a></li>
+<li><a href="https://github.com/dart-lang/http/tree/master/pkgs/flutter_http_example" rel="ugc">The Flutter HTTP example application</a></li>
+</ul>
+</div>
+<p>You can also exert more fine-grained control over your requests and responses by
+creating <a href="https://pub.dev/documentation/http/latest/http/Request-class.html">Request</a> or <a href="https://pub.dev/documentation/http/latest/http/StreamedRequest-class.html">StreamedRequest</a> objects yourself and passing them to
+<a href="https://pub.dev/documentation/http/latest/http/Client/send.html">Client.send</a>.</p>
+<p>This package is designed to be composable. This makes it easy for external
+libraries to work with one another to add behavior to it. Libraries wishing to
+add behavior should create a subclass of <a href="https://pub.dev/documentation/http/latest/http/BaseClient-class.html">BaseClient</a> that wraps another
+<a href="https://pub.dev/documentation/http/latest/http/Client-class.html">Client</a> and adds the desired behavior:</p>
+<pre><code class="language-dart">class UserAgentClient extends http.BaseClient {
+  final String userAgent;
+  final http.Client _inner;
+
+  UserAgentClient(this.userAgent, this._inner);
+
+  @override
+  Future&lt;http.StreamedResponse&gt; send(http.BaseRequest request) {
+    request.headers['user-agent'] = userAgent;
+    return _inner.send(request);
+  }
+}
+</code></pre>
+<h2 id="testing" class="hash-header">Testing <a href="#testing" class="hash-link">#</a></h2>
+<p>For better testability, especially in Flutter applications, it's recommended
+to use a <a href="https://pub.dev/documentation/http/latest/http/Client-class.html">Client</a> instance rather than the top-level functions like
+<code>http.get()</code> or <code>http.post()</code>. This approach makes it easier to mock HTTP
+requests in your tests.</p>
+<pre><code class="language-dart">// Instead of using static methods (harder to test):
+// var response = await http.get(Uri.https('example.com', 'data.json'));
+
+// Use a Client instance (easier to test):
+class DataService {
+  final http.Client client;
+
+  DataService({http.Client? client}) : client = client ?? http.Client();
+
+  Future&lt;String&gt; fetchData() async {
+    var response = await client.get(Uri.https('example.com', 'data.json'));
+    return response.body;
+  }
+}
+</code></pre>
+<p>In your tests, you can easily mock the HTTP client:</p>
+<pre><code class="language-dart">import 'package:http/testing.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('fetchData returns expected data', () async {
+    final mockClient = MockClient((request) async {
+      return http.Response('{"key": "value"}', 200);
+    });
+
+    final dataService = DataService(client: mockClient);
+    final result = await dataService.fetchData();
+
+    expect(result, '{"key": "value"}');
+  });
+}
+</code></pre>
+<div class="markdown-alert markdown-alert-tip">
+<p class="markdown-alert-title">Tip</p>
+<p>You can also use <code>package:mockito</code> to mock <code>http.Client</code>.
+For more detailed guidance, see the
+<a href="https://docs.flutter.dev/cookbook/testing/unit/mocking" rel="ugc">Flutter testing cookbook</a>,
+which demonstrates best practices for mocking HTTP requests.</p>
+</div>
+<h2 id="retrying-requests" class="hash-header">Retrying requests <a href="#retrying-requests" class="hash-link">#</a></h2>
+<p><code>package:http/retry.dart</code> provides a class <a href="https://pub.dev/documentation/http/latest/retry/RetryClient-class.html"><code>RetryClient</code></a> to wrap
+an underlying <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>http.Client</code></a> which transparently retries failing
+requests.</p>
+<pre><code class="language-dart">import 'package:http/http.dart' as http;
+import 'package:http/retry.dart';
+
+Future&lt;void&gt; main() async {
+  final client = RetryClient(http.Client());
+  try {
+    print(await client.read(Uri.http('example.org', '')));
+  } finally {
+    client.close();
+  }
+}
+</code></pre>
+<p>By default, this retries any request whose response has status code 503
+Temporary Failure up to three retries. It waits 500ms before the first retry,
+and increases the delay by 1.5x each time. All of this can be customized using
+the <a href="https://pub.dev/documentation/http/latest/retry/RetryClient/RetryClient.html"><code>RetryClient()</code></a> constructor.</p>
+<h2 id="aborting-requests" class="hash-header">Aborting requests <a href="#aborting-requests" class="hash-link">#</a></h2>
+<p>Some clients, such as <a href="https://pub.dev/documentation/http/latest/browser_client/BrowserClient-class.html"><code>BrowserClient</code></a>, <a href="https://pub.dev/documentation/http/latest/io_client/IOClient-class.html"><code>IOClient</code></a>, and
+<a href="https://pub.dev/documentation/http/latest/retry/RetryClient-class.html"><code>RetryClient</code></a>, support aborting requests before they complete.</p>
+<p>Aborting in this way can only be performed when using <a href="https://pub.dev/documentation/http/latest/http/Client/send.html"><code>Client.send</code></a> or
+<a href="https://pub.dev/documentation/http/latest/http/BaseRequest/send.html"><code>BaseRequest.send</code></a> with an <a href="https://pub.dev/documentation/http/latest/http/Abortable-class.html"><code>Abortable</code></a> request (such
+as <a href="https://pub.dev/documentation/http/latest/http/AbortableRequest-class.html"><code>AbortableRequest</code></a>).</p>
+<p>To abort a request, complete the <a href="https://pub.dev/documentation/http/latest/http/Abortable/abortTrigger.html"><code>Abortable.abortTrigger</code></a> <code>Future</code>.</p>
+<p>If the request is aborted before the response <code>Future</code> completes, then the response
+<code>Future</code> will complete with <a href="https://pub.dev/documentation/http/latest/http/RequestAbortedException-class.html"><code>RequestAbortedException</code></a>. If
+the response is a <code>StreamedResponse</code> and the the request is cancelled while the
+response stream is being consumed, then the response stream will contain a
+<a href="https://pub.dev/documentation/http/latest/http/RequestAbortedException-class.html"><code>RequestAbortedException</code></a>.</p>
+<pre><code class="language-dart">import 'dart:async';
+
+import 'package:http/http.dart' as http;
+
+Future&lt;void&gt; main() async {
+  final abortTrigger = Completer&lt;void&gt;();
+  final client = Client();
+  final request = AbortableRequest(
+    'GET',
+    Uri.https('example.com'),
+    abortTrigger: abortTrigger.future,
+  );
+
+  // Whenever abortion is required:
+  // &gt; abortTrigger.complete();
+
+  // Send request
+  final StreamedResponse response;
+  try {
+    response = await client.send(request);
+  } on RequestAbortedException {
+    // request aborted before it was fully sent
+    rethrow;
+  }
+
+  // Using full response bytes listener
+  response.stream.listen(
+    (data) {
+      // consume response bytes
+    },
+    onError: (Object err) {
+      if (err is RequestAbortedException) {
+        // request aborted whilst response bytes are being streamed;
+        // the stream will always be finished early
+      }
+    },
+    onDone: () {
+      // response bytes consumed, or partially consumed if finished
+      // early due to abortion
+    },
+  );
+
+  // Alternatively, using `asFuture`
+  try {
+    await response.stream.listen(
+      (data) {
+        // consume response bytes
+      },
+    ).asFuture&lt;void&gt;();
+  } on RequestAbortedException {
+    // request aborted whilst response bytes are being streamed
+    rethrow;
+  }
+    // response bytes fully consumed
+}
+</code></pre>
+<h2 id="choosing-an-implementation" class="hash-header">Choosing an implementation <a href="#choosing-an-implementation" class="hash-link">#</a></h2>
+<p>There are multiple implementations of the <code>package:http</code> <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> interface. By default, <code>package:http</code> uses <a href="https://pub.dev/documentation/http/latest/browser_client/BrowserClient-class.html"><code>BrowserClient</code></a> on the web and <a href="https://pub.dev/documentation/http/latest/io_client/IOClient-class.html"><code>IOClient</code></a> on all other platforms. You can choose a different <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> implementation based on the needs of your application.</p>
+<p>You can change implementations without changing your application code, except
+for a few lines of <a href="#2-configure-the-http-client">configuration</a>.</p>
+<p>Some well-supported implementations are:</p>
+<table>
+<thead>
+<tr>
+<th>Implementation</th>
+<th>Supported Platforms</th>
+<th>SDK</th>
+<th>Caching</th>
+<th>HTTP3/QUIC</th>
+<th>Platform Native</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>package:http</code> — <a href="https://pub.dev/documentation/http/latest/io_client/IOClient-class.html"><code>IOClient</code></a></td>
+<td>Android, iOS, Linux, macOS, Windows</td>
+<td>Dart, Flutter</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>package:http</code> — <a href="https://pub.dev/documentation/http/latest/browser_client/BrowserClient-class.html"><code>BrowserClient</code></a></td>
+<td>Web</td>
+<td>Dart, Flutter</td>
+<td>―</td>
+<td>✅︎</td>
+<td>✅︎</td>
+</tr>
+<tr>
+<td><a href="https://pub.dev/packages/cupertino_http"><code>package:cupertino_http</code></a> — <a href="https://pub.dev/documentation/cupertino_http/latest/cupertino_http/CupertinoClient-class.html"><code>CupertinoClient</code></a></td>
+<td>iOS, macOS</td>
+<td>Flutter</td>
+<td>✅︎</td>
+<td>✅︎</td>
+<td>✅︎</td>
+</tr>
+<tr>
+<td><a href="https://pub.dev/packages/cronet_http"><code>package:cronet_http</code></a> — <a href="https://pub.dev/documentation/cronet_http/latest/cronet_http/CronetClient-class.html"><code>CronetClient</code></a></td>
+<td>Android</td>
+<td>Flutter</td>
+<td>✅︎</td>
+<td>✅︎</td>
+<td>―</td>
+</tr>
+<tr>
+<td><a href="https://pub.dev/packages/fetch_client"><code>package:fetch_client</code></a> — <a href="https://pub.dev/documentation/fetch_client/latest/fetch_client/FetchClient-class.html"><code>FetchClient</code></a></td>
+<td>Web</td>
+<td>Dart, Flutter</td>
+<td>✅︎</td>
+<td>✅︎</td>
+<td>✅︎</td>
+</tr>
+</tbody>
+</table>
+<div class="markdown-alert markdown-alert-tip">
+<p class="markdown-alert-title">Tip</p>
+<p>If you are writing a Dart package or Flutter plugin that uses
+<code>package:http</code>, you should not depend on a particular <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a>
+implementation. Let the application author decide what implementation is
+best for their project. You can make that easier by accepting an explicit
+<a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> argument. For example:</p>
+<pre><code class="language-dart">Future&lt;Album&gt; fetchAlbum({Client? client}) async {
+client ??= Client();
+...
+}
+</code></pre>
+</div>
+<h2 id="configuration" class="hash-header">Configuration <a href="#configuration" class="hash-link">#</a></h2>
+<p>To use an HTTP client implementation other than the default, you must:</p>
+<ol>
+<li>Add the HTTP client as a dependency.</li>
+<li>Configure the HTTP client.</li>
+<li>Connect the HTTP client to the code that uses it.</li>
+</ol>
+<h3 id="1-add-the-http-client-as-a-dependency" class="hash-header">1. Add the HTTP client as a dependency. <a href="#1-add-the-http-client-as-a-dependency" class="hash-link">#</a></h3>
+<p>To add a package compatible with the Dart SDK to your project, use <code>dart pub add</code>.</p>
+<p>For example:</p>
+<pre><code class="language-terminal"># Replace  "fetch_client" with the package that you want to use.
+dart pub add fetch_client
+</code></pre>
+<p>To add a package that requires the Flutter SDK, use <code>flutter pub add</code>.</p>
+<p>For example:</p>
+<pre><code class="language-terminal"># Replace  "cupertino_http" with the package that you want to use.
+flutter pub add cupertino_http
+</code></pre>
+<h3 id="2-configure-the-http-client" class="hash-header">2. Configure the HTTP client. <a href="#2-configure-the-http-client" class="hash-link">#</a></h3>
+<p>Different <code>package:http</code> <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> implementations may require
+different configuration options.</p>
+<p>Add a function that returns a correctly configured <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a>. You can
+return a different <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> on different platforms.</p>
+<p>For example:</p>
+<pre><code class="language-dart">Client httpClient() {
+  if (Platform.isAndroid) {
+    final engine = CronetEngine.build(
+        cacheMode: CacheMode.memory,
+        cacheMaxSize: 1000000);
+    return CronetClient.fromCronetEngine(engine);
+  }
+  if (Platform.isIOS || Platform.isMacOS) {
+    final config = URLSessionConfiguration.ephemeralSessionConfiguration()
+      ..cache = URLCache.withCapacity(memoryCapacity: 1000000);
+    return CupertinoClient.fromSessionConfiguration(config);
+  }
+  return IOClient();
+}
+</code></pre>
+<div class="markdown-alert markdown-alert-tip">
+<p class="markdown-alert-title">Tip</p>
+<p><a href="https://github.com/dart-lang/http/tree/master/pkgs/flutter_http_example" rel="ugc">The Flutter HTTP example application</a> demonstrates
+configuration best practices.</p>
+</div>
+<h4 id="supporting-browser-and-native">Supporting browser and native</h4>
+<p>If your application can be run in the browser and natively, you must put your
+browser and native configurations in separate files and import the correct file
+based on the platform.</p>
+<p>For example:</p>
+<pre><code class="language-dart">// -- http_client_factory.dart
+Client httpClient() {
+  if (Platform.isAndroid) {
+    return CronetClient.defaultCronetEngine();
+  }
+  if (Platform.isIOS || Platform.isMacOS) {
+    return CupertinoClient.defaultSessionConfiguration();
+  }
+  return IOClient();
+}
+</code></pre>
+<pre><code class="language-dart">// -- http_client_factory_web.dart
+Client httpClient() =&gt; FetchClient();
+</code></pre>
+<pre><code class="language-dart">// -- main.dart
+import 'http_client_factory.dart'
+    if (dart.library.js_interop) 'http_client_factory_web.dart'
+
+// The correct `httpClient` will be available.
+</code></pre>
+<h3 id="3-connect-the-http-client-to-the-code-that-uses-it" class="hash-header">3. Connect the HTTP client to the code that uses it. <a href="#3-connect-the-http-client-to-the-code-that-uses-it" class="hash-link">#</a></h3>
+<p>The best way to pass <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> to the places that use it is
+explicitly through arguments.</p>
+<p>For example:</p>
+<pre><code class="language-dart">void main() {
+  final client = httpClient();
+  fetchAlbum(client, ...);
+}
+</code></pre>
+<p>When using the Flutter SDK, you can use a one of many
+<a href="https://docs.flutter.dev/data-and-backend/state-mgmt/options" rel="ugc">state management approaches</a>.</p>
+<div class="markdown-alert markdown-alert-tip">
+<p class="markdown-alert-title">Tip</p>
+<p><a href="https://github.com/dart-lang/http/tree/master/pkgs/flutter_http_example" rel="ugc">The Flutter HTTP example application</a> demonstrates
+how to make the configured <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> available using
+<a href="https://pub.dev/packages/provider"><code>package:provider</code></a> and
+<a href="https://pub.dev/documentation/http_image_provider"><code>package:http_image_provider</code></a>.</p>
+</div>
+<p>When using the Dart SDK, you can use <a href="https://pub.dev/documentation/http/latest/http/runWithClient.html"><code>runWithClient</code></a> to
+ensure that the correct <a href="https://pub.dev/documentation/http/latest/http/Client-class.html"><code>Client</code></a> is used when explicit argument
+passing is not an option. For example, if you depend on code that uses
+top-level functions (e.g. <code>http.post</code>) or calls the
+<a href="https://pub.dev/documentation/http/latest/http/Client/Client.html"><code>Client()</code></a> constructor. When an <a href="https://dart.dev/language/concurrency#how-isolates-work">Isolate</a> is
+spawned, it does not inherit any variables from the calling Zone, so
+<code>runWithClient</code> needs to be used in each Isolate that uses <code>package:http</code>.</p>
+<p>You can ensure that only the <code>Client</code> that you have explicitly configured is
+used by defining <code>no_default_http_client=true</code> in the environment. This will
+also allow the default <code>Client</code> implementation to be removed, resulting in
+a reduced application size.</p>
+<pre><code class="language-terminal">$ flutter build appbundle --dart-define=no_default_http_client=true ...
+$ dart compile exe --define=no_default_http_client=true ...
+</code></pre>
+</section>

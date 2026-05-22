@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - `search_api_symbols` now correctly maps `kind` integers from `index.json` to their dartdoc labels. The entire `_kindToType` table is rewritten to match the ordinal positions of dartdoc's `Kind` enum, fixing enums (kind 5) being reported as `typedef`, mixins (kind 11) as `constant`, and typedefs (kind 21) falling through to a raw integer string, among other mismatches.
+- `HtmlToMarkdown` section isolation now uses `package:html` DOM queries instead of regex string-matching. `_isolateByClass` previously returned the tail of the document from the opening tag onward (a structural bug) and silently failed on elements with extra classes, single-quoted attributes, or out-of-order class tokens. Both isolation methods now return the matched element's `innerHtml`, giving correct, content-only extraction across all five pub.dev HTML extraction paths.
+- Added 10 real-world fixture tests for `HtmlToMarkdown` using live pub.dev README HTML from `http`, `provider`, `riverpod`, `dio`, `equatable`, `freezed`, `path`, `go_router`, `mocktail`, and `intl`. Each fixture validates that the full convert pipeline (isolation + Markdown conversion) produces clean output with no residual HTML tags or entities.
 
 ## [0.2.0] - 2026-05-21
 

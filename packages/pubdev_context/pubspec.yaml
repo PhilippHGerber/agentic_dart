@@ -25,6 +25,7 @@ dependencies:
   archive: ^4.0.9
   cli_config: ^0.2.0
   dart_mcp: ^0.5.1
+  html: ^0.15.0
   http: ^1.0.0
 
 dev_dependencies:

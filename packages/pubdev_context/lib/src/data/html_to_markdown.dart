@@ -5,6 +5,8 @@
 /// parameters.
 library;
 
+import 'package:html/parser.dart' show parse;
+
 /// Converts dartdoc-flavoured HTML to Markdown.
 ///
 /// The single shared rule set covers all HTML patterns produced by dartdoc and
@@ -46,28 +48,26 @@ final class HtmlToMarkdown {
     return result;
   }
 
-  /// Extracts the content between the first `<[tag]>` and `</[tag]>`.
+  /// Returns the `innerHtml` of the first element matching [tag].
   ///
-  /// Returns [html] unchanged when the tag is absent.
+  /// Returns [html] unchanged when no such element exists.
   static String _isolateByTag(String html, String tag) {
-    final openPattern = RegExp('<$tag[^>]*>', caseSensitive: false);
-    final match = openPattern.firstMatch(html);
-    if (match == null) return html;
-    final closeIdx = html.indexOf('</$tag>', match.end);
-    if (closeIdx == -1) return html.substring(match.end);
-    return html.substring(match.end, closeIdx);
+    final element = parse(html).querySelector(tag);
+    if (element == null) return html;
+    return element.innerHtml;
   }
 
-  /// Extracts content starting after the first element with [cssClass].
+  /// Returns the `innerHtml` of the first element whose class list contains
+  /// every whitespace-separated token in [cssClass].
   ///
-  /// Returns `''` when the class marker is absent.
+  /// Returns `''` when no matching element exists.
   static String _isolateByClass(String html, String cssClass) {
-    final marker = 'class="$cssClass';
-    final markerIdx = html.indexOf(marker);
-    if (markerIdx == -1) return '';
-    final tagEnd = html.indexOf('>', markerIdx);
-    if (tagEnd == -1) return '';
-    return html.substring(tagEnd + 1);
+    final required = cssClass.split(' ').where((t) => t.isNotEmpty).toSet();
+    if (required.isEmpty) return '';
+    for (final element in parse(html).querySelectorAll('*')) {
+      if (element.classes.containsAll(required)) return element.innerHtml;
+    }
+    return '';
   }
 
   static String _toMarkdown(String html) {

@@ -49,8 +49,8 @@ The Dart class that implements a tool's logic (`GetPackageHandler`, `SearchPacka
 _Avoid_: tool, handler, implementation
 
 **HtmlToMarkdown**:
-The single shared HTML-to-Markdown converter (`lib/src/data/html_to_markdown.dart`). All four pub.dev HTML extraction paths — symbol docs, changelog, full README, README excerpt — delegate here. Callers vary only the section-isolation parameters (`isolateTag`, `isolateClass`) and optional `maxChars` truncation. Tag-to-Markdown rules (headings, code blocks, definition lists, entity decoding, whitespace normalisation) are defined once.
-_Avoid_: HTML extractor, HTML parser, HTML stripper
+The single shared HTML-to-Markdown converter (`lib/src/data/html_to_markdown.dart`). All five pub.dev HTML extraction paths — symbol docs, changelog, full README, README excerpt, and package example — delegate here. Output is structured Markdown (headings, fenced code blocks, lists) optimised for LLM token efficiency and information density. Callers vary only the section-isolation parameters (`isolateTag`, `isolateClass`) and optional `maxChars` truncation. Tag-to-Markdown rules are defined once.
+_Avoid_: HTML extractor, HTML parser, HTML stripper, plain-text extractor
 
 ## Relationships
 

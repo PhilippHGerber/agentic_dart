@@ -1,0 +1,250 @@
+<section class="tab-content detail-tab-readme-content -active markdown-body"><img src="https://external-images.pub.dev/b%2F0xMTdAyrkArkdC5KyWbT23f%2BK04cH6k8XnkRU3nIA%3D/1779408000000/https%3A%2F%2Fgithub.com%2Ffelangel%2Fequatable%2Fraw%2Fmaster%2Fdoc%2Fassets%2Fequatable_logo_full.png" width="100%" alt="logo">
+<h2 align="center">
+  Simplify Equality Comparisons
+</h2>
+<p align="center">
+  <a href="https://github.com/felangel/equatable/actions" rel="ugc">
+    <img alt="Build Status" src="https://external-images.pub.dev/6I0A6ZR7eRo9dh9dgbua0Mza44xHIhGsFE1UXTQkZaI%3D/1779408000000/https%3A%2F%2Fgithub.com%2Ffelangel%2Fequatable%2Fworkflows%2Fbuild%2Fbadge.svg">
+  </a>
+  <a href="https://github.com/felangel/equatable/actions" rel="ugc">
+    <img alt="Code Coverage" src="https://external-images.pub.dev/9R2YObyE5RPVJG8zBiH61P1y6J8nGeOt51WaoIORcvc%3D/1779408000000/https%3A%2F%2Fraw.githubusercontent.com%2Ffelangel%2Fequatable%2Fmaster%2Fcoverage_badge.svg">
+  </a>
+  <a href="https://pub.dartlang.org/packages/equatable" rel="ugc">
+    <img alt="Pub Package" src="https://external-images.pub.dev/VBXAh2tJ4sqZosQxi9iMMl5%2B%2FmEtwRrf1NRBDMKqT2c%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fpub%2Fv%2Fequatable.svg">
+  </a>
+  <br>
+  <a href="https://github.com/felangel/equatable" rel="ugc">
+    <img src="https://external-images.pub.dev/jLvTHDKEFXxAgr%2BydkxDBHoMcLR2HHf%2BkM3lzWxaaLA%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fgithub%2Fstars%2Ffelangel%2Fequatable.svg%3Fstyle%3Dflat%26logo%3Dgithub%26colorB%3Ddeeppink%26label%3Dstars" alt="Star on GitHub">
+  </a>
+  <a href="https://discord.gg/Hc5KD3g" rel="ugc">
+    <img src="https://external-images.pub.dev/joxuB2hO60q3yHuop%2BeHUTtz8L1hyjp7EKY8C21Ktng%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fdiscord%2F649708778631200778.svg%3Flogo%3Ddiscord%26color%3Dblue" alt="Discord">
+  </a>
+  <a href="https://opensource.org/licenses/MIT" rel="ugc">
+    <img alt="MIT License" src="https://external-images.pub.dev/1S%2BGkfKnp%2BeXlZ9PqTmepDuVPOot0W1rFG9s%2BekcWb4%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fbadge%2FLicense-MIT-blue.svg">
+  </a>
+</p>
+<hr>
+<h2 id="overview" class="hash-header">Overview <a href="#overview" class="hash-link">#</a></h2>
+<p>Being able to compare objects in <code>Dart</code> often involves having to override the <code>==</code> operator as well as <code>hashCode</code>.</p>
+<p>Not only is it verbose and tedious, but failure to do so can lead to inefficient code which does not behave as we expect.</p>
+<p>By default, <code>==</code> returns true if two objects are the same instance.</p>
+<p>Let's say we have the following class:</p>
+<pre><code class="language-dart">class Person {
+  const Person(this.name);
+
+  final String name;
+}
+</code></pre>
+<p>We can create instances of <code>Person</code> like so:</p>
+<pre><code class="language-dart">void main() {
+  final Person bob = Person("Bob");
+}
+</code></pre>
+<p>Later if we try to compare two instances of <code>Person</code> either in our production code or in our tests we will run into a problem.</p>
+<pre><code class="language-dart">print(bob == Person("Bob")); // false
+</code></pre>
+<p>For more information about this, you can check out the official <a href="https://www.dartlang.org/guides/language/effective-dart/design#equality" rel="ugc">Dart Documentation</a>.</p>
+<p>In order to be able to compare two instances of <code>Person</code> we need to change our class to override <code>==</code> and <code>hashCode</code> like so:</p>
+<pre><code class="language-dart">class Person {
+  const Person(this.name);
+
+  final String name;
+
+  @override
+  bool operator ==(Object other) =&gt;
+    identical(this, other) ||
+    other is Person &amp;&amp;
+    runtimeType == other.runtimeType &amp;&amp;
+    name == other.name;
+
+  @override
+  int get hashCode =&gt; name.hashCode;
+}
+</code></pre>
+<p>Now if we run the following code again:</p>
+<pre><code class="language-dart">print(bob == Person("Bob")); // true
+</code></pre>
+<p>it will be able to compare different instances of <code>Person</code>.</p>
+<p>You can see how this can quickly become a hassle when dealing with complex classes. This is where <code>Equatable</code> comes in!</p>
+<h2 id="what-does-equatable-do" class="hash-header">What does Equatable do? <a href="#what-does-equatable-do" class="hash-link">#</a></h2>
+<p><code>Equatable</code> overrides <code>==</code> and <code>hashCode</code> for you so you don't have to waste your time writing lots of boilerplate code.</p>
+<p>There are other packages that will actually generate the boilerplate for you; however, you still have to run the code generation step which is not ideal.</p>
+<p>With <code>Equatable</code> there is no code generation needed and we can focus more on writing amazing applications and less on mundane tasks.</p>
+<h2 id="usage" class="hash-header">Usage <a href="#usage" class="hash-link">#</a></h2>
+<p>First, we need to do add <code>equatable</code> to the dependencies of the <code>pubspec.yaml</code></p>
+<pre><code class="language-yaml">dependencies:
+  equatable: ^2.0.0
+</code></pre>
+<p>Next, we need to install it:</p>
+<pre><code class="language-sh"># Dart
+pub get
+
+# Flutter
+flutter packages get
+</code></pre>
+<p>Lastly, we need to extend <code>Equatable</code></p>
+<pre><code class="language-dart">import 'package:equatable/equatable.dart';
+
+class Person extends Equatable {
+  const Person(this.name);
+
+  final String name;
+
+  @override
+  List&lt;Object&gt; get props =&gt; [name];
+}
+</code></pre>
+<p>When working with json:</p>
+<pre><code class="language-dart">import 'package:equatable/equatable.dart';
+
+class Person extends Equatable {
+  const Person(this.name);
+
+  final String name;
+
+  @override
+  List&lt;Object&gt; get props =&gt; [name];
+
+  factory Person.fromJson(Map&lt;String, dynamic&gt; json) {
+    return Person(json['name']);
+  }
+}
+</code></pre>
+<p>We can now compare instances of <code>Person</code> just like before without the pain of having to write all of that boilerplate.
+<strong>Note:</strong> Equatable is designed to only work with immutable objects so all member variables must be final (This is not just a feature of <code>Equatable</code> - <a href="https://dart.dev/guides/language/effective-dart/design#avoid-defining-custom-equality-for-mutable-classes">overriding a <code>hashCode</code> with a mutable value can break hash-based collections</a>).</p>
+<p>Equatable also supports <code>const</code> constructors:</p>
+<pre><code class="language-dart">import 'package:equatable/equatable.dart';
+
+class Person extends Equatable {
+  const Person(this.name);
+
+  final String name;
+
+  @override
+  List&lt;Object&gt; get props =&gt; [name];
+}
+</code></pre>
+<p>Equatable also supports nullable props:</p>
+<pre><code class="language-dart">import 'package:equatable/equatable.dart';
+
+class Person extends Equatable {
+  const Person(this.name, [this.age]);
+
+  final String name;
+  final int? age;
+
+  @override
+  List&lt;Object?&gt; get props =&gt; [name, age];
+}
+</code></pre>
+<h3 id="tostring-implementation" class="hash-header"><code>toString</code> Implementation <a href="#tostring-implementation" class="hash-link">#</a></h3>
+<p>Equatable can implement <code>toString</code> method including all the given props. If you want that behaviour for a specific <code>Equatable</code> object, just include the following:</p>
+<pre><code class="language-dart">@override
+bool get stringify =&gt; true;
+</code></pre>
+<p>For instance:</p>
+<pre><code class="language-dart">import 'package:equatable/equatable.dart';
+
+class Person extends Equatable {
+  const Person(this.name);
+
+  final String name;
+
+  @override
+  List&lt;Object&gt; get props =&gt; [name];
+
+  @override
+  bool get stringify =&gt; true;
+}
+</code></pre>
+<p>For the name <code>Bob</code>, the output will be:</p>
+<p><code>Person(Bob)</code></p>
+<p>This flag by default is false and <code>toString</code> will return just the type:</p>
+<p><code>Person</code></p>
+<h4 id="equatableconfig">EquatableConfig</h4>
+<p><code>stringify</code> can also be configured globally for all <code>Equatable</code> instances via <code>EquatableConfig</code></p>
+<pre><code class="language-dart">EquatableConfig.stringify = true;
+</code></pre>
+<p>If <code>stringify</code> is overridden for a specific <code>Equatable</code> class, then the value of <code>EquatableConfig.stringify</code> is ignored.
+In other words, the local configuration always takes precedence over the global configuration.</p>
+<p><em>Note: <code>EquatableConfig.stringify</code> defaults to <code>true</code> in debug mode and <code>false</code> in release mode.</em></p>
+<h2 id="recap" class="hash-header">Recap <a href="#recap" class="hash-link">#</a></h2>
+<h3 id="without-equatable" class="hash-header">Without Equatable <a href="#without-equatable" class="hash-link">#</a></h3>
+<pre><code class="language-dart">class Person {
+  const Person(this.name);
+
+  final String name;
+
+  @override
+  bool operator ==(Object other) =&gt;
+    identical(this, other) ||
+    other is Person &amp;&amp;
+    runtimeType == other.runtimeType &amp;&amp;
+    name == other.name;
+
+  @override
+  int get hashCode =&gt; name.hashCode;
+}
+</code></pre>
+<h3 id="with-equatable" class="hash-header">With Equatable <a href="#with-equatable" class="hash-link">#</a></h3>
+<pre><code class="language-dart">import 'package:equatable/equatable.dart';
+
+class Person extends Equatable {
+  const Person(this.name);
+
+  final String name;
+
+  @override
+  List&lt;Object&gt; get props =&gt; [name];
+}
+</code></pre>
+<h2 id="equatablemixin" class="hash-header">EquatableMixin <a href="#equatablemixin" class="hash-link">#</a></h2>
+<p>Sometimes it isn't possible to extend <code>Equatable</code> because your class already has a superclass.
+In this case, you can still get the benefits of <code>Equatable</code> by using the <code>EquatableMixin</code>.</p>
+<h3 id="usage-2" class="hash-header">Usage <a href="#usage-2" class="hash-link">#</a></h3>
+<p>Let's say we want to make an <code>EquatableDateTime</code> class, we can use <code>EquatableMixin</code> like so:</p>
+<pre><code class="language-dart">class EquatableDateTime extends DateTime with EquatableMixin {
+  EquatableDateTime(
+    int year, [
+    int month = 1,
+    int day = 1,
+    int hour = 0,
+    int minute = 0,
+    int second = 0,
+    int millisecond = 0,
+    int microsecond = 0,
+  ]) : super(year, month, day, hour, minute, second, millisecond, microsecond);
+
+  @override
+  List&lt;Object&gt; get props {
+    return [year, month, day, hour, minute, second, millisecond, microsecond];
+  }
+}
+</code></pre>
+<p>Now if we want to create a subclass of <code>EquatableDateTime</code>, we can just override <code>props</code>.</p>
+<pre><code class="language-dart">class EquatableDateTimeSubclass extends EquatableDateTime {
+  final int century;
+
+  EquatableDateTimeSubclass(
+    this.century,
+    int year,[
+    int month = 1,
+    int day = 1,
+    int hour = 0,
+    int minute = 0,
+    int second = 0,
+    int millisecond = 0,
+    int microsecond = 0,
+  ]) : super(year, month, day, hour, minute, second, millisecond, microsecond);
+
+  @override
+  List&lt;Object&gt; get props =&gt; [...super.props, century];
+}
+</code></pre>
+<h2 id="benchmarks" class="hash-header">Benchmarks <a href="#benchmarks" class="hash-link">#</a></h2>
+<p>You can see and run performance benchmarks by heading over to <a href="https://github.com/felangel/equatable/blob/master/benchmarks" rel="ugc">benchmarks</a>.</p>
+<h2 id="maintainers" class="hash-header">Maintainers <a href="#maintainers" class="hash-link">#</a></h2>
+<ul>
+<li><a href="https://github.com/felangel" rel="ugc">Felix Angelov</a></li>
+</ul>
+</section>

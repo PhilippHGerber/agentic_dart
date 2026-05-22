@@ -1,0 +1,1163 @@
+<section class="tab-content detail-tab-readme-content -active markdown-body"><p><a href="https://github.com/rrousselGit/freezed/blob/master/packages/freezed/README.md" rel="ugc">English</a> | <a href="https://github.com/rrousselGit/freezed/blob/master/resources/translations/ko_KR/README.md" rel="ugc">한국어</a> | <a href="https://github.com/rrousselGit/freezed/blob/master/resources/translations/zh_CN/README.md" rel="ugc">简体中文</a> | <a href="https://github.com/rrousselGit/freezed/blob/master/resources/translations/ja_JP/README.md" rel="ugc">日本語</a> | <a href="https://github.com/rrousselGit/freezed/blob/master/resources/translations/vi_VN/README.md" rel="ugc">Tiếng Việt</a></p>
+<p><img src="https://external-images.pub.dev/rNYsbUqSe7lvMRdkMbNcqdbhga3WBuzso4ZfHCMOqsw%3D/1779408000000/https%3A%2F%2Fgithub.com%2FrrousselGit%2Ffreezed%2Fworkflows%2FBuild%2Fbadge.svg" alt="Build">
+<a href="https://pub.dartlang.org/packages/freezed" rel="ugc"><img src="https://external-images.pub.dev/7AlwbRUqAroeiAXI91ZYZvGXSuJfqcAf2O7PcCJpwn0%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fpub%2Fv%2Ffreezed.svg" alt="pub package"></a>
+<a href="https://discord.gg/GSt793j6eT" rel="ugc"><img src="https://external-images.pub.dev/mlULMIFWjCg3Kr0lveZAvthmzRZehq1h1NEkXCbxoM0%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fdiscord%2F765557403865186374.svg%3Flogo%3Ddiscord%26color%3Dblue" alt="Discord"></a></p>
+<p><a href="https://flutter.dev/docs/development/packages-and-plugins/favorites"><img src="https://external-images.pub.dev/wBFmbX86vuzkgFNdxqaPubCf2fuZgoowLquJGShEuUk%3D/1779408000000/https%3A%2F%2Fraw.githubusercontent.com%2FrrousselGit%2Fprovider%2Fmaster%2Fresources%2Fflutter_favorite.png" width="200"></a></p>
+<p>Welcome to <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a>, yet another code generator for data classes, tagged unions, nested classes and cloning.</p>
+<h1 id="migration-to-300" class="hash-header">Migration to 3.0.0 <a href="#migration-to-300" class="hash-link">#</a></h1>
+<p>To migrate from 2.0.0 to 3.0.0, see <a href="https://github.com/rrousselGit/freezed/blob/master/packages/freezed/CHANGELOG.md#300---2025-02-25" rel="ugc">changelog</a> and our <a href="https://github.com/rrousselGit/freezed/blob/master/packages/freezed/migration_guide.md" rel="ugc">migration guide</a>.</p>
+<h1 id="motivation" class="hash-header">Motivation <a href="#motivation" class="hash-link">#</a></h1>
+<p>Dart is awesome, but defining a "model" can be tedious. You have to:</p>
+<ul>
+<li>Define a constructor + properties</li>
+<li>Override <code>toString</code>, <code>operator ==</code>, <code>hashCode</code></li>
+<li>Implement a <code>copyWith</code> method to clone the object</li>
+<li>Handle (de)serialization</li>
+</ul>
+<p>Implementing all of this can take hundreds of lines, which are error-prone
+and affect the readability of your model significantly.</p>
+<p>Freezed tries to fix that by implementing most of this for you, allowing you
+to focus on the definition of your model.</p>
+<table>
+<thead>
+<tr>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="https://external-images.pub.dev/lgCfqlzVx1o8AEfbRpQ%2FqKS3MYm6bTvQE2XSeCVV698%3D/1779408000000/https%3A%2F%2Fraw.githubusercontent.com%2FrrousselGit%2Ffreezed%2Frefs%2Fheads%2Fmaster%2Fresources%2Fbefore.png" alt="before"></td>
+<td><img src="https://external-images.pub.dev/EawkxLPNqrqECvrlRBHWT3DZcgs1jxks4vdebFpEiGU%3D/1779408000000/https%3A%2F%2Fraw.githubusercontent.com%2FrrousselGit%2Ffreezed%2Fmaster%2Fresources%2Fafter.png" alt="before"></td>
+</tr>
+</tbody>
+</table>
+<h1 id="index" class="hash-header">Index <a href="#index" class="hash-link">#</a></h1>
+<ul>
+<li><a href="#migration-to-300">Migration to 3.0.0</a></li>
+<li><a href="#motivation">Motivation</a></li>
+<li><a href="#index">Index</a></li>
+<li><a href="#how-to-use">How to use</a>
+<ul>
+<li><a href="#install">Install</a>
+<ul>
+<li><a href="#disabling-invalid_annotation_target-warning-and-warning-in-generates-files">Disabling invalid_annotation_target warning and warning in generates files</a></li>
+</ul>
+</li>
+<li><a href="#run-the-generator">Run the generator</a></li>
+<li><a href="#creating-a-model-using-freezed">Creating a Model using Freezed</a>
+<ul>
+<li><a href="#primary-constructors">Primary constructors</a>
+<ul>
+<li><a href="#adding-getters-and-methods-to-our-models">Adding getters and methods to our models</a></li>
+<li><a href="#asserts">Asserts</a></li>
+<li><a href="#default-values">Default values</a></li>
+<li><a href="#non-constant-default-values">Non-constant default values</a></li>
+<li><a href="#extending-classes">Extending classes</a></li>
+<li><a href="#defining-a-mutable-class-instead-of-an-immutable-one">Defining a mutable class instead of an immutable one</a></li>
+<li><a href="#allowing-the-mutation-of-listsmapssets">Allowing the mutation of Lists/Maps/Sets</a></li>
+</ul>
+</li>
+<li><a href="#classic-classes">Classic classes</a></li>
+</ul>
+</li>
+<li><a href="#how-copywith-works">How copyWith works</a>
+<ul>
+<li><a href="#going-further-deep-copy">Going further: Deep copy</a></li>
+</ul>
+</li>
+<li><a href="#decorators-and-comments">Decorators and comments</a></li>
+<li><a href="#fromjsontojson">FromJson/ToJson</a>
+<ul>
+<li><a href="#fromjson---classes-with-multiple-constructors">fromJSON - classes with multiple constructors</a></li>
+<li><a href="#deserializing-generic-classes">Deserializing generic classes</a></li>
+</ul>
+</li>
+<li><a href="#union-types">Union types</a>
+<ul>
+<li><a href="#shared-properties">Shared properties</a></li>
+<li><a href="#using-pattern-matching-to-read-non-shared-properties">Using pattern matching to read non-shared properties</a></li>
+<li><a href="#mixins-and-interfaces-for-individual-classes-for-union-types">Mixins and Interfaces for individual classes for union types</a></li>
+<li><a href="#ejecting-an-individual-union-case">Ejecting an individual union case</a>
+<ul>
+<li><a href="#legacy-pattern-matching-utilities">(Legacy) Pattern matching utilities</a>
+<ul>
+<li><a href="#when">When</a></li>
+<li><a href="#map">Map</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a href="#configurations">Configurations</a>
+<ul>
+<li><a href="#changing-the-behavior-for-a-specific-model">Changing the behavior for a specific model</a></li>
+<li><a href="#changing-the-behavior-for-the-entire-project">Changing the behavior for the entire project</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a href="#utilities">Utilities</a>
+<ul>
+<li><a href="#ide-extensions">IDE Extensions</a>
+<ul>
+<li><a href="#freezed-extension-for-vscode">Freezed extension for VSCode</a></li>
+<li><a href="#freezed-extension-for-intellijandroid-studio">Freezed extension for IntelliJ/Android Studio</a></li>
+</ul>
+</li>
+<li><a href="#linting">Linting</a></li>
+<li><a href="#third-party-tools">Third-party tools</a>
+<ul>
+<li><a href="#dartj">DartJ</a></li>
+</ul>
+</li>
+<li><a href="#sponsors">Sponsors</a></li>
+</ul>
+</li>
+</ul>
+<h1 id="how-to-use" class="hash-header">How to use <a href="#how-to-use" class="hash-link">#</a></h1>
+<h2 id="install" class="hash-header">Install <a href="#install" class="hash-link">#</a></h2>
+<p>To use <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a>, you will need your typical <a href="https://pub.dev/packages/build_runner">build_runner</a>/code-generator setup.<br>
+First, install <a href="https://pub.dev/packages/build_runner">build_runner</a> and <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> by adding them to your <code>pubspec.yaml</code> file:</p>
+<p>For a Flutter project:</p>
+<pre><code class="language-console">flutter pub add \
+  dev:build_runner \
+  freezed_annotation \
+  dev:freezed
+# if using freezed to generate fromJson/toJson, also add:
+flutter pub add json_annotation dev:json_serializable
+</code></pre>
+<p>For a Dart project:</p>
+<pre><code class="language-console">dart pub add \
+  dev:build_runner \
+  freezed_annotation \
+  dev:freezed
+# if using freezed to generate fromJson/toJson, also add:
+dart pub add json_annotation dev:json_serializable
+</code></pre>
+<p>This installs three packages:</p>
+<ul>
+<li><a href="https://pub.dev/packages/build_runner">build_runner</a>, the tool to run code-generators</li>
+<li><a href="https://pub.dartlang.org/packages/freezed" rel="ugc">freezed</a>, the code generator</li>
+<li><a href="https://pub.dev/packages/freezed_annotation">freezed_annotation</a>, a package containing annotations for <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">freezed</a>.</li>
+</ul>
+<h3 id="disabling-invalid_annotation_target-warning-and-warning-in-generates-files" class="hash-header">Disabling invalid_annotation_target warning and warning in generates files <a href="#disabling-invalid_annotation_target-warning-and-warning-in-generates-files" class="hash-link">#</a></h3>
+<p>If you plan on using <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> in combination with <code>json_serializable</code>, recent
+versions of <code>json_serializable</code> and <code>meta</code> may require you to disable the
+<code>invalid_annotation_target</code> warning.</p>
+<p>To do that, you can add the following to the <code>analysis_options.yaml</code> file
+at the root of your project:</p>
+<pre><code class="language-yaml">analyzer:
+  errors:
+    invalid_annotation_target: ignore
+</code></pre>
+<h2 id="run-the-generator" class="hash-header">Run the generator <a href="#run-the-generator" class="hash-link">#</a></h2>
+<p>To run the code generator, execute the following command:</p>
+<pre><code>dart run build_runner watch -d
+</code></pre>
+<p>Note that like most code-generators, <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> will need you to both import the annotation (<a href="https://pub.dartlang.org/packages/freezed_annotation" rel="ugc">freezed_annotation</a>)
+and use the <code>part</code> keyword on the top of your files.</p>
+<p>As such, a file that wants to use <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> will start with:</p>
+<pre><code class="language-dart">import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'my_file.freezed.dart';
+
+</code></pre>
+<p><strong>CONSIDER</strong> also importing <code>package:flutter/foundation.dart</code>.<br>
+The reason being, importing <code>foundation.dart</code> also imports classes to make an
+object nicely readable in Flutter's devtool.<br>
+If you import <code>foundation.dart</code>, <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> will automatically do it for you.</p>
+<h2 id="creating-a-model-using-freezed" class="hash-header">Creating a Model using Freezed <a href="#creating-a-model-using-freezed" class="hash-link">#</a></h2>
+<p>Freezed offers two ways of creating data-classes:</p>
+<ul>
+<li><a href="#primary-constructors">Primary constructors</a> ; where you define a constructor and Freezed generates the associated fields.
+This is simulating the <a href="https://github.com/dart-lang/language/issues/2364" rel="ugc">Primary Constructor</a> using <code>factory</code>.</li>
+<li><a href="#classic-classes">Classic classes</a>, where you write a normal Dart class and Freezed only handles <code>toString/==/copyWith</code></li>
+</ul>
+<h3 id="primary-constructors" class="hash-header">Primary constructors <a href="#primary-constructors" class="hash-link">#</a></h3>
+<p>Freezed implements Primary Constructors by relying on <code>factory</code> constructors.
+The idea is, you define a <code>factory</code> and Freezed generates everything else:</p>
+<pre><code class="language-dart">import 'package:freezed_annotation/freezed_annotation.dart';
+
+// required: associates our `main.dart` with the code generated by Freezed
+part 'main.freezed.dart';
+// optional: Since our Person class is serializable, we must add this line.
+// But if Person was not serializable, we could skip it.
+part 'main.g.dart';
+
+@freezed
+abstract class Person with _$Person {
+  const factory Person({
+    required String firstName,
+    required String lastName,
+    required int age,
+  }) = _Person;
+
+  factory Person.fromJson(Map&lt;String, Object?&gt; json) =&gt; _$PersonFromJson(json);
+}
+</code></pre>
+<p>The following snippet defines a model named <code>Person</code>:</p>
+<ul>
+<li><code>Person</code> has 3 properties: <code>firstName</code>, <code>lastName</code> and <code>age</code></li>
+<li>Because we are using <code>@freezed</code>, all of this class's properties are immutable.</li>
+<li>Since we defined a <code>fromJson</code>, this class is de/serializable.
+Freezed will add a <code>toJson</code> method for us.</li>
+<li>Freezed will also automatically generate:
+<ul>
+<li>a <code>copyWith</code> method, for cloning the object with different properties</li>
+<li>a <code>toString</code> override listing all the properties of the object</li>
+<li>an <code>operator ==</code> and <code>hashCode</code> override (since <code>Person</code> is immutable)</li>
+</ul>
+</li>
+</ul>
+<p>From this example, we can notice a few things:</p>
+<ul>
+<li>
+<p>It is necessary to annotate our model with <code>@freezed</code> (or <code>@Freezed</code>/<code>@unfreezed</code>, more about that later).<br>
+This annotation is what tells Freezed to generate code for that class.</p>
+</li>
+<li>
+<p>We must also apply a mixin with the name of our class, prefixed by <code>_$</code>.
+This mixin is what defines the various properties/methods of our object.</p>
+</li>
+<li>
+<p>When defining a constructor in a Freezed class, we should use the <code>factory</code> keyword
+as showcased (<code>const</code> is optional).<br>
+The parameters of this constructor will be the list of all properties that this class contains.<br>
+Parameters <strong>don't</strong> have to be named and required. Feel free to use
+positional optional parameters if you want!</p>
+</li>
+</ul>
+<h4 id="adding-getters-and-methods-to-our-models">Adding getters and methods to our models</h4>
+<p>Sometimes, you may want to manually define methods/properties in our classes.<br>
+But you will quickly notice that if you try to use primary constructors:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  const factory Person(String name, {int? age}) = _Person;
+
+  void method() {
+    print('hello world');
+  }
+}
+</code></pre>
+<p>then it will fail with the error <code>The non-abstract class _$_Person is missing implementations for these members:</code>.</p>
+<p>For that to work, we need to define a private empty constructor. That will enable the generated code to <em>extend/subclass</em> our class, instead of <em>implementing</em> it (which is the default, and only inherits type, and not properties or methods):</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  // Added constructor. Must not have any parameter
+  const Person._();
+
+  const factory Person(String name, {int? age}) = _Person;
+
+  void method() {
+    print('hello world');
+  }
+}
+</code></pre>
+<h4 id="asserts">Asserts</h4>
+<p>Dart does not allow adding <code>assert(...)</code> statements to a <code>factory</code> constructor.<br>
+As such, to add asserts to your Freezed classes, you will need the <code>@Assert</code> decorator:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  @Assert('name.isNotEmpty', 'name cannot be empty')
+  const factory Person({required String name, int? age}) = _Person;
+}
+</code></pre>
+<p>Alternatively, you can specify a <code>MyClass._()</code> constructor:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  Person._({required this.name})
+    : assert(name.isNotEmpty, 'name cannot be empty');
+
+  factory Person({required String name, int? age}) = _Person;
+
+  @override
+  final String name;
+}
+</code></pre>
+<h4 id="default-values">Default values</h4>
+<p>Similarly to asserts, Dart does not allow "redirecting factory constructors"
+to specify default values.</p>
+<p>As such, if you want to specify default values for your properties,
+you will need the <code>@Default</code> annotation:</p>
+<pre><code class="language-dart">@freezed
+abstract class Example with _$Example {
+  const factory Example([@Default(42) int value]) = _Example;
+}
+</code></pre>
+<p><strong>NOTE</strong>:<br>
+If you are using serialization/deserialization, this will automatically add
+a <code>@JsonKey(defaultValue: &lt;something&gt;)</code> for you.</p>
+<h4 id="non-constant-default-values">Non-constant default values</h4>
+<p>If using <code>@Default</code> is not enough, you have two options:</p>
+<ul>
+<li>Either stop using primary constructors. See <a href="#classic-classes">Classic Classes</a></li>
+<li>Add a <code>MyClass._()</code> constructor to initialize said value</li>
+</ul>
+<p>The latter is particularly helpful when writing large models, as this doesn't require writing a lot of code just for one default values.</p>
+<p>One example would be the following:</p>
+<pre><code class="language-dart">@freezed
+sealed class Response&lt;T&gt; with _$Response&lt;T&gt; {
+  // We give "time" parameters a non-constant default
+  Response._({DateTime? time}) : time = time ?? DateTime.now();
+  // Constructors may enable passing parameters to ._();
+  factory Response.data(T value, {DateTime? time}) = ResponseData;
+  // If ._ parameters are named and optional, factory constructors are not required to specify it
+  factory Response.error(Object error) = ResponseError;
+
+  @override
+  final DateTime time;
+}
+</code></pre>
+<p>In this example, the field <code>time</code> is defaulting to <code>DateTime.now()</code>.</p>
+<h4 id="extending-classes">Extending classes</h4>
+<p>You may want to have your Freezed class extend another class.
+Unfortunately, <code>factory</code> does not allow specifying <code>super(...)</code>.</p>
+<p>As such, one workaround is to specify the <code>MyClass._()</code> again, similarly
+to how we used it for non-constant default values. Here's an example:</p>
+<pre><code class="language-dart">class Subclass {
+  const Subclass.name(this.value);
+
+  final int value;
+}
+
+@freezed
+abstract class MyFreezedClass extends Subclass with _$MyFreezedClass {
+  // We can receive parameters in this constructor, which we can use with `super.field`
+  const MyFreezedClass._(super.value) : super.name();
+
+  const factory MyFreezedClass(int value, /* other fields */) = _MyFreezedClass;
+}
+</code></pre>
+<p>This syntax gives full control over inheritance.<br>
+Of course, you can also opt-out of <code>factory</code> constructors and write normal classes.
+See <a href="#classic-classes">Classic Classes</a>.</p>
+<p>In general, this workaround makes more sense for <a href="#union-types">Unions</a>, where
+we have more than one <code>factory</code> constructor.</p>
+<h4 id="defining-a-mutable-class-instead-of-an-immutable-one">Defining a mutable class instead of an immutable one</h4>
+<p>So far, we've seen how to define a model where all of its properties are <code>final</code>;
+but you may want to define mutable properties in your model.</p>
+<p>Freezed supports this, by replacing the <code>@freezed</code> annotation with <code>@unfreezed</code>:</p>
+<pre><code class="language-dart">@unfreezed
+abstract class Person with _$Person {
+  factory Person({
+    required String firstName,
+    required String lastName,
+    required final int age,
+  }) = _Person;
+
+  factory Person.fromJson(Map&lt;String, Object?&gt; json) =&gt; _$PersonFromJson(json);
+}
+</code></pre>
+<p>This defines a model mostly identical to our previous snippets, but with the following
+differences:</p>
+<ul>
+<li>
+<p><code>firstName</code> and <code>lastName</code> are now mutable. As such, we can write:</p>
+<pre><code class="language-dart">void main() {
+  var person = Person(firstName: 'John', lastName: 'Smith', age: 42);
+
+  person.firstName = 'Mona';
+  person.lastName = 'Lisa';
+}
+</code></pre>
+</li>
+<li>
+<p><code>age</code> is still immutable, because we explicitly marked the property as <code>final</code>.</p>
+</li>
+<li>
+<p><code>Person</code> no-longer has a custom ==/hashCode implementation:</p>
+<pre><code class="language-dart">void main() {
+  var john = Person(firstName: 'John', lastName: 'Smith', age: 42);
+  var john2 = Person(firstName: 'John', lastName: 'Smith', age: 42);
+
+  print(john == john2); // false
+}
+</code></pre>
+</li>
+<li>
+<p>Of course, since our <code>Person</code> class is mutable, it is no-longer possible
+to instantiate it using <code>const</code>.</p>
+</li>
+</ul>
+<h4 id="allowing-the-mutation-of-listsmapssets">Allowing the mutation of Lists/Maps/Sets</h4>
+<p>By default when using <code>@freezed</code> (but not <code>@unfreezed</code>), properties of type <code>List</code>/<code>Map</code>/<code>Set</code>
+are transformed to be immutable.</p>
+<p>This means that writing the following will cause a runtime exception:</p>
+<pre><code class="language-dart">@freezed
+abstract class Example with _$Example {
+  factory Example(List&lt;int&gt; list) = _Example;
+}
+
+void main() {
+  var example = Example([]);
+  example.list.add(42); // throws because we are mutating a collection
+}
+</code></pre>
+<p>That behavior can be disabled by writing:</p>
+<pre><code class="language-dart">@Freezed(makeCollectionsUnmodifiable: false)
+abstract class Example with _$Example {
+  factory Example(List&lt;int&gt; list) = _Example;
+}
+
+void main() {
+  var example = Example([]);
+  example.list.add(42); // OK
+}
+</code></pre>
+<h3 id="classic-classes" class="hash-header">Classic classes <a href="#classic-classes" class="hash-link">#</a></h3>
+<p>Instead of primary constructors, you can write normal Dart classes.</p>
+<p>In this scenario, write a typical constructor + fields combo as you normally would:</p>
+<pre><code class="language-dart">import 'package:freezed_annotation/freezed_annotation.dart';
+
+// required: associates our `main.dart` with the code generated by Freezed
+part 'main.freezed.dart';
+// optional: Since our Person class is serializable, we must add this line.
+// But if Person was not serializable, we could skip it.
+part 'main.g.dart';
+
+@freezed
+@JsonSerializable()
+class Person with _$Person {
+  const Person({
+    required this.firstName,
+    required this.lastName,
+    required this.age,
+  });
+
+  @override
+  final String firstName;
+  @override
+  final String lastName;
+  @override
+  final int age;
+
+  factory Person.fromJson(Map&lt;String, Object?&gt; json)
+      =&gt; _$PersonFromJson(json);
+
+  Map&lt;String, Object?&gt; toJson() =&gt; _$PersonToJson(this);
+}
+</code></pre>
+<p>In this scenario, Freezed will generate <code>copyWith</code>/<code>toString</code>/<code>==</code>/<code>hashCode</code>,
+but won't do anything related to JSON encoding (hence why you need to manually add <code>@JsonSerializable</code>).</p>
+<p>This syntax has the benefit of enabling advanced constructor logic, such as
+inheritance or non-constant default values.</p>
+<h2 id="how-copywith-works" class="hash-header">How copyWith works <a href="#how-copywith-works" class="hash-link">#</a></h2>
+<p>As explained before, when defining a model using Freezed, then the code-generator
+will automatically generate a <code>copyWith</code> method for us.<br>
+This method is used to clone an object with different values.</p>
+<p>For example if we define:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  factory Person(String name, int? age) = _Person;
+}
+</code></pre>
+<p>Then we could write:</p>
+<pre><code class="language-dart">void main() {
+  var person = Person('Remi', 24);
+
+  // `age` not passed, its value is preserved
+  print(person.copyWith(name: 'Dash')); // Person(name: Dash, age: 24)
+  // `age` is set to `null`
+  print(person.copyWith(age: null)); // Person(name: Remi, age: null)
+}
+</code></pre>
+<p>Notice Freezed supports <code>person.copyWith(age: null)</code>.</p>
+<h3 id="going-further-deep-copy" class="hash-header">Going further: Deep copy <a href="#going-further-deep-copy" class="hash-link">#</a></h3>
+<p>While <code>copyWith</code> is very powerful in itself, it becomes inconvenient on more complex objects.</p>
+<p>Consider the following classes:</p>
+<pre><code class="language-dart">@freezed
+abstract class Company with _$Company {
+  const factory Company({String? name, required Director director}) = _Company;
+}
+
+@freezed
+abstract class Director with _$Director {
+  const factory Director({String? name, Assistant? assistant}) = _Director;
+}
+
+@freezed
+abstract class Assistant with _$Assistant {
+  const factory Assistant({String? name, int? age}) = _Assistant;
+}
+</code></pre>
+<p>Then, from a reference on <code>Company</code>, we may want to perform changes on <code>Assistant</code>.<br>
+For example, to change the <code>name</code> of an assistant, using <code>copyWith</code> we would have to write:</p>
+<pre><code class="language-dart">Company company;
+
+Company newCompany = company.copyWith(
+  director: company.director.copyWith(
+    assistant: company.director.assistant.copyWith(
+      name: 'John Smith',
+    ),
+  ),
+);
+</code></pre>
+<p>This <em>works</em>, but is relatively verbose with a lot of duplicates.<br>
+This is where we could use <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a>'s "deep copy".</p>
+<p>If a Freezed model contains properties that are also Freezed models, then
+the code-generator will offer an alternate syntax to the previous example:</p>
+<pre><code class="language-dart">Company company;
+
+Company newCompany = company.copyWith.director.assistant(name: 'John Smith');
+</code></pre>
+<p>This snippet will achieve strictly the same result as the previous snippet
+(creating a new company with an updated assistant name), but no longer has duplicates.</p>
+<p>Going deeper in this syntax, if instead, we wanted to change the director's name
+then we could write:</p>
+<pre><code class="language-dart">Company company;
+Company newCompany = company.copyWith.director(name: 'John Doe');
+</code></pre>
+<p>Overall, based on the definitions of <code>Company</code>/<code>Director</code>/<code>Assistant</code> mentioned above,
+all the following "copy" syntaxes will work:</p>
+<pre><code class="language-dart">Company company;
+
+company = company.copyWith(name: 'Google', director: Director(...));
+company = company.copyWith.director(name: 'Larry', assistant: Assistant(...));
+</code></pre>
+<p><strong>Null consideration</strong></p>
+<p>Some objects may also be <code>null</code>. For example, using our <code>Company</code> class,
+then <code>Director</code>'s <code>assistant</code> may be <code>null</code>.</p>
+<p>As such, writing:</p>
+<pre><code class="language-dart">Company company = Company(name: 'Google', director: Director(assistant: null));
+Company newCompany = company.copyWith.director.assistant(name: 'John');
+</code></pre>
+<p>doesn't make sense.<br>
+We can't change the assistant's name if there is no assistant to begin with.</p>
+<p>In that situation, <code>company.copyWith.director.assistant</code> will return <code>null</code>,
+causing our code to fail to compile.</p>
+<p>To fix it, we can use the <code>?.call</code> operator and write:</p>
+<pre><code class="language-dart">Company? newCompany = company.copyWith.director.assistant?.call(name: 'John');
+</code></pre>
+<h2 id="decorators-and-comments" class="hash-header">Decorators and comments <a href="#decorators-and-comments" class="hash-link">#</a></h2>
+<p><a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> supports property and class level decorators/documentation by
+decorating/documenting their respective parameter and constructor definition.</p>
+<p>Consider:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  const factory Person({
+    String? name,
+    int? age,
+    Gender? gender,
+  }) = _Person;
+}
+</code></pre>
+<p>If you want to document <code>name</code>, you can do:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  const factory Person({
+    /// The name of the user.
+    ///
+    /// Must not be null
+    String? name,
+    int? age,
+    Gender? gender,
+  }) = _Person;
+}
+</code></pre>
+<p>If you want to mark the property <code>gender</code> as <code>@deprecated</code>, then you can do:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  const factory Person({
+    String? name,
+    int? age,
+    @deprecated Gender? gender,
+  }) = _Person;
+}
+</code></pre>
+<p>This will deprecate both:</p>
+<ul>
+<li>The constructor
+<pre><code class="language-dart">Person(gender: Gender.something); // gender is deprecated
+</code></pre>
+</li>
+<li>The generated class's constructor:
+<pre><code class="language-dart">_Person(gender: Gender.something); // gender is deprecated
+</code></pre>
+</li>
+<li>the property:
+<pre><code class="language-dart">Person person;
+print(person.gender); // gender is deprecated
+</code></pre>
+</li>
+<li>the <code>copyWith</code> parameter:
+<pre><code class="language-dart">Person person;
+person.copyWith(gender: Gender.something); // gender is deprecated
+</code></pre>
+</li>
+</ul>
+<p>Similarly, if you want to decorate the generated class you can decorate the
+defining factory constructor.</p>
+<p>As such, to deprecate <code>_Person</code>, you could do:</p>
+<pre><code class="language-dart">@freezed
+abstract class Person with _$Person {
+  @deprecated
+  const factory Person({
+    String? name,
+    int? age,
+    Gender? gender,
+  }) = _Person;
+}
+</code></pre>
+<h2 id="fromjsontojson" class="hash-header">FromJson/ToJson <a href="#fromjsontojson" class="hash-link">#</a></h2>
+<p>While <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> will not generate your typical <code>fromJson</code>/<code>toJson</code> by itself, it knows
+what <a href="https://pub.dev/packages/json_serializable">json_serializable</a> is.</p>
+<p>Making a class compatible with <a href="https://pub.dev/packages/json_serializable">json_serializable</a> is very straightforward.</p>
+<p>Consider this snippet:</p>
+<pre><code class="language-dart">import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'model.freezed.dart';
+
+@freezed
+sealed class Model with _$Model {
+  factory Model.first(String a) = First;
+  factory Model.second(int b, bool c) = Second;
+}
+</code></pre>
+<p>The changes necessary to make it compatible with <a href="https://pub.dev/packages/json_serializable">json_serializable</a> consists of two lines:</p>
+<ul>
+<li>a new <code>part</code>: <code>part 'model.g.dart';</code></li>
+<li>a new constructor on the targeted class: <code>factory Model.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$ModelFromJson(json);</code></li>
+</ul>
+<p>The end result is:</p>
+<pre><code class="language-dart">import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'model.freezed.dart';
+part 'model.g.dart';
+
+@freezed
+sealed class Model with _$Model {
+  factory Model.first(String a) = First;
+  factory Model.second(int b, bool c) = Second;
+
+  factory Model.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$ModelFromJson(json);
+}
+</code></pre>
+<p>Don't forget to add <code>json_serializable</code> to your <code>pubspec.yaml</code> file:</p>
+<pre><code class="language-yaml">dev_dependencies:
+  json_serializable:
+</code></pre>
+<p>That's it!<br>
+With these changes, <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> will automatically ask <a href="https://pub.dev/packages/json_serializable">json_serializable</a> to generate all the necessary
+<code>fromJson</code>/<code>toJson</code>.</p>
+<p><strong>Note</strong>:<br>
+Freezed will only generate a fromJson if the factory is using <code>=&gt;</code>.</p>
+<h3 id="fromjson---classes-with-multiple-constructors" class="hash-header">fromJSON - classes with multiple constructors <a href="#fromjson---classes-with-multiple-constructors" class="hash-link">#</a></h3>
+<p>For classes with multiple constructors, <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> will check the JSON response
+for a string element called <code>runtimeType</code> and choose the constructor to use based
+on its value. For example, given the following constructors:</p>
+<pre><code class="language-dart">@freezed
+sealed class MyResponse with _$MyResponse {
+  const factory MyResponse(String a) = MyResponseData;
+  const factory MyResponse.special(String a, int b) = MyResponseSpecial;
+  const factory MyResponse.error(String message) = MyResponseError;
+
+  factory MyResponse.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$MyResponseFromJson(json);
+}
+</code></pre>
+<p>Then <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> will use each JSON object's <code>runtimeType</code> to choose the constructor as follows:</p>
+<pre><code class="language-json">[
+  {
+    "runtimeType": "default",
+    "a": "This JSON object will use constructor MyResponse()"
+  },
+  {
+    "runtimeType": "special",
+    "a": "This JSON object will use constructor MyResponse.special()",
+    "b": 42
+  },
+  {
+    "runtimeType": "error",
+    "message": "This JSON object will use constructor MyResponse.error()"
+  }
+]
+</code></pre>
+<p>You can customize key and value with something different
+using <code>@Freezed</code> and <code>@FreezedUnionValue</code> decorators:</p>
+<pre><code class="language-dart">@Freezed(unionKey: 'type', unionValueCase: FreezedUnionCase.pascal)
+sealed class MyResponse with _$MyResponse {
+  const factory MyResponse(String a) = MyResponseData;
+
+  @FreezedUnionValue('SpecialCase')
+  const factory MyResponse.special(String a, int b) = MyResponseSpecial;
+
+  const factory MyResponse.error(String message) = MyResponseError;
+
+  factory MyResponse.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+      _$MyResponseFromJson(json);
+}
+</code></pre>
+<p>which would update the previous json to:</p>
+<pre><code class="language-json">[
+  {
+    "type": "Default",
+    "a": "This JSON object will use constructor MyResponse()"
+  },
+  {
+    "type": "SpecialCase",
+    "a": "This JSON object will use constructor MyResponse.special()",
+    "b": 42
+  },
+  {
+    "type": "Error",
+    "message": "This JSON object will use constructor MyResponse.error()"
+  }
+]
+</code></pre>
+<p>If you want to customize key and value for all the classes, you can specify it inside your
+<code>build.yaml</code> file, for example:</p>
+<pre><code class="language-yaml">targets:
+  $default:
+    builders:
+      freezed:
+        options:
+          union_key: type
+          union_value_case: pascal
+</code></pre>
+<p>If you don't control the JSON response, then you can implement a custom converter.
+Your custom converter will need to implement its own logic for determining which
+constructor to use.</p>
+<pre><code class="language-dart">class MyResponseConverter implements JsonConverter&lt;MyResponse, Map&lt;String, dynamic&gt;&gt; {
+  const MyResponseConverter();
+
+  @override
+  MyResponse fromJson(Map&lt;String, dynamic&gt; json) {
+    // type data was already set (e.g. because we serialized it ourselves)
+    if (json['runtimeType'] != null) {
+      return MyResponse.fromJson(json);
+    }
+    // you need to find some condition to know which type it is. e.g. check the presence of some field in the json
+    if (isTypeData) {
+      return MyResponseData.fromJson(json);
+    } else if (isTypeSpecial) {
+      return MyResponseSpecial.fromJson(json);
+    } else if (isTypeError) {
+      return MyResponseError.fromJson(json);
+    } else {
+      throw Exception('Could not determine the constructor for mapping from JSON');
+    }
+ }
+
+  @override
+  Map&lt;String, dynamic&gt; toJson(MyResponse data) =&gt; data.toJson();
+}
+</code></pre>
+<p>To then apply your custom converter pass the decorator to a constructor parameter.</p>
+<pre><code class="language-dart">@freezed
+abstract class MyModel with _$MyModel {
+  const factory MyModel(@MyResponseConverter() MyResponse myResponse) = MyModelData;
+
+  factory MyModel.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$MyModelFromJson(json);
+}
+</code></pre>
+<p>By doing this, json serializable will use <code>MyResponseConverter.fromJson()</code> and <code>MyResponseConverter.toJson()</code> to convert <code>MyResponse</code>.</p>
+<p>You can also use a custom converter on a constructor parameter contained in a <code>List</code>.</p>
+<pre><code class="language-dart">@freezed
+abstract class MyModel with _$MyModel {
+  const factory MyModel(@MyResponseConverter() List&lt;MyResponse&gt; myResponse) = MyModelData;
+
+  factory MyModel.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$MyModelFromJson(json);
+}
+</code></pre>
+<p><strong>Note</strong>:<br>
+In order to serialize nested lists of freezed objects, you are supposed to either
+specify a <code>@JsonSerializable(explicitToJson: true)</code> or change <code>explicit_to_json</code>
+inside your <code>build.yaml</code> file (<a href="https://github.com/google/json_serializable.dart/tree/master/json_serializable#build-configuration" rel="ugc">see the documentation</a>).</p>
+<h3 id="deserializing-generic-classes" class="hash-header">Deserializing generic classes <a href="#deserializing-generic-classes" class="hash-link">#</a></h3>
+<p>In order to de/serialize generic typed freezed objects, you can enable <code>genericArgumentFactories</code>.<br>
+All you need to do is to change the signature of the <code>fromJson</code> method and add <code>genericArgumentFactories: true</code> to the freezed configuration.</p>
+<pre><code class="language-dart">@Freezed(genericArgumentFactories: true)
+sealed class ApiResponse&lt;T&gt; with _$ApiResponse&lt;T&gt; {
+  const factory ApiResponse.data(T data) = ApiResponseData;
+  const factory ApiResponse.error(String message) = ApiResponseError;
+
+  factory ApiResponse.fromJson(Map&lt;String, dynamic&gt; json, T Function(Object?) fromJsonT) =&gt; _$ApiResponseFromJson(json, fromJsonT);
+}
+</code></pre>
+<p>Alternatively, you can enable <code>genericArgumentFactories</code> for the whole project by modifying your <code>build.yaml</code> file to include the following:</p>
+<pre><code class="language-yaml">targets:
+  $default:
+    builders:
+      freezed:
+        options:
+          generic_argument_factories: true
+</code></pre>
+<p><strong>What about <code>@JsonKey</code> annotation?</strong></p>
+<p>All decorators passed to a constructor parameter are "copy-pasted" to the generated
+property too.<br>
+As such, you can write:</p>
+<pre><code class="language-dart">@freezed
+abstract class Example with _$Example {
+  factory Example(@JsonKey(name: 'my_property') String myProperty) = _Example;
+
+  factory Example.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$ExampleFromJson(json);
+}
+</code></pre>
+<p><strong>What about <code>@JsonSerializable</code> annotation?</strong></p>
+<p>You can pass <code>@JsonSerializable</code> annotation by placing it over constructor e.g.:</p>
+<pre><code class="language-dart">@freezed
+abstract class Example with _$Example {
+  @JsonSerializable(explicitToJson: true)
+  factory Example(@JsonKey(name: 'my_property') SomeOtherClass myProperty) = _Example;
+
+  factory Example.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$ExampleFromJson(json);
+}
+</code></pre>
+<p>If you want to define some custom json_serializable flags for all the classes (e.g. <code>explicit_to_json</code> or <code>any_map</code>) you can do it via <code>build.yaml</code> file as described <a href="https://pub.dev/packages/json_serializable#build-configuration">here</a>.</p>
+<p>See also the <a href="#decorators-and-comments">decorators</a> section</p>
+<h2 id="union-types" class="hash-header">Union types <a href="#union-types" class="hash-link">#</a></h2>
+<p>Coming from other languages, you may be used to features like "union types," "sealed classes," and pattern matching.</p>
+<p>These are powerful tools in combination with a type system, but it isn't particularly ergonomic to use them in Dart.</p>
+<p>But fear not, <a href="https://pub.dartlang.org/packages/freezed" rel="ugc">Freezed</a> supports them, generating a few utilities to help you!</p>
+<p>Long story short, in any Freezed class, you can write multiple constructors:</p>
+<pre><code class="language-dart">@freezed
+sealed class Union with _$Union {
+  const factory Union.data(int value) = Data;
+  const factory Union.loading() = Loading;
+  const factory Union.error([String? message]) = Error;
+}
+</code></pre>
+<p>By doing this, our model now can be in different mutually exclusive states.</p>
+<p>In particular, this snippet defines a model <code>Union</code>, and that model has 3 possible states:</p>
+<ul>
+<li>data</li>
+<li>loading</li>
+<li>error</li>
+</ul>
+<p>Note how we gave meaningful names to the right hand of the factory constructors we defined.
+They will come in handy later.</p>
+<p>One thing you may also notice is that with this example, we can no longer write code such as:</p>
+<pre><code class="language-dart">void main() {
+  Union union = Union.data(42);
+
+  print(union.value); // compilation error: property value does not exist
+}
+</code></pre>
+<p>We'll see why in the following section.</p>
+<h3 id="shared-properties" class="hash-header">Shared properties <a href="#shared-properties" class="hash-link">#</a></h3>
+<p>When defining multiple constructors, you will lose the ability to read properties that are not common to all constructors:</p>
+<p>For example, if you write:</p>
+<pre><code class="language-dart">@freezed
+sealed class Example with _$Example {
+  const factory Example.person(String name, int age) = Person;
+  const factory Example.city(String name, int population) = City;
+}
+</code></pre>
+<p>Then you will be unable to read <code>age</code> and <code>population</code> directly:</p>
+<pre><code class="language-dart">var example = Example.person('Remi', 24);
+print(example.age); // does not compile!
+</code></pre>
+<p>On the other hand, you <strong>can</strong> read properties that are defined on all constructors.
+For example, the <code>name</code> variable is common to both <code>Example.person</code> and <code>Example.city</code> constructors.</p>
+<p>As such we can write:</p>
+<pre><code class="language-dart">var example = Example.person('Remi', 24);
+print(example.name); // Remi
+example = Example.city('London', 8900000);
+print(example.name); // London
+</code></pre>
+<p>The same logic can be applied to <code>copyWith</code> too.<br>
+We can use <code>copyWith</code> with properties defined on all constructors:</p>
+<pre><code class="language-dart">var example = Example.person('Remi', 24);
+print(example.copyWith(name: 'Dash')); // Example.person(name: Dash, age: 24)
+
+example = Example.city('London', 8900000);
+print(example.copyWith(name: 'Paris')); // Example.city(name: Paris, population: 8900000)
+</code></pre>
+<p>On the other hand, properties that are unique to a specific constructor aren't available:</p>
+<pre><code class="language-dart">var example = Example.person('Remi', 24);
+
+example.copyWith(age: 42); // compilation error, parameter `age` does not exist
+</code></pre>
+<p>To solve this problem, we need check the state of our object using what we call "pattern matching".</p>
+<h3 id="using-pattern-matching-to-read-non-shared-properties" class="hash-header">Using pattern matching to read non-shared properties <a href="#using-pattern-matching-to-read-non-shared-properties" class="hash-link">#</a></h3>
+<p>For this section, let's consider the following union:</p>
+<pre><code class="language-dart">@freezed
+sealed class Example with _$Example {
+  const factory Example.person(String name, int age) = Person;
+  const factory Example.city(String name, int population) = City;
+}
+</code></pre>
+<p>Let's see how we can use pattern matching to read the content of an <code>Example</code> instance.</p>
+<p>For this, you should use Dart’s built-in pattern matching using <code>switch</code>:</p>
+<pre><code class="language-dart">switch (example) {
+  Person(:final name) =&gt; print('Person $name'),
+  City(:final population) =&gt; print('City ($population)'),
+}
+</code></pre>
+<p>Alternatively, you could use an <code>if</code>-<code>case</code> statement:</p>
+<pre><code class="language-dart">if (example case Person(:final name)) {
+  print('Person $name');
+} else if (example case City(:final population)) {
+  print('City ($population)');
+}
+</code></pre>
+<p>You could also use <code>is</code>/<code>as</code> to cast an <code>Example</code> variable into either a <code>Person</code> or a <code>City</code>, but this is heavily discouraged. Use one of the other two options.</p>
+<h3 id="mixins-and-interfaces-for-individual-classes-for-union-types" class="hash-header">Mixins and Interfaces for individual classes for union types <a href="#mixins-and-interfaces-for-individual-classes-for-union-types" class="hash-link">#</a></h3>
+<p>When you have multiple types in the same class you might want one of those
+types to implement an interface or mixin a class. You can do that using the
+<code>@Implements</code> or <code>@With</code> decorators respectively. In the following example
+<code>City</code> implements <code>GeographicArea</code>.</p>
+<pre><code class="language-dart">abstract class GeographicArea {
+  int get population;
+  String get name;
+}
+
+@freezed
+sealed class Example with _$Example {
+  const factory Example.person(String name, int age) = Person;
+
+  @Implements&lt;GeographicArea&gt;()
+  const factory Example.city(String name, int population) = City;
+}
+</code></pre>
+<p>This also works for implementing or mixing in generic classes e.g.
+<code>AdministrativeArea&lt;House&gt;</code> except when the class has a generic type parameter
+e.g. <code>AdministrativeArea&lt;T&gt;</code>. In this case freezed will generate correct code
+but dart will throw a load error on the annotation declaration when compiling.
+To avoid this you should use the <code>@Implements.fromString</code> and
+<code>@With.fromString</code> decorators as follows:</p>
+<pre><code class="language-dart">abstract class GeographicArea {}
+abstract class House {}
+abstract class Shop {}
+abstract class AdministrativeArea&lt;T&gt; {}
+
+@freezed
+sealed class Example&lt;T&gt; with _$Example&lt;T&gt; {
+  const factory Example.person(String name, int age) = Person&lt;T&gt;;
+
+  @With.fromString('AdministrativeArea&lt;T&gt;')
+  const factory Example.street(String name) = Street&lt;T&gt;;
+
+  @With&lt;House&gt;()
+  @Implements&lt;Shop&gt;()
+  @Implements&lt;GeographicArea&gt;()
+  @Implements.fromString('AdministrativeArea&lt;T&gt;')
+  const factory Example.city(String name, int population) = City&lt;T&gt;;
+}
+</code></pre>
+<p><strong>Note</strong>: You need to make sure that you comply with the interface
+requirements by implementing all the abstract members. If the interface
+has no members or just fields, you can fulfill the interface contract by
+adding them to the union type's constructor. Keep in mind that if
+the interface defines a method or a getter, that you implement in the
+class, you need to use the
+<a href="#adding-getters-and-methods-to-our-models">Adding getters and methods to our models</a> instructions.</p>
+<p><strong>Note 2</strong>: You cannot use <code>@With</code>/<code>@Implements</code> with freezed classes.
+Freezed classes can neither be extended nor implemented.</p>
+<h3 id="ejecting-an-individual-union-case" class="hash-header">Ejecting an individual union case <a href="#ejecting-an-individual-union-case" class="hash-link">#</a></h3>
+<p>To have fine-grained control over your models, Freezed offer the ability to manually write a subclass of a union.</p>
+<p>Consider:</p>
+<pre><code class="language-dart">@freezed
+sealed class Result&lt;T&gt; with _$Result {
+  factory Result.data(T data) = ResultData;
+  factory Result.error(Object error) = ResultError;
+}
+</code></pre>
+<p>Now, let's say we wanted to write <code>ResultData</code> ourselves. For that, simply
+define a <code>ResultData</code> class in the same file:</p>
+<pre><code class="language-dart">@freezed
+sealed class Result&lt;T&gt; with _$Result {
+  factory Result.data(T data) = ResultData;
+  factory Result.error(Object error) = ResultError;
+}
+
+class ResultData&lt;T&gt; implements Result&lt;T&gt; {
+  // TODO: implement Result&lt;T&gt;
+}
+</code></pre>
+<p>Note that the extracted class can be a Freezed class too!</p>
+<pre><code class="language-dart">@freezed
+sealed class Result&lt;T&gt; with _$Result&lt;T&gt; {
+  const Result._();
+  const factory Result.data(T data) = ResultData;
+  const factory Result.error(Object error) = ResultError;
+}
+
+// TODO maybe add some methods unique to ResultData
+@freezed
+abstract class ResultData&lt;T&gt; extends Result&lt;T&gt; with _$ResultData&lt;T&gt; {
+  const factory ResultData(T data) = _ResultData;
+  const ResultData._() : super._();
+}
+</code></pre>
+<h4 id="legacy-pattern-matching-utilities">(Legacy) Pattern matching utilities</h4>
+<div class="markdown-alert markdown-alert-warning">
+<p class="markdown-alert-title">Warning</p>
+<p>As of Dart 3, Dart now has built-in pattern-matching using sealed classes.
+As such, you no-longer need to rely on Freezed's generated methods for pattern matching.
+Instead of using <code>when</code>/<code>map</code>, use the official Dart syntax.</p>
+<p>The references to <code>when</code>/<code>map</code> are kept for users who have yet to
+migrate to Dart 3.
+But in the long term, you should stop relying on them and migrate to <code>switch</code> expressions.</p>
+</div>
+<h5 id="when">When</h5>
+<p>The [when] method is the equivalent to pattern matching with destructuring.<br>
+The prototype of the method depends on the constructors defined.</p>
+<p>For example, with:</p>
+<pre><code class="language-dart">@freezed
+sealed class Union with _$Union {
+  const factory Union(int value) = Data;
+  const factory Union.loading() = Loading;
+  const factory Union.error([String? message]) = ErrorDetails;
+}
+</code></pre>
+<p>Then [when] will be:</p>
+<pre><code class="language-dart">var union = Union(42);
+
+print(
+  union.when(
+    (int value) =&gt; 'Data $value',
+    loading: () =&gt; 'loading',
+    error: (String? message) =&gt; 'Error: $message',
+  ),
+); // Data 42
+</code></pre>
+<p>Whereas if we defined:</p>
+<pre><code class="language-dart">@freezed
+sealed class Model with _$Model {
+  factory Model.first(String a) = First;
+  factory Model.second(int b, bool c) = Second;
+}
+</code></pre>
+<p>Then [when] will be:</p>
+<pre><code class="language-dart">var model = Model.first('42');
+
+print(
+  model.when(
+    first: (String a) =&gt; 'first $a',
+    second: (int b, bool c) =&gt; 'second $b $c'
+  ),
+); // first 42
+</code></pre>
+<p>Notice how each callback matches with a constructor's name and prototype.</p>
+<h5 id="map">Map</h5>
+<p>The [map] methods are equivalent to [when], but <strong>without</strong> destructuring.</p>
+<p>Consider this class:</p>
+<pre><code class="language-dart">@freezed
+sealed class Model with _$Model {
+  factory Model.first(String a) = First;
+  factory Model.second(int b, bool c) = Second;
+}
+</code></pre>
+<p>With such class, while [when] will be:</p>
+<pre><code class="language-dart">var model = Model.first('42');
+
+print(
+  model.when(
+    first: (String a) =&gt; 'first $a',
+    second: (int b, bool c) =&gt; 'second $b $c'
+  ),
+); // first 42
+</code></pre>
+<p>[map] will instead be:</p>
+<pre><code class="language-dart">var model = Model.first('42');
+
+print(
+  model.map(
+    first: (First value) =&gt; 'first ${value.a}',
+    second: (Second value) =&gt; 'second ${value.b} ${value.c}'
+  ),
+); // first 42
+</code></pre>
+<p>This can be useful if you want to do complex operations, like [copyWith]/<code>toString</code> for example:</p>
+<pre><code class="language-dart">var model = Model.second(42, false)
+print(
+  model.map(
+    first: (value) =&gt; value,
+    second: (value) =&gt; value.copyWith(c: true),
+  )
+); // Model.second(b: 42, c: true)
+</code></pre>
+<h2 id="configurations" class="hash-header">Configurations <a href="#configurations" class="hash-link">#</a></h2>
+<p>Freezed offers various options to customize the generated code. To do so, there are two possibilities:</p>
+<h3 id="changing-the-behavior-for-a-specific-model" class="hash-header">Changing the behavior for a specific model <a href="#changing-the-behavior-for-a-specific-model" class="hash-link">#</a></h3>
+<p>If you want to customize the generated code for only one specific class,
+you can do so by using a different annotation:</p>
+<pre><code class="language-dart">@Freezed()
+abstract class Person with _$Person {
+  factory Person(String name, int age) = _Person;
+}
+</code></pre>
+<p>By doing so, you can now pass various parameters to <code>@Freezed</code> to change the output:</p>
+<pre><code class="language-dart">@Freezed(
+  // Disable the generation of copyWith/==
+  copyWith: false,
+  equal: false,
+)
+ abstract class Person with _$Person {...}
+</code></pre>
+<p>To view all the possibilities, see the documentation of <code>@Freezed</code>: <a href="https://pub.dev/documentation/freezed_annotation/latest/freezed_annotation/Freezed-class.html">https://pub.dev/documentation/freezed_annotation/latest/freezed_annotation/Freezed-class.html</a></p>
+<h3 id="changing-the-behavior-for-the-entire-project" class="hash-header">Changing the behavior for the entire project <a href="#changing-the-behavior-for-the-entire-project" class="hash-link">#</a></h3>
+<p>Instead of applying your modification to a single class, you may want to apply it to
+all Freezed models at the same time.</p>
+<p>You can do so by customizing a file called <code>build.yaml</code><br>
+This file is an optional configuration file that should be placed next to your <code>pubspec.yaml</code>:</p>
+<pre><code>my_project_folder/
+  pubspec.yaml
+  build.yaml
+  lib/
+</code></pre>
+<p>There, you will be able to change the same options as the options found in <code>@Freezed</code> (see above)
+by writing:</p>
+<pre><code class="language-yaml">targets:
+  $default:
+    builders:
+      freezed:
+        options:
+          # Tells Freezed to format .freezed.dart files.
+          # This can significantly slow down code-generation.
+          # Disabling formatting will only work when opting into Dart 3.7 as a minimum
+          # in your project SDK constraints.
+          format: true
+          # Disable the generation of copyWith/== for the entire project
+          copy_with: false
+          equal: false
+</code></pre>
+<h1 id="utilities" class="hash-header">Utilities <a href="#utilities" class="hash-link">#</a></h1>
+<h2 id="ide-extensions" class="hash-header">IDE Extensions <a href="#ide-extensions" class="hash-link">#</a></h2>
+<h3 id="freezed-extension-for-vscode" class="hash-header">Freezed extension for VSCode <a href="#freezed-extension-for-vscode" class="hash-link">#</a></h3>
+<p>The <a href="https://marketplace.visualstudio.com/items?itemName=blaxou.freezed" rel="ugc">Freezed</a> extension might help you work faster with freezed. For example :</p>
+<ul>
+<li>Use <kbd>Ctrl+Shift+B</kbd> (<kbd>Cmd+Shift+B</kbd> on Mac) to quickly build using <code>build_runner</code>.</li>
+<li>Quickly generate a Freezed class by using <kbd>Ctrl+Shift+P</kbd> (<kbd>Cmd+Shift+P</kbd> on Mac)&gt; <code>Generate Freezed class</code>.</li>
+</ul>
+<h3 id="freezed-extension-for-intellijandroid-studio" class="hash-header">Freezed extension for IntelliJ/Android Studio <a href="#freezed-extension-for-intellijandroid-studio" class="hash-link">#</a></h3>
+<p>You can get Live Templates for boiler plate code <a href="https://github.com/Tinhorn/freezed_intellij_live_templates" rel="ugc">here</a>.</p>
+<p>Example:</p>
+<ul>
+<li>type <strong>freezedClass</strong> and press <kbd>Tab</kbd> to generate a freezed class
+<pre><code class="language-dart">@freezed
+class Demo with _$Demo {
+}
+</code></pre>
+</li>
+<li>type <strong>freezedFromJson</strong> and press <kbd>Tab</kbd> to generate the fromJson method for json_serializable
+<pre><code class="language-dart">factory Demo.fromJson(Map&lt;String, dynamic&gt; json) =&gt; _$DemoFromJson(json);
+</code></pre>
+</li>
+</ul>
+<h2 id="linting" class="hash-header">Linting <a href="#linting" class="hash-link">#</a></h2>
+<p>You can add <code>freezed</code> specific linting rules that provide helpful utilities and catch common mistakes when creating <code>freezed</code> classes.</p>
+<p>Add <a href="https://pub.dev/packages/custom_lint"><code>custom_lint</code></a> and <code>freezed_lint</code> to your <code>pubspec.yaml</code>:</p>
+<pre><code class="language-console">dart pub add dev:custom_lint
+dart pub add dev:freezed_lint
+</code></pre>
+<p>Also add <code>custom_lint</code> to your <code>analysis_options.yaml</code>:</p>
+<pre><code class="language-yaml">analyzer:
+  plugins:
+    - custom_lint
+</code></pre>
+<h2 id="third-party-tools" class="hash-header">Third-party tools <a href="#third-party-tools" class="hash-link">#</a></h2>
+<p>This part contains community-made tools which integrate with Freezed.</p>
+<h3 id="dartj" class="hash-header">DartJ <a href="#dartj" class="hash-link">#</a></h3>
+<p><a href="https://dartj.web.app/#/" rel="ugc">DartJ</a> is Flutter application, made by <a href="https://github.com/ttpho" rel="ugc"><strong>@ttpho</strong></a>, which will generate the Freezed classes from a JSON payload.</p>
+<p>Example:</p>
+<p><a href="https://github.com/ttpho/ttpho/assets/3994863/5d529258-c02c-4066-925e-ca2ffc68a804" rel="ugc">https://github.com/ttpho/ttpho/assets/3994863/5d529258-c02c-4066-925e-ca2ffc68a804</a></p>
+<h2 id="sponsors" class="hash-header">Sponsors <a href="#sponsors" class="hash-link">#</a></h2>
+<p align="center">
+  <a href="https://raw.githubusercontent.com/rrousselGit/freezed/master/sponsorkit/sponsors.svg" rel="ugc">
+    <img src="https://external-images.pub.dev/qrWq98w%2FEJ9MIULfEuFH98ldKHdMaDs8Fe3G84XkRbQ%3D/1779408000000/https%3A%2F%2Fraw.githubusercontent.com%2FrrousselGit%2Ffreezed%2Fmaster%2Fsponsorkit%2Fsponsors.svg">
+  </a>
+</p>
+</section>

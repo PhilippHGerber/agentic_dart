@@ -1,0 +1,819 @@
+<section class="tab-content detail-tab-readme-content -active markdown-body"><h1 id="dio" class="hash-header">dio <a href="#dio" class="hash-link">#</a></h1>
+<p><a href="https://pub.dev/packages/dio"><img src="https://external-images.pub.dev/sKB3hKvU31qLSB6KydmBSyIbI9Ds%2FnLKojT0l%2ByJeHQ%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fpub%2Fv%2Fdio.svg" alt="Pub"></a>
+<a href="https://pub.dev/packages/dio"><img src="https://external-images.pub.dev/QD%2BGQTTzubtjBgq3wdZHvRRaZL82CvcDHCakv3I%2FpXM%3D/1779408000000/https%3A%2F%2Fimg.shields.io%2Fpub%2Fv%2Fdio.svg%3Flabel%3Ddev%26include_prereleases" alt="Dev"></a></p>
+<p>Language: English | <a href="https://github.com/cfug/dio/blob/main/dio/README-ZH.md" rel="ugc">简体中文</a></p>
+<p>A powerful HTTP networking package for Dart/Flutter,
+supports Global configuration, Interceptors, FormData,
+Request cancellation, File uploading/downloading,
+Timeout, Custom adapters, Transformers, etc.</p>
+<blockquote>
+<p>Don't forget to add <a href="https://pub.dev/packages?q=topic%3Adio">#dio</a>
+topic to your published dio related packages!
+See more: <a href="https://dart.dev/tools/pub/pubspec#topics">https://dart.dev/tools/pub/pubspec#topics</a></p>
+</blockquote>
+<details>
+  <summary>Table of content</summary>
+<!-- TOC -->
+<ul>
+<li><a href="#dio">dio</a>
+<ul>
+<li><a href="#get-started">Get started</a>
+<ul>
+<li><a href="#install">Install</a></li>
+<li><a href="#super-simple-to-use">Super simple to use</a></li>
+</ul>
+</li>
+<li><a href="#awesome-dio">Awesome dio</a>
+<ul>
+<li><a href="#plugins">Plugins</a></li>
+</ul>
+</li>
+<li><a href="#examples">Examples</a>
+<ul>
+<li><a href="#performing-a-get-request">Performing a <code>GET</code> request</a></li>
+<li><a href="#performing-a-post-request">Performing a <code>POST</code> request</a></li>
+<li><a href="#performing-multiple-concurrent-requests">Performing multiple concurrent requests</a></li>
+<li><a href="#downloading-a-file">Downloading a file</a></li>
+<li><a href="#get-response-stream">Get response stream</a></li>
+<li><a href="#get-response-with-bytes">Get response with bytes</a></li>
+<li><a href="#sending-a-formdata">Sending a <code>FormData</code></a></li>
+<li><a href="#uploading-multiple-files-to-server-by-formdata">Uploading multiple files to server by FormData</a></li>
+<li><a href="#listening-the-uploading-progress">Listening the uploading progress</a></li>
+<li><a href="#post-binary-data-with-stream">Post binary data with Stream</a></li>
+</ul>
+</li>
+<li><a href="#dio-apis">Dio APIs</a>
+<ul>
+<li><a href="#creating-an-instance-and-set-default-configs">Creating an instance and set default configs</a></li>
+<li><a href="#request-options">Request Options</a></li>
+<li><a href="#response">Response</a></li>
+<li><a href="#interceptors">Interceptors</a>
+<ul>
+<li><a href="#resolve-and-reject-the-request">Resolve and reject the request</a></li>
+<li><a href="#queuedinterceptor">QueuedInterceptor</a>
+<ul>
+<li><a href="#example">Example</a></li>
+</ul>
+</li>
+<li><a href="#loginterceptor">LogInterceptor</a></li>
+<li><a href="#dart">Dart</a></li>
+<li><a href="#flutter">Flutter</a></li>
+<li><a href="#custom-interceptor">Custom Interceptor</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a href="#handling-errors">Handling Errors</a>
+<ul>
+<li><a href="#dioexception">DioException</a></li>
+<li><a href="#dioexceptiontype">DioExceptionType</a></li>
+</ul>
+</li>
+<li><a href="#using-applicationx-www-form-urlencoded-format">Using application/x-www-form-urlencoded format</a></li>
+<li><a href="#sending-formdata">Sending FormData</a>
+<ul>
+<li><a href="#multiple-files-upload">Multiple files upload</a></li>
+<li><a href="#reuse-formdatas-and-multipartfiles">Reuse <code>FormData</code>s and <code>MultipartFile</code>s</a></li>
+</ul>
+</li>
+<li><a href="#transformer">Transformer</a>
+<ul>
+<li><a href="#transformer-example">Transformer example</a></li>
+</ul>
+</li>
+<li><a href="#httpclientadapter">HttpClientAdapter</a>
+<ul>
+<li><a href="#using-proxy">Using proxy</a></li>
+<li><a href="#https-certificate-verification">HTTPS certificate verification</a></li>
+</ul>
+</li>
+<li><a href="#http2-support">HTTP/2 support</a></li>
+<li><a href="#cancellation">Cancellation</a></li>
+<li><a href="#extends-dio-class">Extends Dio class</a></li>
+<li><a href="#cross-origin-resource-sharing-on-web-cors">Cross-Origin Resource Sharing on Web (CORS)</a></li>
+</ul>
+</li>
+</ul>
+<!-- TOC -->
+</details>
+<h2 id="get-started" class="hash-header">Get started <a href="#get-started" class="hash-link">#</a></h2>
+<h3 id="install" class="hash-header">Install <a href="#install" class="hash-link">#</a></h3>
+<p>Add the <code>dio</code> package to your
+<a href="https://pub.dev/packages/dio/install">pubspec dependencies</a>.</p>
+<p><strong>Before you upgrade: Breaking changes might happen in major and minor versions of packages.<br>
+See the <a href="https://pub.dev/documentation/dio/latest/topics/Migration%20Guide-topic.html">Migration Guide</a> for the complete breaking changes list.</strong></p>
+<h3 id="super-simple-to-use" class="hash-header">Super simple to use <a href="#super-simple-to-use" class="hash-link">#</a></h3>
+<pre><code class="language-dart">import 'package:dio/dio.dart';
+
+final dio = Dio();
+
+void getHttp() async {
+  final response = await dio.get('https://dart.dev');
+  print(response);
+}
+</code></pre>
+<h2 id="awesome-dio" class="hash-header">Awesome dio <a href="#awesome-dio" class="hash-link">#</a></h2>
+<p>🎉 A curated list of awesome things related to dio.</p>
+<h3 id="plugins" class="hash-header">Plugins <a href="#plugins" class="hash-link">#</a></h3>
+<p><a href="https://pub.dev/documentation/dio/latest/topics/Plugins-topic.html">Plugins</a></p>
+<p>Welcome to submit third-party plugins and related libraries
+in <a href="https://github.com/cfug/dio/issues/347" rel="ugc">here</a>.</p>
+<h2 id="examples" class="hash-header">Examples <a href="#examples" class="hash-link">#</a></h2>
+<h3 id="performing-a-get-request" class="hash-header">Performing a <code>GET</code> request <a href="#performing-a-get-request" class="hash-link">#</a></h3>
+<pre><code class="language-dart">import 'package:dio/dio.dart';
+
+final dio = Dio();
+
+void request() async {
+  Response response;
+  response = await dio.get('/test?id=12&amp;name=dio');
+  print(response.data.toString());
+  // The below request is the same as above.
+  response = await dio.get(
+    '/test',
+    queryParameters: {'id': 12, 'name': 'dio'},
+  );
+  print(response.data.toString());
+}
+</code></pre>
+<h3 id="performing-a-post-request" class="hash-header">Performing a <code>POST</code> request <a href="#performing-a-post-request" class="hash-link">#</a></h3>
+<pre><code class="language-dart">response = await dio.post('/test', data: {'id': 12, 'name': 'dio'});
+</code></pre>
+<h3 id="performing-multiple-concurrent-requests" class="hash-header">Performing multiple concurrent requests <a href="#performing-multiple-concurrent-requests" class="hash-link">#</a></h3>
+<pre><code class="language-dart">List&lt;Response&gt; responses = await Future.wait([dio.post('/info'), dio.get('/token')]);
+</code></pre>
+<h3 id="downloading-a-file" class="hash-header">Downloading a file <a href="#downloading-a-file" class="hash-link">#</a></h3>
+<pre><code class="language-dart">response = await dio.download(
+  'https://pub.dev/',
+  (await getTemporaryDirectory()).path + 'pub.html',
+);
+</code></pre>
+<h3 id="get-response-stream" class="hash-header">Get response stream <a href="#get-response-stream" class="hash-link">#</a></h3>
+<pre><code class="language-dart">final rs = await dio.get(
+  url,
+  options: Options(responseType: ResponseType.stream), // Set the response type to `stream`.
+);
+print(rs.data.stream); // Response stream.
+</code></pre>
+<h3 id="get-response-with-bytes" class="hash-header">Get response with bytes <a href="#get-response-with-bytes" class="hash-link">#</a></h3>
+<pre><code class="language-dart">final rs = await Dio().get&lt;List&lt;int&gt;&gt;(
+  url,
+  options: Options(responseType: ResponseType.bytes), // Set the response type to `bytes`.
+);
+print(rs.data); // Type: List&lt;int&gt;.
+</code></pre>
+<h3 id="sending-a-formdata" class="hash-header">Sending a <code>FormData</code> <a href="#sending-a-formdata" class="hash-link">#</a></h3>
+<pre><code class="language-dart">final formData = FormData.fromMap({
+  'name': 'dio',
+  'date': DateTime.now().toIso8601String(),
+});
+final response = await dio.post('/info', data: formData);
+</code></pre>
+<h3 id="uploading-multiple-files-to-server-by-formdata" class="hash-header">Uploading multiple files to server by FormData <a href="#uploading-multiple-files-to-server-by-formdata" class="hash-link">#</a></h3>
+<pre><code class="language-dart">final formData = FormData.fromMap({
+  'name': 'dio',
+  'date': DateTime.now().toIso8601String(),
+  'file': await MultipartFile.fromFile('./text.txt', filename: 'upload.txt'),
+  'files': [
+    await MultipartFile.fromFile('./text1.txt', filename: 'text1.txt'),
+    await MultipartFile.fromFile('./text2.txt', filename: 'text2.txt'),
+  ]
+});
+final response = await dio.post('/info', data: formData);
+</code></pre>
+<h3 id="listening-the-uploading-progress" class="hash-header">Listening the uploading progress <a href="#listening-the-uploading-progress" class="hash-link">#</a></h3>
+<pre><code class="language-dart">final response = await dio.post(
+  'https://www.dtworkroom.com/doris/1/2.0.0/test',
+  data: {'aa': 'bb' * 22},
+  onSendProgress: (int sent, int total) {
+    print('$sent $total');
+  },
+);
+</code></pre>
+<h3 id="post-binary-data-with-stream" class="hash-header">Post binary data with Stream <a href="#post-binary-data-with-stream" class="hash-link">#</a></h3>
+<pre><code class="language-dart">// Binary data
+final postData = &lt;int&gt;[0, 1, 2];
+await dio.post(
+  url,
+  data: Stream.fromIterable(postData.map((e) =&gt; [e])), // Creates a Stream&lt;List&lt;int&gt;&gt;.
+  options: Options(
+    headers: {
+      Headers.contentLengthHeader: postData.length, // Set the content-length.
+    },
+  ),
+);
+</code></pre>
+<p>Note: <code>content-length</code> must be set if you want to subscribe to the sending progress.</p>
+<p>See all examples code <a href="https://github.com/cfug/dio/blob/main/dio/example" rel="ugc">here</a>.</p>
+<h2 id="dio-apis" class="hash-header">Dio APIs <a href="#dio-apis" class="hash-link">#</a></h2>
+<h3 id="creating-an-instance-and-set-default-configs" class="hash-header">Creating an instance and set default configs <a href="#creating-an-instance-and-set-default-configs" class="hash-link">#</a></h3>
+<blockquote>
+<p>It is recommended to use a singleton of <code>Dio</code> in projects, which can manage configurations like headers, base urls,
+and timeouts consistently.
+Here is an <a href="https://github.com/cfug/dio/blob/main/example_flutter_app" rel="ugc">example</a> that use a singleton in Flutter.</p>
+</blockquote>
+<p>You can create instance of Dio with an optional <code>BaseOptions</code> object:</p>
+<pre><code class="language-dart">final dio = Dio(); // With default `Options`.
+
+void configureDio() {
+  // Set default configs
+  dio.options.baseUrl = 'https://api.pub.dev';
+  dio.options.connectTimeout = Duration(seconds: 5);
+  dio.options.receiveTimeout = Duration(seconds: 3);
+
+  // Or create `Dio` with a `BaseOptions` instance.
+  final options = BaseOptions(
+    baseUrl: 'https://api.pub.dev',
+    connectTimeout: Duration(seconds: 5),
+    receiveTimeout: Duration(seconds: 3),
+  );
+  final anotherDio = Dio(options);
+
+  // Or clone the existing `Dio` instance with all fields.
+  final clonedDio = dio.clone();
+}
+</code></pre>
+<p>The core API in Dio instance is:</p>
+<pre><code class="language-dart">Future&lt;Response&lt;T&gt;&gt; request&lt;T&gt;(
+  String path, {
+  Object? data,
+  Map&lt;String, dynamic&gt;? queryParameters,
+  CancelToken? cancelToken,
+  Options? options,
+  ProgressCallback? onSendProgress,
+  ProgressCallback? onReceiveProgress,
+});
+</code></pre>
+<pre><code class="language-dart">final response = await dio.request(
+  '/test',
+  data: {'id': 12, 'name': 'dio'},
+  options: Options(method: 'GET'),
+);
+</code></pre>
+<h3 id="request-options" class="hash-header">Request Options <a href="#request-options" class="hash-link">#</a></h3>
+<p>There are two request options concepts in the Dio library:
+<code>BaseOptions</code> and <code>Options</code>.
+The <code>BaseOptions</code> include a set of base settings for each <code>Dio()</code>,
+and the <code>Options</code> describes the configuration for a single request.
+These options will be merged when making requests.
+The <code>Options</code> declaration is as follows:</p>
+<pre><code class="language-dart">/// The HTTP request method.
+String method;
+
+/// Timeout when sending data.
+///
+/// Throws the [DioException] with
+/// [DioExceptionType.sendTimeout] type when timed out.
+///
+/// `null` or `Duration.zero` means no timeout limit.
+Duration? sendTimeout;
+
+/// Timeout when receiving data.
+///
+/// The timeout represents:
+///  - a timeout before the connection is established
+///    and the first received response bytes.
+///  - the duration during data transfer of each byte event,
+///    rather than the total duration of the receiving.
+///
+/// Throws the [DioException] with
+/// [DioExceptionType.receiveTimeout] type when timed out.
+///
+/// `null` or `Duration.zero` means no timeout limit.
+Duration? receiveTimeout;
+
+/// Custom field that you can retrieve it later in [Interceptor],
+/// [Transformer] and the [Response.requestOptions] object.
+Map&lt;String, dynamic&gt;? extra;
+
+/// HTTP request headers.
+///
+/// The keys of the header are case-insensitive,
+/// e.g.: `content-type` and `Content-Type` will be treated as the same key.
+Map&lt;String, dynamic&gt;? headers;
+
+/// Whether the case of header keys should be preserved.
+///
+/// Defaults to false.
+///
+/// This option WILL NOT take effect on these circumstances:
+/// - XHR ([HttpRequest]) does not support handling this explicitly.
+/// - The HTTP/2 standard only supports lowercase header keys.
+bool? preserveHeaderCase;
+
+/// The type of data that [Dio] handles with options.
+///
+/// The default value is [ResponseType.json].
+/// [Dio] will parse response string to JSON object automatically
+/// when the content-type of response is [Headers.jsonContentType].
+///
+/// See also:
+///  - `plain` if you want to receive the data as `String`.
+///  - `bytes` if you want to receive the data as the complete bytes.
+///  - `stream` if you want to receive the data as streamed binary bytes.
+ResponseType? responseType;
+
+/// The request content-type.
+///
+/// The default `content-type` for requests will be implied by the
+/// [ImplyContentTypeInterceptor] according to the type of the request payload.
+/// The interceptor can be removed by
+/// [Interceptors.removeImplyContentTypeInterceptor].
+String? contentType;
+
+/// Defines whether the request is considered to be successful
+/// with the given status code.
+/// The request will be treated as succeed if the callback returns true.
+ValidateStatus? validateStatus;
+
+/// Whether to retrieve the data if status code indicates a failed request.
+///
+/// Defaults to true.
+bool? receiveDataWhenStatusError;
+
+/// See [HttpClientRequest.followRedirects].
+///
+/// Defaults to true.
+bool? followRedirects;
+
+/// The maximum number of redirects when [followRedirects] is `true`.
+/// [RedirectException] will be thrown if redirects exceeded the limit.
+///
+/// Defaults to 5.
+int? maxRedirects;
+
+/// See [HttpClientRequest.persistentConnection].
+///
+/// Defaults to true.
+bool? persistentConnection;
+
+/// The default request encoder is [Utf8Encoder], you can set custom
+/// encoder by this option.
+RequestEncoder? requestEncoder;
+
+/// The default response decoder is [Utf8Decoder], you can set custom
+/// decoder by this option, it will be used in [Transformer].
+ResponseDecoder? responseDecoder;
+
+/// Indicates the format of collection data in request query parameters and
+/// `x-www-url-encoded` body data.
+///
+/// Defaults to [ListFormat.multi].
+ListFormat? listFormat;
+</code></pre>
+<p>There is a complete example <a href="https://github.com/cfug/dio/blob/main/example_dart/lib/options.dart" rel="ugc">here</a>.</p>
+<h3 id="response" class="hash-header">Response <a href="#response" class="hash-link">#</a></h3>
+<p>The response for a request contains the following information.</p>
+<pre><code class="language-dart">/// Response body. may have been transformed, please refer to [ResponseType].
+T? data;
+
+/// The corresponding request info.
+RequestOptions requestOptions;
+
+/// HTTP status code.
+int? statusCode;
+
+/// Returns the reason phrase associated with the status code.
+/// The reason phrase must be set before the body is written
+/// to. Setting the reason phrase after writing to the body.
+String? statusMessage;
+
+/// Whether this response is a redirect.
+/// ** Attention **: Whether this field is available depends on whether the
+/// implementation of the adapter supports it or not.
+bool isRedirect;
+
+/// The series of redirects this connection has been through. The list will be
+/// empty if no redirects were followed. [redirects] will be updated both
+/// in the case of an automatic and a manual redirect.
+///
+/// ** Attention **: Whether this field is available depends on whether the
+/// implementation of the adapter supports it or not.
+List&lt;RedirectRecord&gt; redirects;
+
+/// Custom fields that only for the [Response].
+Map&lt;String, dynamic&gt; extra;
+
+/// Response headers.
+Headers headers;
+</code></pre>
+<p>When request is succeed, you will receive the response as follows:</p>
+<pre><code class="language-dart">final response = await dio.get('https://pub.dev');
+print(response.data);
+print(response.headers);
+print(response.requestOptions);
+print(response.statusCode);
+</code></pre>
+<p>Be aware, the <code>Response.extra</code> is different from <code>RequestOptions.extra</code>,
+they are not related to each other.</p>
+<h3 id="interceptors" class="hash-header">Interceptors <a href="#interceptors" class="hash-link">#</a></h3>
+<p>For each dio instance, we can add one or more interceptors,
+by which we can intercept requests, responses, and errors
+before they are handled by <code>then</code> or <code>catchError</code>.</p>
+<pre><code class="language-dart">dio.interceptors.add(
+  InterceptorsWrapper(
+    onRequest: (RequestOptions options, RequestInterceptorHandler handler) {
+      // Do something before request is sent.
+      // If you want to resolve the request with custom data,
+      // you can resolve a `Response` using `handler.resolve(response)`.
+      // If you want to reject the request with a error message,
+      // you can reject with a `DioException` using `handler.reject(dioError)`.
+      return handler.next(options);
+    },
+    onResponse: (Response response, ResponseInterceptorHandler handler) {
+      // Do something with response data.
+      // If you want to reject the request with a error message,
+      // you can reject a `DioException` object using `handler.reject(dioError)`.
+      return handler.next(response);
+    },
+    onError: (DioException error, ErrorInterceptorHandler handler) {
+      // Do something with response error.
+      // If you want to resolve the request with some custom data,
+      // you can resolve a `Response` object using `handler.resolve(response)`.
+      return handler.next(error);
+    },
+  ),
+);
+</code></pre>
+<p>Simple interceptor example:</p>
+<pre><code class="language-dart">import 'package:dio/dio.dart';
+class CustomInterceptors extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    print('REQUEST[${options.method}] =&gt; PATH: ${options.path}');
+    super.onRequest(options, handler);
+  }
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    print('RESPONSE[${response.statusCode}] =&gt; PATH: ${response.requestOptions.path}');
+    super.onResponse(response, handler);
+  }
+
+  @override
+  Future onError(DioException err, ErrorInterceptorHandler handler) async {
+    print('ERROR[${err.response?.statusCode}] =&gt; PATH: ${err.requestOptions.path}');
+    super.onError(err, handler);
+  }
+}
+</code></pre>
+<h4 id="resolve-and-reject-the-request">Resolve and reject the request</h4>
+<p>In all interceptors, you can interfere with their execution flow.
+If you want to resolve the request/response with some custom data,
+you can call <code>handler.resolve(Response)</code>.
+If you want to reject the request/response with a error message,
+you can call <code>handler.reject(dioError)</code> .</p>
+<pre><code class="language-dart">dio.interceptors.add(
+  InterceptorsWrapper(
+    onRequest: (options, handler) {
+      return handler.resolve(
+        Response(requestOptions: options, data: 'fake data'),
+      );
+    },
+  ),
+);
+final response = await dio.get('/test');
+print(response.data); // 'fake data'
+</code></pre>
+<h4 id="queuedinterceptor">QueuedInterceptor</h4>
+<p><code>Interceptor</code> can be executed concurrently, that is,
+all the requests enter the interceptor at once, rather than executing sequentially.
+However, in some cases we expect that requests enter the interceptor sequentially like #590.
+Therefore, we need to provide a mechanism for sequential access (step by step)
+to interceptors and <code>QueuedInterceptor</code> can solve this problem.</p>
+<h5 id="example">Example</h5>
+<p>Because of security reasons, we need all the requests to set up
+a <code>csrfToken</code> in the header, if <code>csrfToken</code> does not exist,
+we need to request a csrfToken first, and then perform the network request,
+because the request csrfToken progress is asynchronous,
+so we need to execute this async request in request interceptor.</p>
+<p>For the complete code see <a href="https://github.com/cfug/dio/blob/main/example_dart/lib/queued_interceptor_crsftoken.dart" rel="ugc">here</a>.</p>
+<h4 id="loginterceptor">LogInterceptor</h4>
+<p>You can apply the <code>LogInterceptor</code> to log requests and responses automatically.</p>
+<p><strong>Note:</strong> <code>LogInterceptor</code> should always be the last interceptor added,
+otherwise modifications by following interceptors will not be logged.</p>
+<h4 id="dart">Dart</h4>
+<pre><code class="language-dart">dio.interceptors.add(LogInterceptor(responseBody: false)); // Do not output responses body.
+</code></pre>
+<p><strong>Note:</strong> When using the default <code>logPrint</code> function, logs will only be printed
+in DEBUG mode (when the assertion is enabled).</p>
+<p>Alternatively <code>dart:developer</code>'s log can also be used to log messages (available in Flutter too).</p>
+<h4 id="flutter">Flutter</h4>
+<p>When using Flutter, Flutters own <code>debugPrint</code> function should be used.</p>
+<p>This ensures, that debug messages are also available via <code>flutter logs</code>.</p>
+<p><strong>Note:</strong> <code>debugPrint</code> <strong>does not mean print logs under the DEBUG mode</strong>,
+it's a throttled function which helps to print full logs without truncation.
+Do not use it under any production environment unless you're intended to.</p>
+<pre><code class="language-dart">dio.interceptors.add(
+  LogInterceptor(
+    logPrint: (o) =&gt; debugPrint(o.toString()),
+  ),
+);
+</code></pre>
+<h4 id="custom-interceptor">Custom Interceptor</h4>
+<p>You can customize interceptor by extending the <code>Interceptor/QueuedInterceptor</code> class.
+There is an example that implementing a simple cache policy:
+<a href="https://github.com/cfug/dio/blob/main/example_dart/lib/custom_cache_interceptor.dart" rel="ugc">custom cache interceptor</a>.</p>
+<h2 id="handling-errors" class="hash-header">Handling Errors <a href="#handling-errors" class="hash-link">#</a></h2>
+<p>When an error occurs, Dio will wrap the <code>Error/Exception</code> to a <code>DioException</code>:</p>
+<pre><code class="language-dart">try {
+  // 404
+  await dio.get('https://api.pub.dev/not-exist');
+} on DioException catch (e) {
+  // The request was made and the server responded with a status code
+  // that falls out of the range of 2xx and is also not 304.
+  if (e.response != null) {
+    print(e.response.data)
+    print(e.response.headers)
+    print(e.response.requestOptions)
+  } else {
+    // Something happened in setting up or sending the request that triggered an Error
+    print(e.requestOptions)
+    print(e.message)
+  }
+}
+</code></pre>
+<h3 id="dioexception" class="hash-header">DioException <a href="#dioexception" class="hash-link">#</a></h3>
+<pre><code class="language-dart">/// The request info for the request that throws exception.
+RequestOptions requestOptions;
+
+/// Response info, it may be `null` if the request can't reach to the
+/// HTTP server, for example, occurring a DNS error, network is not available.
+Response? response;
+
+/// The type of the current [DioException].
+DioExceptionType type;
+
+/// The original error/exception object;
+/// It's usually not null when `type` is [DioExceptionType.unknown].
+Object? error;
+
+/// The stacktrace of the original error/exception object;
+/// It's usually not null when `type` is [DioExceptionType.unknown].
+StackTrace? stackTrace;
+
+/// The error message that throws a [DioException].
+String? message;
+</code></pre>
+<h3 id="dioexceptiontype" class="hash-header">DioExceptionType <a href="#dioexceptiontype" class="hash-link">#</a></h3>
+<p>See <a href="https://github.com/cfug/dio/blob/main/dio/lib/src/dio_exception.dart" rel="ugc">the source code</a>.</p>
+<h2 id="using-applicationx-www-form-urlencoded-format" class="hash-header">Using application/x-www-form-urlencoded format <a href="#using-applicationx-www-form-urlencoded-format" class="hash-link">#</a></h2>
+<p>By default, Dio serializes request data (except <code>String</code> type) to <code>JSON</code>.
+To send data in the <code>application/x-www-form-urlencoded</code> format instead:</p>
+<pre><code class="language-dart">// Instance level
+dio.options.contentType = Headers.formUrlEncodedContentType;
+// or only works once
+dio.post(
+  '/info',
+  data: {'id': 5},
+  options: Options(contentType: Headers.formUrlEncodedContentType),
+);
+</code></pre>
+<h2 id="sending-formdata" class="hash-header">Sending FormData <a href="#sending-formdata" class="hash-link">#</a></h2>
+<p>You can also send <code>FormData</code> with Dio, which will send data in the <code>multipart/form-data</code>,
+and it supports uploading files.</p>
+<pre><code class="language-dart">final formData = FormData.fromMap({
+  'name': 'dio',
+  'date': DateTime.now().toIso8601String(),
+  'file': await MultipartFile.fromFile('./text.txt', filename: 'upload.txt'),
+});
+final response = await dio.post('/info', data: formData);
+</code></pre>
+<p>You can also specify your desired boundary name which will be used
+to construct boundaries of every <code>FormData</code> with additional prefix and suffix.</p>
+<pre><code class="language-dart">final formDataWithBoundaryName = FormData(
+  boundaryName: 'my-boundary-name',
+);
+</code></pre>
+<blockquote>
+<p><code>FormData</code> is supported with the POST method typically.</p>
+</blockquote>
+<p>There is a complete example <a href="https://github.com/cfug/dio/blob/main/example_dart/lib/formdata.dart" rel="ugc">here</a>.</p>
+<h3 id="multiple-files-upload" class="hash-header">Multiple files upload <a href="#multiple-files-upload" class="hash-link">#</a></h3>
+<p>There are two ways to add multiple files to <code>FormData</code>,
+the only difference is that upload keys are different for array types。</p>
+<pre><code class="language-dart">final formData = FormData.fromMap({
+  'files': [
+    MultipartFile.fromFileSync('path/to/upload1.txt', filename: 'upload1.txt'),
+    MultipartFile.fromFileSync('path/to/upload2.txt', filename: 'upload2.txt'),
+  ],
+});
+</code></pre>
+<p>The upload key eventually becomes <code>files[]</code>.
+This is because many back-end services add a middle bracket to key
+when they get an array of files.
+<strong>If you don't want a list literal</strong>,
+you should create FormData as follows (Don't use <code>FormData.fromMap</code>):</p>
+<pre><code class="language-dart">final formData = FormData();
+formData.files.addAll([
+  MapEntry(
+   'files',
+    MultipartFile.fromFileSync('./example/upload.txt',filename: 'upload.txt'),
+  ),
+  MapEntry(
+    'files',
+    MultipartFile.fromFileSync('./example/upload.txt',filename: 'upload.txt'),
+  ),
+]);
+</code></pre>
+<h3 id="reuse-formdatas-and-multipartfiles" class="hash-header">Reuse <code>FormData</code>s and <code>MultipartFile</code>s <a href="#reuse-formdatas-and-multipartfiles" class="hash-link">#</a></h3>
+<p>You should make a new <code>FormData</code> or <code>MultipartFile</code> every time in repeated requests.
+A typical wrong behavior is setting the <code>FormData</code> as a variable and using it in every request.
+It can be easy for the <em>Cannot finalize</em> exceptions to occur.
+To avoid that, write your requests like the below code:</p>
+<pre><code class="language-dart">Future&lt;void&gt; _repeatedlyRequest() async {
+  Future&lt;FormData&gt; createFormData() async {
+    return FormData.fromMap({
+      'name': 'dio',
+      'date': DateTime.now().toIso8601String(),
+      'file': await MultipartFile.fromFile('./text.txt',filename: 'upload.txt'),
+    });
+  }
+  
+  await dio.post('some-url', data: await createFormData());
+}
+</code></pre>
+<h2 id="transformer" class="hash-header">Transformer <a href="#transformer" class="hash-link">#</a></h2>
+<p><code>Transformer</code> allows changes to the request/response data
+before it is sent/received to/from the server.
+Dio has already implemented a <code>BackgroundTransformer</code> as default,
+which calls <code>jsonDecode</code> in an isolate if the response is larger than 50 KB.
+If you want to customize the transformation of request/response data,
+you can provide a <code>Transformer</code> by your self,
+and replace the <code>BackgroundTransformer</code> by setting the <code>dio.transformer</code>.</p>
+<blockquote>
+<p><code>Transformer.transformRequest</code> only takes effect when request with <code>PUT</code>/<code>POST</code>/<code>PATCH</code>,
+they're methods that can contain the request body.
+<code>Transformer.transformResponse</code> however, can be applied to all types of responses.</p>
+</blockquote>
+<h3 id="transformer-example" class="hash-header">Transformer example <a href="#transformer-example" class="hash-link">#</a></h3>
+<p>There is an example for <a href="https://github.com/cfug/dio/blob/main/example_dart/lib/transformer.dart" rel="ugc">customizing Transformer</a>.</p>
+<h2 id="httpclientadapter" class="hash-header">HttpClientAdapter <a href="#httpclientadapter" class="hash-link">#</a></h2>
+<p><code>HttpClientAdapter</code> is a bridge between <code>Dio</code> and <code>HttpClient</code>.</p>
+<p><code>Dio</code> implements standard and friendly APIs for developer.
+<code>HttpClient</code> is the real object that makes Http requests.</p>
+<p>We can use any <code>HttpClient</code> not just <code>dart:io:HttpClient</code> to make HTTP requests.
+And all we need is providing a <code>HttpClientAdapter</code>.
+The default <code>HttpClientAdapter</code> for Dio is <code>IOHttpClientAdapter</code> on native platforms,
+and <code>BrowserHttpClientAdapter</code> on the Web platform.
+They can be initiated by calling the <code>HttpClientAdapter()</code>.</p>
+<pre><code class="language-dart">dio.httpClientAdapter = HttpClientAdapter();
+</code></pre>
+<p>If you want to use platform adapters explicitly:</p>
+<ul>
+<li>For the Web platform:
+<pre><code class="language-dart">import 'package:dio/browser.dart';
+// ...
+dio.httpClientAdapter = BrowserHttpClientAdapter();
+</code></pre>
+</li>
+<li>For native platforms:
+<pre><code class="language-dart">import 'package:dio/io.dart';
+// ...
+dio.httpClientAdapter = IOHttpClientAdapter();
+</code></pre>
+</li>
+</ul>
+<p><a href="https://github.com/cfug/dio/blob/main/example_dart/lib/adapter.dart" rel="ugc">Here</a> is a simple example to custom adapter.</p>
+<h3 id="using-proxy" class="hash-header">Using proxy <a href="#using-proxy" class="hash-link">#</a></h3>
+<p><code>IOHttpClientAdapter</code> provide a callback to set proxy to <code>dart:io:HttpClient</code>,
+for example:</p>
+<pre><code class="language-dart">import 'package:dio/io.dart';
+
+void initAdapter() {
+  dio.httpClientAdapter = IOHttpClientAdapter(
+    createHttpClient: () {
+      final client = HttpClient();
+      // Config the client.
+      client.findProxy = (uri) {
+        // Forward all request to proxy "localhost:8888".
+        // Be aware, the proxy should went through you running device,
+        // not the host platform.
+        return 'PROXY localhost:8888';
+      };
+      // You can also create a new HttpClient for Dio instead of returning,
+      // but a client must being returned here.
+      return client;
+    },
+  );
+}
+</code></pre>
+<p>There is a complete example <a href="https://github.com/cfug/dio/blob/main/example_dart/lib/proxy.dart" rel="ugc">here</a>.</p>
+<p>Web does not support to set proxy.</p>
+<h3 id="https-certificate-verification" class="hash-header">HTTPS certificate verification <a href="#https-certificate-verification" class="hash-link">#</a></h3>
+<p>HTTPS certificate verification (or public key pinning) refers to the process of ensuring that
+the certificates protecting the TLS connection to the server are the ones you expect them to be.
+The intention is to reduce the chance of a man-in-the-middle attack.
+The theory is covered by <a href="https://owasp.org/www-community/controls/Certificate_and_Public_Key_Pinning" rel="ugc">OWASP</a>.</p>
+<p><em>Server Response Certificate</em></p>
+<p>Unlike other methods, this one works with the certificate of the server itself.</p>
+<pre><code class="language-dart">void initAdapter() {
+  const String fingerprint = 'ee5ce1dfa7a53657c545c62b65802e4272878dabd65c0aadcf85783ebb0b4d5c';
+  dio.httpClientAdapter = IOHttpClientAdapter(
+    createHttpClient: () {
+      // Don't trust any certificate just because their root cert is trusted.
+      final HttpClient client = HttpClient(context: SecurityContext(withTrustedRoots: false));
+      // You can test the intermediate / root cert here. We just ignore it.
+      client.badCertificateCallback = (cert, host, port) =&gt; true;
+      return client;
+    },
+    validateCertificate: (cert, host, port) {
+      // Check that the cert fingerprint matches the one we expect.
+      // We definitely require _some_ certificate.
+      if (cert == null) {
+        return false;
+      }
+      // Validate it any way you want. Here we only check that
+      // the fingerprint matches the OpenSSL SHA256.
+      return fingerprint == sha256.convert(cert.der).toString();
+    },
+  );
+}
+</code></pre>
+<p>You can use openssl to read the SHA256 value of a certificate:</p>
+<pre><code class="language-sh">openssl s_client -servername pinning-test.badssl.com -connect pinning-test.badssl.com:443 &lt; /dev/null 2&gt;/dev/null \
+  | openssl x509 -noout -fingerprint -sha256
+
+# SHA256 Fingerprint=EE:5C:E1:DF:A7:A5:36:57:C5:45:C6:2B:65:80:2E:42:72:87:8D:AB:D6:5C:0A:AD:CF:85:78:3E:BB:0B:4D:5C
+# (remove the formatting, keep only lower case hex characters to match the `sha256` above)
+</code></pre>
+<p><em>Certificate Authority Verification</em></p>
+<p>These methods work well when your server has a self-signed certificate,
+but they don't work for certificates issued by a 3rd party like AWS or Let's Encrypt.</p>
+<p>There are two ways to verify the root of the https certificate chain provided by the server.
+Suppose the certificate format is PEM, the code like:</p>
+<pre><code class="language-dart">void initAdapter() {
+  String PEM = 'XXXXX'; // root certificate content
+  dio.httpClientAdapter = IOHttpClientAdapter(
+    createHttpClient: () {
+      final client = HttpClient();
+      client.badCertificateCallback = (X509Certificate cert, String host, int port) {
+        return cert.pem == PEM; // Verify the certificate.
+      };
+      return client;
+    },
+  );
+}
+</code></pre>
+<p>Another way is creating a <code>SecurityContext</code> when create the <code>HttpClient</code>:</p>
+<pre><code class="language-dart">void initAdapter() {
+  String PEM = 'XXXXX'; // root certificate content
+  dio.httpClientAdapter = IOHttpClientAdapter(
+    onHttpClientCreate: (_) {
+      final SecurityContext sc = SecurityContext();
+      sc.setTrustedCertificates(File(pathToTheCertificate));
+      final HttpClient client = HttpClient(context: sc);
+      return client;
+    },
+  );
+}
+</code></pre>
+<p>In this way, the format of <code>setTrustedCertificates()</code> must be PEM or PKCS12.
+PKCS12 requires password to use, which will expose the password in the code,
+so it's not recommended to use in common cases.</p>
+<h2 id="http2-support" class="hash-header">HTTP/2 support <a href="#http2-support" class="hash-link">#</a></h2>
+<p><a href="https://github.com/cfug/dio/blob/main/plugins/http2_adapter" rel="ugc">dio_http2_adapter</a> is a Dio <code>HttpClientAdapter</code>
+which supports HTTP/2.</p>
+<h2 id="cancellation" class="hash-header">Cancellation <a href="#cancellation" class="hash-link">#</a></h2>
+<p>You can cancel a request using a <code>CancelToken</code>.
+One token can be shared with multiple requests.
+When a token's <code>cancel()</code> is invoked, all requests with this token will be cancelled.</p>
+<pre><code class="language-dart">final cancelToken = CancelToken();
+dio.get(url, cancelToken: cancelToken).catchError((DioException error) {
+  if (CancelToken.isCancel(error)) {
+    print('Request canceled: ${error.message}');
+  } else {
+    // handle error.
+  }
+});
+// Cancel the requests with "cancelled" message.
+token.cancel('cancelled');
+</code></pre>
+<p>There is a complete example <a href="https://github.com/cfug/dio/blob/main/example_dart/lib/cancel_request.dart" rel="ugc">here</a>.</p>
+<h2 id="extends-dio-class" class="hash-header">Extends Dio class <a href="#extends-dio-class" class="hash-link">#</a></h2>
+<p><code>Dio</code> is an abstract class with factory constructor,
+so we don't extend <code>Dio</code> class direct.
+We can extend <code>DioForNative</code> or <code>DioForBrowser</code> instead, for example:</p>
+<pre><code class="language-dart">import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+// If in browser, import 'package:dio/browser.dart'.
+
+class Http extends DioForNative {
+  Http([BaseOptions options]) : super(options) {
+    // do something
+  }
+}
+</code></pre>
+<p>We can also implement a custom <code>Dio</code> client:</p>
+<pre><code class="language-dart">class MyDio with DioMixin implements Dio {
+  // ...
+}
+</code></pre>
+<h2 id="cross-origin-resource-sharing-on-web-cors" class="hash-header">Cross-Origin Resource Sharing on Web (CORS) <a href="#cross-origin-resource-sharing-on-web-cors" class="hash-link">#</a></h2>
+<p>If a request is not a <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests" rel="ugc">simple request</a>,
+the Web browser will send a <a href="https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request" rel="ugc">CORS preflight request</a>
+that checks to see if the CORS protocol is understood
+and a server is aware using specific methods and headers.</p>
+<p>You can modify your requests to match the definition of simple request,
+or add a CORS middleware for your service to handle CORS requests.</p>
+</section>
