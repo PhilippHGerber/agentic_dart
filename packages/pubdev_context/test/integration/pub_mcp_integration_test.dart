@@ -8,6 +8,7 @@
 ///
 /// Test subjects use stable, well-known packages: http, path, dart_mcp.
 /// These are safe to query without risk of false failures.
+@Tags(['integration'])
 library;
 
 import 'dart:async';
@@ -108,6 +109,18 @@ final class _McpProcess {
     return response['result']! as Map<String, Object?>;
   }
 
+  /// Sends a `resources/read` request for [uri] and returns the result map.
+  Future<Map<String, Object?>> readResource(String uri) async {
+    final id = _nextId++;
+    final response = await send({
+      'jsonrpc': '2.0',
+      'id': id,
+      'method': 'resources/read',
+      'params': {'uri': uri},
+    });
+    return response['result']! as Map<String, Object?>;
+  }
+
   /// Closes stdin and waits for the process to exit, killing it after 5 s.
   Future<int> close() async {
     await _process.stdin.close();
@@ -124,7 +137,7 @@ final class _McpProcess {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Decodes the first content item of a `tools/call` result as a JSON value.
-Object? _content(_McpProcess _, Map<String, Object?> result) {
+Object? _content(Map<String, Object?> result) {
   final content = result['content']! as List<Object?>;
   final first = content.first! as Map<String, Object?>;
   return jsonDecode(first['text']! as String);
@@ -135,6 +148,12 @@ String _text(Map<String, Object?> result) {
   final content = result['content']! as List<Object?>;
   final first = content.first! as Map<String, Object?>;
   return first['text']! as String;
+}
+
+/// Returns the first content entry from a `resources/read` result.
+Map<String, Object?> _firstResourceContent(Map<String, Object?> result) {
+  final contents = result['contents']! as List<Object?>;
+  return contents.first! as Map<String, Object?>;
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -219,6 +238,10 @@ void main() {
     test('includes get_symbol_documentation', () {
       expect(toolNames, contains('get_symbol_documentation'));
     });
+
+    test('includes search_api_symbols', () {
+      expect(toolNames, contains('search_api_symbols'));
+    });
   });
 
   // ─── search_packages ─────────────────────────────────────────────────────────
@@ -228,11 +251,16 @@ void main() {
 
     setUpAll(() async {
       final result = await mcp.callTool('search_packages', {'query': 'http'});
-      results = _content(mcp, result)! as List<Object?>;
+      results = _content(result)! as List<Object?>;
     });
 
     test('returns a non-empty list', () {
       expect(results, isNotEmpty);
+    });
+
+    test('the http package appears in results', () {
+      final names = results.cast<Map<String, Object?>>().map((r) => r['name']! as String).toList();
+      expect(names, contains('http'));
     });
 
     test('returns objects with a name field', () {
@@ -253,7 +281,7 @@ void main() {
 
     setUpAll(() async {
       final result = await mcp.callTool('get_package', {'name': 'path'});
-      detail = _content(mcp, result)! as Map<String, Object?>;
+      detail = _content(result)! as Map<String, Object?>;
     });
 
     test('returns the correct package name', () {
@@ -286,7 +314,7 @@ void main() {
 
     setUpAll(() async {
       final result = await mcp.callTool('get_changelog', {'name': 'path'});
-      entries = _content(mcp, result)! as List<Object?>;
+      entries = _content(result)! as List<Object?>;
     });
 
     test('returns a non-empty list of entries', () {
@@ -301,6 +329,44 @@ void main() {
     test('each entry has a breaking field', () {
       final first = entries.first! as Map<String, Object?>;
       expect(first, contains('breaking'));
+    });
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  // ─── search_api_symbols ───────────────────────────────────────────────────────
+
+  group('search_api_symbols', () {
+    late List<Object?> symbols;
+
+    setUpAll(() async {
+      final result = await mcp.callTool('search_api_symbols', {
+        'package': 'http',
+        'query': 'Client',
+      });
+      symbols = _content(result)! as List<Object?>;
+    });
+
+    test('result is not an error', () {
+      // A domain error would be a Map with an "error" key, not a List.
+      expect(symbols, isA<List<Object?>>());
+    });
+
+    test('returns at least one matching symbol', () {
+      expect(symbols, isNotEmpty);
+    });
+
+    test('each symbol has a name field', () {
+      final first = symbols.first! as Map<String, Object?>;
+      expect(first, contains('name'));
+    });
+
+    test('each symbol has a type field', () {
+      final first = symbols.first! as Map<String, Object?>;
+      expect(first, contains('type'));
+    });
+
+    test('each symbol has an href field', () {
+      final first = symbols.first! as Map<String, Object?>;
+      expect(first, contains('href'));
     });
   }, timeout: const Timeout(Duration(seconds: 30)));
 
@@ -348,7 +414,7 @@ void main() {
         'names': ['http', 'path', 'dart_mcp'],
       });
       elapsed = DateTime.now().difference(start);
-      payload = _content(mcp, result)! as Map<String, Object?>;
+      payload = _content(result)! as Map<String, Object?>;
     });
 
     test('result is not an error', () {
@@ -377,4 +443,112 @@ void main() {
       expect(elapsed.inMilliseconds, greaterThanOrEqualTo(200));
     });
   }, timeout: const Timeout(Duration(seconds: 60)));
+
+  // ─── resources ───────────────────────────────────────────────────────────────
+
+  group('resources', () {
+    // ── pub://meta/scoring ──────────────────────────────────────────────────────
+
+    group('pub://meta/scoring', () {
+      late Map<String, Object?> content;
+
+      setUpAll(() async {
+        final result = await mcp.readResource('pub://meta/scoring');
+        content = _firstResourceContent(result);
+      });
+
+      test('mimeType is text/plain', () {
+        expect(content['mimeType'], equals('text/plain'));
+      });
+
+      test('returns non-empty plain text', () {
+        expect(content['text']! as String, isNotEmpty);
+      });
+
+      test('uri echoes the requested URI', () {
+        expect(content['uri'], equals('pub://meta/scoring'));
+      });
+    }, timeout: const Timeout(Duration(seconds: 15)));
+
+    // ── pub://meta/sdk-versions ─────────────────────────────────────────────────
+
+    group('pub://meta/sdk-versions', () {
+      late Map<String, Object?> content;
+      late Map<String, Object?> data;
+
+      setUpAll(() async {
+        final result = await mcp.readResource('pub://meta/sdk-versions');
+        content = _firstResourceContent(result);
+        data = jsonDecode(content['text']! as String) as Map<String, Object?>;
+      });
+
+      test('mimeType is application/json', () {
+        expect(content['mimeType'], equals('application/json'));
+      });
+
+      test('dart field is a non-empty version string', () {
+        expect(data['dart'], isA<String>());
+        expect(data['dart']! as String, isNotEmpty);
+      });
+
+      test('flutter field is a non-empty version string', () {
+        expect(data['flutter'], isA<String>());
+        expect(data['flutter']! as String, isNotEmpty);
+      });
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    // ── pub://package/http/readme ───────────────────────────────────────────────
+
+    group('pub://package/http/readme', () {
+      late Map<String, Object?> content;
+
+      setUpAll(() async {
+        final result = await mcp.readResource('pub://package/http/readme');
+        content = _firstResourceContent(result);
+      });
+
+      test('mimeType is text/markdown', () {
+        expect(content['mimeType'], equals('text/markdown'));
+      });
+
+      test('returns non-empty markdown content', () {
+        expect(content['text']! as String, isNotEmpty);
+      });
+
+      test('uri echoes the requested URI', () {
+        expect(content['uri'], equals('pub://package/http/readme'));
+      });
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    // ── pub://package/http/api ──────────────────────────────────────────────────
+
+    group('pub://package/http/api', () {
+      late Map<String, Object?> content;
+      late List<Object?> symbols;
+
+      setUpAll(() async {
+        final result = await mcp.readResource('pub://package/http/api');
+        content = _firstResourceContent(result);
+        symbols = jsonDecode(content['text']! as String) as List<Object?>;
+      });
+
+      test('mimeType is application/json', () {
+        expect(content['mimeType'], equals('application/json'));
+      });
+
+      test('returns a non-empty JSON array of symbols', () {
+        expect(symbols, isNotEmpty);
+      });
+
+      test('each symbol entry has a name field', () {
+        final first = symbols.first! as Map<String, Object?>;
+        expect(first, contains('name'));
+      });
+
+      test('each symbol entry has a type field', () {
+        final first = symbols.first! as Map<String, Object?>;
+        expect(first, contains('type'));
+      });
+    }, timeout: const Timeout(Duration(seconds: 30)));
+  });
 }
