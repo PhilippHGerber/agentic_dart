@@ -281,6 +281,13 @@ void main() {
         expect(uris, contains('pub://meta/sdk-versions'));
       });
 
+      test('lists pub://meta/resources after initialization', () async {
+        await doInitialize();
+        final resources = await serverConnection.listResources(ListResourcesRequest());
+        final uris = resources.resources.map((r) => r.uri).toList();
+        expect(uris, contains('pub://meta/resources'));
+      });
+
       test('lists pub://package/{name}/example after initialization', () async {
         await doInitialize();
         final templates = await serverConnection.listResourceTemplates();
@@ -308,6 +315,13 @@ void main() {
         final resource = resources.resources.firstWhere(
           (r) => r.uri == 'pub://meta/sdk-versions',
         );
+        expect(resource.name, isNotEmpty);
+      });
+
+      test('pub://meta/resources resource has a non-empty name', () async {
+        await doInitialize();
+        final resources = await serverConnection.listResources(ListResourcesRequest());
+        final resource = resources.resources.firstWhere((r) => r.uri == 'pub://meta/resources');
         expect(resource.name, isNotEmpty);
       });
 

@@ -58,10 +58,13 @@ void main() {
   late ResponseCache<String> cache;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
+  const kTestManifest = '[{"uri":"pub://meta/scoring"}]';
+
   MetaResourcesHandler buildHandler() => MetaResourcesHandler(
     httpClient: mockHttp,
     cache: cache,
     log: (level, data) => loggedMessages.add((level, data)),
+    resourcesManifest: kTestManifest,
   );
 
   setUp(() {
@@ -333,6 +336,37 @@ void main() {
         buildHandler().handleSdkVersions(_request('pub://meta/sdk-versions')),
         throwsA(isA<Exception>()),
       );
+    });
+  });
+
+  // ─── Resources manifest ──────────────────────────────────────────────────────
+
+  group('resources manifest', () {
+    test('returns the manifest JSON passed at construction time', () async {
+      final result = await buildHandler().handleResources(_request('pub://meta/resources'));
+
+      final content = (result.contents.single as TextResourceContents).text;
+      expect(content, equals(kTestManifest));
+    });
+
+    test('uses application/json MIME type', () async {
+      final result = await buildHandler().handleResources(_request('pub://meta/resources'));
+
+      final content = result.contents.single as TextResourceContents;
+      expect(content.mimeType, equals('application/json'));
+    });
+
+    test('response URI matches the request URI', () async {
+      final result = await buildHandler().handleResources(_request('pub://meta/resources'));
+
+      final content = result.contents.single as TextResourceContents;
+      expect(content.uri, equals('pub://meta/resources'));
+    });
+
+    test('does not call the HTTP client', () async {
+      await buildHandler().handleResources(_request('pub://meta/resources'));
+
+      verifyNever(() => mockHttp.get(any()));
     });
   });
 

@@ -10,6 +10,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
@@ -235,11 +236,14 @@ base class PubMcpServer extends MCPServer
       httpClient: _metaHttp,
       cache: _metaCache,
       log: log,
+      resourcesManifest: _buildResourcesManifest(),
     );
     addResource(kScoringResource, metaHandler.handleScoring);
     log(LoggingLevel.debug, 'registered resource: pub://meta/scoring');
     addResource(kSdkVersionsResource, metaHandler.handleSdkVersions);
     log(LoggingLevel.debug, 'registered resource: pub://meta/sdk-versions');
+    addResource(kResourcesResource, metaHandler.handleResources);
+    log(LoggingLevel.debug, 'registered resource: pub://meta/resources');
 
     final handler = PackageResourcesHandler(
       client: _client,
@@ -271,6 +275,44 @@ base class PubMcpServer extends MCPServer
     addPrompt(kEvaluateAlternativesPrompt, const EvaluateAlternativesHandler().call);
     log(LoggingLevel.debug, 'registered prompt: evaluate-alternatives');
   }
+
+  static String _buildResourcesManifest() => jsonEncode([
+    {
+      'uri': kScoringResource.uri,
+      'mimeType': kScoringResource.mimeType,
+      'description': kScoringResource.description,
+    },
+    {
+      'uri': kSdkVersionsResource.uri,
+      'mimeType': kSdkVersionsResource.mimeType,
+      'description': kSdkVersionsResource.description,
+    },
+    {
+      'uri': kResourcesResource.uri,
+      'mimeType': kResourcesResource.mimeType,
+      'description': kResourcesResource.description,
+    },
+    {
+      'uri': PackageResourcesHandler.kReadmeTemplate.uriTemplate,
+      'mimeType': PackageResourcesHandler.kReadmeTemplate.mimeType,
+      'description': PackageResourcesHandler.kReadmeTemplate.description,
+    },
+    {
+      'uri': PackageResourcesHandler.kExampleTemplate.uriTemplate,
+      'mimeType': PackageResourcesHandler.kExampleTemplate.mimeType,
+      'description': PackageResourcesHandler.kExampleTemplate.description,
+    },
+    {
+      'uri': PackageResourcesHandler.kChangelogTemplate.uriTemplate,
+      'mimeType': PackageResourcesHandler.kChangelogTemplate.mimeType,
+      'description': PackageResourcesHandler.kChangelogTemplate.description,
+    },
+    {
+      'uri': PackageResourcesHandler.kApiTemplate.uriTemplate,
+      'mimeType': PackageResourcesHandler.kApiTemplate.mimeType,
+      'description': PackageResourcesHandler.kApiTemplate.description,
+    },
+  ]);
 
   static LoggingLevel _toLoggingLevel(LogLevel level) => switch (level) {
     LogLevel.debug => LoggingLevel.debug,

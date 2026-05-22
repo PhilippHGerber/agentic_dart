@@ -50,7 +50,8 @@ final kAnalyzeUpgradeImpactPrompt = Prompt(
     ),
     PromptArgument(
       name: 'from_version',
-      description: 'The currently installed version string. Changelog entries older than this are ignored.',
+      description:
+          'The currently installed version string. Changelog entries older than this are ignored.',
       required: true,
     ),
     PromptArgument(
@@ -76,12 +77,14 @@ final kEvaluateAlternativesPrompt = Prompt(
     ),
     PromptArgument(
       name: 'sdk',
-      description: 'Restrict search to packages supporting this SDK (e.g. "flutter"). Omit for all SDKs.',
+      description:
+          'Restrict search to packages supporting this SDK (e.g. "flutter"). Omit for all SDKs.',
       required: false,
     ),
     PromptArgument(
       name: 'platform',
-      description: 'Restrict search to packages supporting this platform (e.g. "android", "ios", "web"). Omit for all platforms.',
+      description:
+          'Restrict search to packages supporting this platform (e.g. "android", "ios", "web"). Omit for all platforms.',
       required: false,
     ),
   ],

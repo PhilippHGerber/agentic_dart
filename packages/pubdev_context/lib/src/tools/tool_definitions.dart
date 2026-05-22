@@ -21,7 +21,14 @@ const kServerInstructions =
     'API exploration: search_api_symbols (one symbol at a time) → get_symbol_documentation → get_package_source_file if implementation details are missing. '
     'Upgrade analysis: get_changelog with from_version set → inspect breaking flags → rewrite affected code. '
     'Package comparison: search_packages → compare_packages on the top candidates. '
-    'Every error response carries a machine-readable code and a suggestion field. Read suggestion before retrying.';
+    'Every error response carries a machine-readable code and a suggestion field. Read suggestion before retrying. '
+    'Resources: read pub://meta/resources first to see all available URIs. '
+    'pub://meta/scoring — pub.dev 160-point scoring rubric. '
+    'pub://meta/sdk-versions — current stable Dart and Flutter SDK versions (JSON). '
+    'pub://package/{name}/readme — full README for a package (text/markdown). '
+    'pub://package/{name}/example — working example code for a package (text/markdown). '
+    'pub://package/{name}/changelog — full raw changelog for a package (text/markdown). '
+    'pub://package/{name}/api — dartdoc symbol index for a package (JSON).';
 
 // ─── search_packages ──────────────────────────────────────────────────────────
 
@@ -53,7 +60,8 @@ final searchPackagesTool = Tool(
         minimum: 1,
       ),
       'sdk': UntitledSingleSelectEnumSchema(
-        description: 'Restrict to packages supporting this SDK. Set when the target environment is known.',
+        description:
+            'Restrict to packages supporting this SDK. Set when the target environment is known.',
         values: ['dart', 'flutter'],
       ),
       'sort': UntitledSingleSelectEnumSchema(
@@ -65,7 +73,8 @@ final searchPackagesTool = Tool(
         defaultValue: 'relevance',
       ),
       'platform': UntitledSingleSelectEnumSchema(
-        description: "Restrict to packages supporting this platform. Set when the user's target platform is known.",
+        description:
+            "Restrict to packages supporting this platform. Set when the user's target platform is known.",
         values: ['android', 'ios', 'web', 'linux', 'macos', 'windows'],
       ),
     },

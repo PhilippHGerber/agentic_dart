@@ -25,6 +25,9 @@ const _kScoringUri = 'pub://meta/scoring';
 /// URI for the current stable SDK versions resource.
 const _kSdkVersionsUri = 'pub://meta/sdk-versions';
 
+/// URI for the resource manifest resource.
+const _kResourcesUri = 'pub://meta/resources';
+
 // ─── Cache keys ───────────────────────────────────────────────────────────────
 
 /// Cache key for the scoring body entry.
@@ -69,6 +72,16 @@ final kSdkVersionsResource = Resource(
       'Read this when you need the current stable Dart or Flutter SDK version — '
       'for example when validating SDK constraints in pubspec.yaml. '
       'Returns JSON: { "dart": "<version>", "flutter": "<version>" }.',
+  mimeType: 'application/json',
+);
+
+/// [Resource] descriptor for `pub://meta/resources`.
+final kResourcesResource = Resource(
+  uri: _kResourcesUri,
+  name: 'Resource manifest',
+  description:
+      'Read this first to discover all resource URIs available on this server. '
+      'Returns a JSON array; each entry has uri, mimeType, and description.',
   mimeType: 'application/json',
 );
 
@@ -185,15 +198,26 @@ final class MetaResourcesHandler {
     required http.Client httpClient,
     required ResponseCache<String> cache,
     required void Function(LoggingLevel, Object) log,
+    required String resourcesManifest,
   }) : _http = httpClient,
        _cache = cache,
-       _log = log;
+       _log = log,
+       _resourcesManifest = resourcesManifest;
 
   final http.Client _http;
   final ResponseCache<String> _cache;
   final void Function(LoggingLevel, Object) _log;
+  final String _resourcesManifest;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
+
+  /// Handles a [ReadResourceRequest] for `pub://meta/resources`.
+  ///
+  /// Returns the pre-built manifest JSON passed in at construction time.
+  /// The manifest is derived from the resource and template descriptors in
+  /// the server layer and never makes an HTTP call.
+  Future<ReadResourceResult> handleResources(ReadResourceRequest request) async =>
+      _textResult(request.uri, _resourcesManifest, 'application/json');
 
   /// Handles a [ReadResourceRequest] for `pub://meta/scoring`.
   ///

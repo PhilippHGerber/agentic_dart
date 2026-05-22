@@ -5,16 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `pub://meta/resources` — new static resource that returns a JSON array of every available resource and resource template, each with its URI, MIME type, and description. Read it first to discover what the server exposes without enumerating resources manually.
+- Server instructions now list all six resource URIs and guide agents to read `pub://meta/resources` before making resource calls.
+
 ### Changed
 
-- All `Tool`, `Resource`, `ResourceTemplate`, and `Prompt` description fields rewritten as direct instructions to the LLM agent (issue #21). Every description now states when to invoke it, what to do with the result, what to call next, and which anti-patterns to avoid. `kServerInstructions` updated to orient the agent with the four standard workflows. `search_api_symbols` now explicitly warns against multi-term queries. Parameter descriptions updated to state when to set each parameter and what happens when it is omitted.
-- `PubDevClient` now caps concurrent HTTP requests via an internal semaphore (default `maxConcurrency: 5`). This prevents pub.dev 429 rate-limit errors when `search()` fans out to many parallel calls or when an LLM agent issues multiple tool calls simultaneously. The limit is injectable at construction time for testing.
+- All tool, resource, resource template, and prompt descriptions rewritten as direct agent instructions. Each description states when to call it, what to do with the result, which tool to call next, and which patterns to avoid. `search_api_symbols` now explicitly warns against multi-term queries.
+- `PubDevClient` caps concurrent HTTP requests at 5 by default, preventing `429 Too Many Requests` errors when an agent issues several tool calls in parallel.
 
 ### Fixed
 
-- `search_api_symbols` now correctly maps `kind` integers from `index.json` to their dartdoc labels. The entire `_kindToType` table is rewritten to match the ordinal positions of dartdoc's `Kind` enum, fixing enums (kind 5) being reported as `typedef`, mixins (kind 11) as `constant`, and typedefs (kind 21) falling through to a raw integer string, among other mismatches.
-- `HtmlToMarkdown` section isolation now uses `package:html` DOM queries instead of regex string-matching. `_isolateByClass` previously returned the tail of the document from the opening tag onward (a structural bug) and silently failed on elements with extra classes, single-quoted attributes, or out-of-order class tokens. Both isolation methods now return the matched element's `innerHtml`, giving correct, content-only extraction across all five pub.dev HTML extraction paths.
-- Added 10 real-world fixture tests for `HtmlToMarkdown` using live pub.dev README HTML from `http`, `provider`, `riverpod`, `dio`, `equatable`, `freezed`, `path`, `go_router`, `mocktail`, and `intl`. Each fixture validates that the full convert pipeline (isolation + Markdown conversion) produces clean output with no residual HTML tags or entities.
+- `search_api_symbols` now reports correct symbol kinds. The `kind` integer from `index.json` was mapped to the wrong ordinal positions, causing enums to appear as `typedef`, mixins as `constant`, and some typedefs to fall through to a raw integer string.
+- Package README and section extraction now uses DOM queries instead of regex. The previous approach returned content from the matched element to the end of the document and silently failed on elements with extra CSS classes, single-quoted attributes, or out-of-order class tokens.
 
 ## [0.2.0] - 2026-05-21
 
