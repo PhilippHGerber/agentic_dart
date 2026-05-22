@@ -332,8 +332,9 @@ void main() {
       loggedMessages.clear();
       await handler.call(_request({'name': 'foo', 'version': '1.0.0', 'path': 'lib/src/bar.dart'}));
 
-      final debugLogs =
-          loggedMessages.where((m) => m.$1 == LoggingLevel.debug).map((m) => m.$2.toString());
+      final debugLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.debug)
+          .map((m) => m.$2.toString());
       expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
     });
   });
@@ -348,8 +349,9 @@ void main() {
         _request({'name': 'foo', 'version': '1.0.0', 'path': 'lib/src/foo.dart'}),
       );
 
-      final debugLogs =
-          loggedMessages.where((m) => m.$1 == LoggingLevel.debug).map((m) => m.$2.toString());
+      final debugLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.debug)
+          .map((m) => m.$2.toString());
       expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
     });
 
@@ -360,8 +362,9 @@ void main() {
         _request({'name': 'foo', 'version': '1.0.0', 'path': 'lib/src/foo.dart'}),
       );
 
-      final infoLogs =
-          loggedMessages.where((m) => m.$1 == LoggingLevel.info).map((m) => m.$2.toString());
+      final infoLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.info)
+          .map((m) => m.$2.toString());
       expect(infoLogs.any((m) => m.contains('name=foo')), isTrue);
     });
   });

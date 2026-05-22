@@ -3,6 +3,12 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `search_api_symbols` now correctly maps `kind` integers from `index.json` to their dartdoc labels. The entire `_kindToType` table is rewritten to match the ordinal positions of dartdoc's `Kind` enum, fixing enums (kind 5) being reported as `typedef`, mixins (kind 11) as `constant`, and typedefs (kind 21) falling through to a raw integer string, among other mismatches.
+
 ## [0.2.0] - 2026-05-21
 
 ### Added

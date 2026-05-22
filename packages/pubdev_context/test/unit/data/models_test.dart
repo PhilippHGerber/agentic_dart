@@ -536,6 +536,61 @@ void main() {
       expect(sym.type, equals('constructor'));
     });
 
+    test('kind 5 maps to type "enum"', () {
+      final sym = DartdocSymbol.fromJson({
+        'name': 'Role',
+        'qualifiedName': 'server.Role',
+        'href': 'server/Role.html',
+        'kind': 5,
+        'desc': 'The sender or recipient of messages.',
+      });
+      expect(sym.type, equals('enum'));
+    });
+
+    test('kind 21 maps to type "typedef"', () {
+      final sym = DartdocSymbol.fromJson({
+        'name': 'ReadResourceHandler',
+        'qualifiedName': 'server.ReadResourceHandler',
+        'href': 'server/ReadResourceHandler.html',
+        'kind': 21,
+        'desc': '',
+      });
+      expect(sym.type, equals('typedef'));
+    });
+
+    test('kind 11 maps to type "mixin"', () {
+      final sym = DartdocSymbol.fromJson({
+        'name': 'ResourcesSupport',
+        'qualifiedName': 'server.ResourcesSupport',
+        'href': 'server/ResourcesSupport.html',
+        'kind': 11,
+        'desc': '',
+      });
+      expect(sym.type, equals('mixin'));
+    });
+
+    test('kind 6 maps to type "extension"', () {
+      final sym = DartdocSymbol.fromJson({
+        'name': 'McpErrorCodes',
+        'qualifiedName': 'server.McpErrorCodes',
+        'href': 'server/McpErrorCodes.html',
+        'kind': 6,
+        'desc': '',
+      });
+      expect(sym.type, equals('extension'));
+    });
+
+    test('kind 7 maps to type "extension-type"', () {
+      final sym = DartdocSymbol.fromJson({
+        'name': 'Annotations',
+        'qualifiedName': 'server.Annotations',
+        'href': 'server/Annotations.html',
+        'kind': 7,
+        'desc': '',
+      });
+      expect(sym.type, equals('extension-type'));
+    });
+
     test('unknown kind passes through as its string representation', () {
       final sym = DartdocSymbol.fromJson({
         'name': 'x',

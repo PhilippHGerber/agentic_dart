@@ -333,8 +333,9 @@ void main() {
       loggedMessages.clear();
       await handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
 
-      final debugLogs =
-          loggedMessages.where((m) => m.$1 == LoggingLevel.debug).map((m) => m.$2.toString());
+      final debugLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.debug)
+          .map((m) => m.$2.toString());
       expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
     });
   });
