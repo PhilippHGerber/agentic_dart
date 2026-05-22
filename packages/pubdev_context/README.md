@@ -55,8 +55,9 @@ dart pub global activate pubdev_context
 
 | URI                               | Description                                              |
 | --------------------------------- | -------------------------------------------------------- |
+| `pub://meta/resources`            | Resource manifest — lists all available URIs (start here)|
 | `pub://meta/scoring`              | pub.dev 160-point scoring system reference               |
-| `pub://meta/sdk-versions`         | Current stable Dart and Flutter SDK versions             |
+| `pub://meta/sdk-versions`         | Current stable Dart and Flutter SDK versions as JSON     |
 | `pub://package/{name}/readme`     | Full package README as `text/markdown`                   |
 | `pub://package/{name}/example`    | Package example code as `text/markdown`                  |
 | `pub://package/{name}/api`        | dartdoc symbol index as `application/json`               |
@@ -91,6 +92,7 @@ Opens a browser UI where you can call tools, inspect schemas, and see raw JSON-R
 
 | pubdev_context | dart_mcp |
 | -------------- | -------- |
+| `0.3.x`        | `^0.5.1` |
 | `0.2.x`        | `^0.5.1` |
 | `0.1.x`        | `^0.5.1` |
 

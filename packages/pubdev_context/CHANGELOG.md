@@ -3,12 +3,16 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.0] - 2026-05-22
 
 ### Added
 
 - `pub://meta/resources` — new static resource that returns a JSON array of every available resource and resource template, each with its URI, MIME type, and description. Read it first to discover what the server exposes without enumerating resources manually.
 - Server instructions now list all six resource URIs and guide agents to read `pub://meta/resources` before making resource calls.
+
+### Added (test)
+
+- Integration test suite in `test/integration/` covering all five tools, four resources, and three lifecycle scenarios (49 tests total). Tagged `integration` in `dart_test.yaml`; excluded from the default `dart test` run via `paths: [test/unit]`. Run with `dart test test/integration/`.
 
 ### Changed
 
@@ -49,9 +53,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - CLI configuration via `--log-level` and `--cache-dir` flags with env var fallback
 - Stdio transport over stdin/stdout (via `dart_mcp ^0.5.1`)
 
-## dart_mcp Compatibility
 
-| pubdev_context | dart_mcp |
-| ----------- | -------- |
-| `0.2.x`     | `^0.5.1` |
-| `0.1.x`     | `^0.5.1` |
