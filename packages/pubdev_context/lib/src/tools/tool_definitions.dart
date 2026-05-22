@@ -18,7 +18,9 @@ const kServerInstructions =
     'You have access to the pub.dev Dart and Flutter package registry. '
     'Never guess a package name — always call search_packages first when the exact name is uncertain. '
     'Package discovery: search_packages → get_package → pub://package/{name}/readme. '
-    'API exploration: browse_api_symbols (one symbol at a time) → get_symbol_documentation → get_package_source_file if implementation details are missing. '
+    'API exploration: call get_symbol_documentation directly when the symbol name is known; '
+    'use browse_api_symbols only when the symbol name is unknown. '
+    'Follow up with get_package_source_file if implementation details are missing. '
     'Upgrade analysis: get_changelog with from_version set → inspect breaking flags → rewrite affected code. '
     'Package comparison: search_packages → compare_packages on the top candidates. '
     'Every error response carries a machine-readable code and a suggestion field. Read suggestion before retrying. '
@@ -145,7 +147,6 @@ final browseApiSymbolsTool = Tool(
   description:
       'Use this only when you do not yet know the symbol name. When the name is already known, call `get_symbol_documentation` directly. '
       'Search for one symbol name at a time — multi-term queries like "PromptsSupport addPrompt" will not match. '
-      'Use the href from the result to call get_symbol_documentation for the full signature and doc comment. '
       'Use type to narrow results when you know the symbol kind (class, method, enum, etc.). '
       'Call get_package first if you are not certain the package name is correct.',
   inputSchema: ObjectSchema(
@@ -183,19 +184,29 @@ final getSymbolDocumentationTool = Tool(
   name: 'get_symbol_documentation',
   description:
       'Call this to read the full signature and doc comment for a known symbol. '
-      'If the symbol name is unknown, call browse_api_symbols first to get the href, then pass it here. '
+      'Pass the short name ("Client") or a qualified name ("Client.send") — the server resolves it automatically. '
+      'Use browse_api_symbols first only when the symbol name is unknown. '
       'Use this to understand parameter types, return types, and usage notes for an API symbol. '
+      'If the result is ambiguous_symbol, pick a qualifiedName from the alternatives array and retry. '
       'If the doc comment does not cover thrown exceptions or internal behavior, call get_package_source_file next.',
   inputSchema: ObjectSchema(
-    required: ['package', 'href'],
+    required: ['package', 'symbol'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name, same as used in browse_api_symbols.',
+        description: 'The pub.dev package name. Verify with get_package if uncertain.',
       ),
-      'href': Schema.string(
+      'symbol': Schema.string(
         description:
-            'Relative documentation path from the href field in a browse_api_symbols result '
-            '(e.g. "http/Client-class.html"). Pass it without modification.',
+            'The symbol name to look up. Accepted forms, in resolution order: '
+            '(1) full qualifiedName (e.g. "http.Client") — use this when retrying after ambiguous_symbol; '
+            '(2) short name (e.g. "Client"); '
+            '(3) qualified suffix without library prefix (e.g. "Client.send"). '
+            'On ambiguous_symbol, pick any value from the alternatives array and pass it here.',
+      ),
+      'version': Schema.string(
+        description:
+            'A specific version string (e.g. "1.2.0"). '
+            'Omit to use the latest published version.',
       ),
     },
   ),

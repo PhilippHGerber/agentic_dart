@@ -39,12 +39,18 @@ abstract final class DomainErrors {
 
   /// The requested source file was not found in the package tarball.
   static const sourceFileNotFound = 'source_file_not_found';
+
+  /// The supplied symbol name matches more than one entry and could not be
+  /// resolved unambiguously.
+  static const ambiguousSymbol = 'ambiguous_symbol';
 }
 
 /// A structured error value returned when a pub.dev API operation fails.
 ///
-/// Serialises to `{ "error": ..., "message": ..., "suggestion": ..., "docs": ... }`.
+/// Serialises to `{ "error": ..., "message": ..., "suggestion": ..., "docs": ..., "alternatives": ... }`.
 /// Pass [docs] when a relevant pub.dev URL aids self-service recovery.
+/// Pass [alternatives] for [DomainErrors.ambiguousSymbol] to list candidate
+/// qualified names the caller can use to retry with a more specific input.
 final class DomainError {
   /// Creates a [DomainError] with the required fields.
   const DomainError({
@@ -52,6 +58,7 @@ final class DomainError {
     required this.message,
     required this.suggestion,
     this.docs,
+    this.alternatives,
   });
 
   /// A short machine-readable code identifying the failure category.
@@ -66,12 +73,19 @@ final class DomainError {
   /// An optional URL to relevant documentation.
   final String? docs;
 
+  /// Candidate qualified names returned with [DomainErrors.ambiguousSymbol].
+  ///
+  /// Each entry is a fully-qualified symbol name (e.g. `"http.Client"`) that
+  /// the caller can pass as `symbol` to disambiguate the request.
+  final List<String>? alternatives;
+
   /// Returns this error as a JSON-encodable map.
   Map<String, Object?> toJson() => {
     'error': error,
     'message': message,
     'suggestion': suggestion,
     if (docs != null) 'docs': docs,
+    if (alternatives != null) 'alternatives': alternatives,
   };
 
   /// Returns this error encoded as a JSON string.

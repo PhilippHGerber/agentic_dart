@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Breaking:** `get_symbol_documentation` no longer accepts an `href` parameter. It now accepts a `symbol` parameter (required) and an optional `version` parameter. Agents pass a human-readable name (`"Client"`, `"Client.send"`, or a full `qualifiedName` like `"http.Client"`) and the server resolves it to an href internally via a three-pass lookup against the cached API index. This eliminates the mandatory `browse_api_symbols → get_symbol_documentation` two-step for agents that already know the symbol name.
+- **Fix:** `get_symbol_documentation` now correctly resolves a full `qualifiedName` input (e.g. `"http.Client"`) via a new Pass 0 exact-`qualifiedName` match. Previously, retrying an `ambiguous_symbol` error with a value from the `alternatives` array always produced `symbol_not_found` because neither the short-name nor the suffix-match passes accepted a fully-qualified name.
+- **Fix:** Symbol-doc cache keys now include the effective version (`symbol_doc:<package>:<version>:<href>`). Previously, the key omitted the version, so a cached response for one version could silently be served for a different version, and a cached 404 from one version could block valid lookups in another.
+- `browse_api_symbols` description updated: the outdated hint to pass the `href` to `get_symbol_documentation` has been removed.
+- Server instructions updated to reflect the new direct-symbol workflow.
+- `DomainError` gains an optional `alternatives` field, included in `ambiguous_symbol` error payloads.
 - Tool `search_api_symbols` renamed to `browse_api_symbols`. The new name reflects the tool's role as a pure discovery aid for when the symbol name is unknown;
 
 ## [0.3.0] - 2026-05-22

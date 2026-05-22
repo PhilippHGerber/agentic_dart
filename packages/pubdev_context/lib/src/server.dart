@@ -209,6 +209,7 @@ base class PubMcpServer extends MCPServer
     final getSymbolDocHandler = GetSymbolDocumentationHandler(
       client: _client,
       cache: _symbolDocCache,
+      apiIndexCache: _apiIndexCache,
       log: log,
     );
     registerTool(getSymbolDocumentationTool, getSymbolDocHandler.call);

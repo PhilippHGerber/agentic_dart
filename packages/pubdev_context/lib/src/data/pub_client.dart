@@ -356,12 +356,15 @@ final class PubDevClient {
     };
   }
 
-  /// Returns the dartdoc symbol index for [name].
+  /// Returns the dartdoc symbol index for [name] at [version].
   ///
-  /// Fetches `GET /documentation/{name}/latest/index.json` and parses each
-  /// entry into a [DartdocSymbol].
-  Future<PubDevResult<List<DartdocSymbol>>> getApiIndex(String name) async {
-    final result = await _fetchJsonList('$_kBaseUrl/documentation/$name/latest/index.json');
+  /// Fetches `GET /documentation/{name}/{version}/index.json` and parses each
+  /// entry into a [DartdocSymbol]. [version] defaults to `'latest'`.
+  Future<PubDevResult<List<DartdocSymbol>>> getApiIndex(
+    String name, {
+    String version = 'latest',
+  }) async {
+    final result = await _fetchJsonList('$_kBaseUrl/documentation/$name/$version/index.json');
     return switch (result) {
       PubDevFailure<List<Object?>>(:final error) => PubDevFailure(error),
       PubDevSuccess<List<Object?>>(:final value) => PubDevSuccess(
@@ -403,11 +406,16 @@ final class PubDevClient {
 
   /// Returns the plain-text content of a dartdoc symbol page for [package].
   ///
-  /// Fetches `GET /documentation/{package}/latest/{href}` and strips HTML.
-  /// The [href] must come from a prior [getApiIndex] call. Returns
-  /// [DomainErrors.symbolNotFound] when the page resolves to HTTP 404.
-  Future<PubDevResult<String>> getSymbolDoc(String package, String href) async {
-    final url = '$_kBaseUrl/documentation/$package/latest/$href';
+  /// Fetches `GET /documentation/{package}/{version}/{href}` and strips HTML.
+  /// The [href] must come from a prior [getApiIndex] call. [version] defaults
+  /// to `'latest'`. Returns [DomainErrors.symbolNotFound] when the page
+  /// resolves to HTTP 404.
+  Future<PubDevResult<String>> getSymbolDoc(
+    String package,
+    String href, {
+    String version = 'latest',
+  }) async {
+    final url = '$_kBaseUrl/documentation/$package/$version/$href';
     final result = await _retry.execute(() => _getRaw(url));
     return switch (result) {
       PubDevFailure<String>(:final error) when error.error == DomainErrors.packageNotFound =>
@@ -415,8 +423,7 @@ final class PubDevClient {
           DomainError(
             error: DomainErrors.symbolNotFound,
             message: 'Symbol documentation page not found.',
-            suggestion:
-                'Verify the href came from browse_api_symbols and the package has dartdoc output.',
+            suggestion: 'Verify the symbol name is correct and the package has dartdoc output.',
           ),
         ),
       PubDevFailure<String>(:final error) => PubDevFailure(error),

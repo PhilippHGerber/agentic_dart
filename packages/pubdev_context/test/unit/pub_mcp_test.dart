@@ -256,11 +256,11 @@ void main() {
         expect(names, contains('get_symbol_documentation'));
       });
 
-      test('get_symbol_documentation input schema marks package and href as required', () async {
+      test('get_symbol_documentation input schema marks package and symbol as required', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_symbol_documentation');
-        expect(tool.inputSchema.required, containsAll(['package', 'href']));
+        expect(tool.inputSchema.required, containsAll(['package', 'symbol']));
       });
     });
 
