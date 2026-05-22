@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- All `Tool`, `Resource`, `ResourceTemplate`, and `Prompt` description fields rewritten as direct instructions to the LLM agent (issue #21). Every description now states when to invoke it, what to do with the result, what to call next, and which anti-patterns to avoid. `kServerInstructions` updated to orient the agent with the four standard workflows. `search_api_symbols` now explicitly warns against multi-term queries. Parameter descriptions updated to state when to set each parameter and what happens when it is omitted.
+- `PubDevClient` now caps concurrent HTTP requests via an internal semaphore (default `maxConcurrency: 5`). This prevents pub.dev 429 rate-limit errors when `search()` fans out to many parallel calls or when an LLM agent issues multiple tool calls simultaneously. The limit is injectable at construction time for testing.
+
 ### Fixed
 
 - `search_api_symbols` now correctly maps `kind` integers from `index.json` to their dartdoc labels. The entire `_kindToType` table is rewritten to match the ordinal positions of dartdoc's `Kind` enum, fixing enums (kind 5) being reported as `typedef`, mixins (kind 11) as `constant`, and typedefs (kind 21) falling through to a raw integer string, among other mismatches.

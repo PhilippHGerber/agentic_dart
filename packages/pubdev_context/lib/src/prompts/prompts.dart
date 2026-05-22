@@ -21,13 +21,15 @@ import '../data/domain_error.dart';
 final kAddAndSetupPackagePrompt = Prompt(
   name: 'add-and-setup-package',
   description:
-      'Guides an LLM through reading a package README, explaining its '
-      'core purpose, writing boilerplate initialisation code, and listing any '
-      'native platform setup steps.',
+      'Surface this when the user wants to add a new package to their project. '
+      "It reads the README, explains the package's core purpose, generates boilerplate initialisation code, "
+      'and lists native platform setup steps.',
   arguments: [
     PromptArgument(
       name: 'package_name',
-      description: 'The pub.dev package name to add and set up.',
+      description:
+          'The exact pub.dev package name to add. '
+          'Use search_packages first if you are not certain of the name.',
       required: true,
     ),
   ],
@@ -37,22 +39,23 @@ final kAddAndSetupPackagePrompt = Prompt(
 final kAnalyzeUpgradeImpactPrompt = Prompt(
   name: 'analyze-upgrade-impact',
   description:
-      'Guides an LLM through identifying breaking changes in a package '
-      'upgrade and rewriting any affected source code to comply with the new API.',
+      'Surface this when the user wants to upgrade a dependency and needs to check for breaking changes. '
+      'It fetches changelog entries between from_version and to_version, identifies breaking changes, '
+      'and rewrites affected source code.',
   arguments: [
     PromptArgument(
       name: 'package_name',
-      description: 'The pub.dev package name to analyse.',
+      description: 'The exact pub.dev package name to analyse.',
       required: true,
     ),
     PromptArgument(
       name: 'from_version',
-      description: 'The currently installed version.',
+      description: 'The currently installed version string. Changelog entries older than this are ignored.',
       required: true,
     ),
     PromptArgument(
       name: 'to_version',
-      description: 'The target version to upgrade to.',
+      description: 'The target upgrade version string.',
       required: true,
     ),
   ],
@@ -62,9 +65,9 @@ final kAnalyzeUpgradeImpactPrompt = Prompt(
 final kEvaluateAlternativesPrompt = Prompt(
   name: 'evaluate-alternatives',
   description:
-      'Guides an LLM through discovering packages that match a use '
-      'case, comparing the top results, and producing a recommendation with a '
-      'markdown comparison matrix.',
+      'Surface this when the user asks which package to use for a given task. '
+      'It searches for matching packages, compares the top results, and produces a recommendation '
+      'with a markdown comparison matrix.',
   arguments: [
     PromptArgument(
       name: 'use_case',
@@ -73,12 +76,12 @@ final kEvaluateAlternativesPrompt = Prompt(
     ),
     PromptArgument(
       name: 'sdk',
-      description: 'Optional Dart SDK filter (e.g. "flutter").',
+      description: 'Restrict search to packages supporting this SDK (e.g. "flutter"). Omit for all SDKs.',
       required: false,
     ),
     PromptArgument(
       name: 'platform',
-      description: 'Optional platform filter (e.g. "android", "ios", "web").',
+      description: 'Restrict search to packages supporting this platform (e.g. "android", "ios", "web"). Omit for all platforms.',
       required: false,
     ),
   ],

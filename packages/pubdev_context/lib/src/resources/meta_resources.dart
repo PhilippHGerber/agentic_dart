@@ -55,7 +55,9 @@ const _kRequestTimeout = Duration(seconds: 15);
 final kScoringResource = Resource(
   uri: _kScoringUri,
   name: 'pub.dev scoring guide',
-  description: 'Plain-text explanation of the pub.dev 160-point scoring system.',
+  description:
+      'Read this when the user asks how pub.dev scores packages, or when you need to explain a low score. '
+      'It covers the 160-point breakdown: conventions, documentation, platform support, static analysis, and dependency freshness.',
   mimeType: 'text/plain',
 );
 
@@ -63,7 +65,10 @@ final kScoringResource = Resource(
 final kSdkVersionsResource = Resource(
   uri: _kSdkVersionsUri,
   name: 'Stable SDK versions',
-  description: 'Current stable Dart and Flutter SDK version strings as JSON.',
+  description:
+      'Read this when you need the current stable Dart or Flutter SDK version — '
+      'for example when validating SDK constraints in pubspec.yaml. '
+      'Returns JSON: { "dart": "<version>", "flutter": "<version>" }.',
   mimeType: 'application/json',
 );
 

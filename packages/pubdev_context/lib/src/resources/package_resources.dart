@@ -152,8 +152,9 @@ final class PackageResourcesHandler {
     uriTemplate: kReadmeUriTemplate,
     name: 'Package README',
     description:
-        'Full README for a pub.dev package, extracted from the documentation '
-        'page. Cached for 60 minutes.',
+        'Read this when you need the full README for a package — '
+        'it is more complete than the excerpt returned by get_package. '
+        'Use it when the user asks how to set up or use a package, or before writing initialisation code.',
     mimeType: 'text/markdown',
   );
 
@@ -164,8 +165,8 @@ final class PackageResourcesHandler {
     uriTemplate: kExampleUriTemplate,
     name: 'Package example',
     description:
-        'Example code for a pub.dev package, extracted from the example tab. '
-        'Cached for 60 minutes.',
+        "Read this to retrieve working example code from the package's example tab. "
+        'Use it before writing setup or usage code — copy patterns from here instead of guessing.',
     mimeType: 'text/markdown',
   );
 
@@ -179,8 +180,9 @@ final class PackageResourcesHandler {
     uriTemplate: kChangelogUriTemplate,
     name: 'Package changelog',
     description:
-        'Full CHANGELOG.md for a pub.dev package, converted from the rendered '
-        'HTML changelog page. Cached for 60 minutes.',
+        'Read this for the complete, unstructured changelog text. '
+        'Prefer get_changelog when you need structured entries with from_version filtering and breaking flags. '
+        'Use this only when you need the full raw markdown.',
     mimeType: 'text/markdown',
   );
 
@@ -193,9 +195,9 @@ final class PackageResourcesHandler {
     uriTemplate: kApiUriTemplate,
     name: 'Package API index',
     description:
-        'Dartdoc symbol index (index.json) for a pub.dev package as a JSON '
-        'array. Shares its cache with the search_api_symbols tool. '
-        'Cached for 60 minutes.',
+        'Read this only when you need the raw dartdoc symbol index — '
+        'prefer search_api_symbols for filtered, ranked symbol lookup. '
+        'Use it for bulk symbol scanning or when search_api_symbols pagination is insufficient.',
     mimeType: 'application/json',
   );
 
