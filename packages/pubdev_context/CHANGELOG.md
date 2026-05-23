@@ -3,17 +3,25 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.4.0.rc.1]
+
+### Added
+
+- **`get_method_body` tool** — returns the exact, untruncated source text of a method, constructor, accessor, or top-level function using AST-precise extraction (`package:analyzer` / `parseString()`). Provide `package`, `method`, and optional `class` for a class member; omit `class` for a top-level function. Supports named-constructor suffix matching (`"fromJson"` → `ClassName.fromJson`), default-constructor retrieval (`"new"` → unnamed constructor, consistent with `ClassName.new` syntax), operator normalisation (`"=="` and `"operator =="` both resolve), and labelled getter+setter pairs when both exist for the same name. Top-level functions are located via the API index (`qualifiedName` suffix match); multiple matches return `ambiguous_symbol` with an `alternatives` array for a qualified retry.
+- `DomainErrors.classNotFound` (`class_not_found`) — returned when the `class` parameter names a type not found in any source file of the package.
+- `DomainErrors.methodNotFound` (`method_not_found`) — returned when the named member is absent from the class or no matching top-level function exists.
 
 ### Changed
 
-- **Breaking:** `get_symbol_documentation` no longer accepts an `href` parameter. It now accepts a `symbol` parameter (required) and an optional `version` parameter. Agents pass a human-readable name (`"Client"`, `"Client.send"`, or a full `qualifiedName` like `"http.Client"`) and the server resolves it to an href internally via a three-pass lookup against the cached API index. This eliminates the mandatory `browse_api_symbols → get_symbol_documentation` two-step for agents that already know the symbol name.
-- **Fix:** `get_symbol_documentation` now correctly resolves a full `qualifiedName` input (e.g. `"http.Client"`) via a new Pass 0 exact-`qualifiedName` match. Previously, retrying an `ambiguous_symbol` error with a value from the `alternatives` array always produced `symbol_not_found` because neither the short-name nor the suffix-match passes accepted a fully-qualified name.
-- **Fix:** Symbol-doc cache keys now include the effective version (`symbol_doc:<package>:<version>:<href>`). Previously, the key omitted the version, so a cached response for one version could silently be served for a different version, and a cached 404 from one version could block valid lookups in another.
-- `browse_api_symbols` description updated: the outdated hint to pass the `href` to `get_symbol_documentation` has been removed.
-- Server instructions updated to reflect the new direct-symbol workflow.
+- **Breaking:** `get_symbol_documentation` no longer accepts an `href` parameter. It now accepts `symbol` (required) and optional `version`. Agents pass a human-readable name (`"Client"`, `"Client.send"`, or a full `qualifiedName` like `"http.Client"`) and the server resolves it internally — eliminating the mandatory `browse_api_symbols → get_symbol_documentation` two-step for agents that already know the symbol name.
 - `DomainError` gains an optional `alternatives` field, included in `ambiguous_symbol` error payloads.
-- Tool `search_api_symbols` renamed to `browse_api_symbols`. The new name reflects the tool's role as a pure discovery aid for when the symbol name is unknown;
+- Tool `search_api_symbols` renamed to `browse_api_symbols` to better reflect its role as a discovery aid for when the symbol name is unknown.
+- Server instructions updated to reflect the direct-symbol workflow.
+
+### Fixed
+
+- `get_symbol_documentation` now correctly resolves a full `qualifiedName` input (e.g. `"http.Client"`) via an exact-match pass. Previously, retrying an `ambiguous_symbol` error with a value from the `alternatives` array always produced `symbol_not_found`.
+- `get_symbol_documentation` cache keys now include the effective version. Previously, a cached response for one version could silently be served for a different version, and a cached error from one version could block valid lookups in another.
 
 ## [0.3.0] - 2026-05-22
 

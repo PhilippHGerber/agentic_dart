@@ -25,6 +25,7 @@ import 'resources/package_resources.dart';
 import 'tools/browse_api_symbols.dart';
 import 'tools/compare_packages.dart';
 import 'tools/get_changelog.dart';
+import 'tools/get_method_body.dart';
 import 'tools/get_package.dart';
 import 'tools/get_package_source_file.dart';
 import 'tools/get_symbol_documentation.dart';
@@ -230,6 +231,15 @@ base class PubMcpServer extends MCPServer
     );
     registerTool(listPackageSourceFilesTool, listSourceFilesHandler.call);
     log(LoggingLevel.debug, 'registered tool: list_package_source_files');
+
+    final getMethodBodyHandler = GetMethodBodyHandler(
+      client: _client,
+      sourceFilesCache: _sourceFilesCache,
+      apiIndexCache: _apiIndexCache,
+      log: log,
+    );
+    registerTool(getMethodBodyTool, getMethodBodyHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_method_body');
   }
 
   void _registerResources() {

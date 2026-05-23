@@ -42,6 +42,9 @@ const Duration kSymbolDocTtl = Duration(hours: 1);
 /// TTL applied to source file map entries (path → content maps).
 const Duration kSourceFileTtl = Duration(hours: 1);
 
+/// TTL applied to AST snapshot entries (parsed `ParseStringResult` objects).
+const Duration kAstSnapshotTtl = Duration(hours: 1);
+
 /// TTL applied to meta-resource entries (scoring, SDK versions).
 const Duration kMetaResourcesTtl = Duration(hours: 24);
 

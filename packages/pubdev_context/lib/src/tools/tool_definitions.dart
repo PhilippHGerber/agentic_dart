@@ -276,6 +276,49 @@ final listPackageSourceFilesTool = Tool(
   ),
 );
 
+// ─── get_method_body ──────────────────────────────────────────────────────────
+
+/// The `get_method_body` [Tool] definition registered with the MCP server.
+final getMethodBodyTool = Tool(
+  name: 'get_method_body',
+  description:
+      'Call this to get the exact source implementation of a method, constructor, '
+      'accessor, or top-level function — verbatim, no truncation. '
+      'Use when get_symbol_documentation shows the signature but not the body, '
+      'or when you need to inspect thrown exceptions and internal branching logic. '
+      'For a class member, provide package, class, and method. '
+      'For a top-level function, provide package and method (omit class). '
+      'On ambiguous_symbol, pick a qualifiedName from alternatives and pass it as method.',
+  inputSchema: ObjectSchema(
+    required: ['package', 'method'],
+    properties: {
+      'package': Schema.string(
+        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+      ),
+      'method': Schema.string(
+        description:
+            'The method, constructor, or function name to extract. '
+            'For operators, pass either "==" or "operator ==" — both are accepted. '
+            'For the default (unnamed) constructor, pass "new" (matches ClassName.new semantics). '
+            'For named constructors, pass the constructor suffix (e.g. "fromJson"). '
+            'For a top-level function, pass the short name (e.g. "get" for http.get) '
+            'for the initial lookup. On ambiguous_symbol, pass the full qualifiedName '
+            'from the alternatives array (e.g. "http.get") to resolve exactly.',
+      ),
+      'class': Schema.string(
+        description:
+            'The class, mixin, enum, or extension name containing the member. '
+            'Omit to extract a top-level function instead of a class member.',
+      ),
+      'version': Schema.string(
+        description:
+            'A specific version string (e.g. "1.2.0"). '
+            'Omit to use the latest published version.',
+      ),
+    },
+  ),
+);
+
 // ─── compare_packages ─────────────────────────────────────────────────────────
 
 /// The `compare_packages` [Tool] definition registered with the MCP server.

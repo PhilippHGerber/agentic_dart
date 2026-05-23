@@ -43,6 +43,14 @@ abstract final class DomainErrors {
   /// The supplied symbol name matches more than one entry and could not be
   /// resolved unambiguously.
   static const ambiguousSymbol = 'ambiguous_symbol';
+
+  /// The requested class (or mixin, enum, or extension) was not found in any
+  /// source file of the package.
+  static const classNotFound = 'class_not_found';
+
+  /// The requested method, constructor, or accessor was not found in the
+  /// specified class, or the named top-level function was not found.
+  static const methodNotFound = 'method_not_found';
 }
 
 /// A structured error value returned when a pub.dev API operation fails.
