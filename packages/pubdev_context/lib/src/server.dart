@@ -12,6 +12,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:analyzer/dart/analysis/results.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 
@@ -29,6 +30,7 @@ import 'tools/get_method_body.dart';
 import 'tools/get_package.dart';
 import 'tools/get_package_source_file.dart';
 import 'tools/get_symbol_documentation.dart';
+import 'tools/get_throw_statements.dart';
 import 'tools/list_package_source_files.dart';
 import 'tools/search_packages.dart';
 import 'tools/tool_definitions.dart';
@@ -232,14 +234,29 @@ base class PubMcpServer extends MCPServer
     registerTool(listPackageSourceFilesTool, listSourceFilesHandler.call);
     log(LoggingLevel.debug, 'registered tool: list_package_source_files');
 
+    // Shared AST snapshot cache — reused by get_method_body and get_throw_statements
+    // so the same source file is never parsed twice in a single agent turn.
+    final sharedAstCache = ResponseCache<ParseStringResult>();
+
     final getMethodBodyHandler = GetMethodBodyHandler(
       client: _client,
       sourceFilesCache: _sourceFilesCache,
       apiIndexCache: _apiIndexCache,
       log: log,
+      astCache: sharedAstCache,
     );
     registerTool(getMethodBodyTool, getMethodBodyHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_method_body');
+
+    final getThrowStatementsHandler = GetThrowStatementsHandler(
+      client: _client,
+      sourceFilesCache: _sourceFilesCache,
+      apiIndexCache: _apiIndexCache,
+      log: log,
+      astCache: sharedAstCache,
+    );
+    registerTool(getThrowStatementsTool, getThrowStatementsHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_throw_statements');
   }
 
   void _registerResources() {

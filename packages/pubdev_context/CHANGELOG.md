@@ -3,7 +3,13 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.0.rc.1]
+## [0.4.0-rc.2]
+
+### Added
+
+- **`get_throw_statements` tool** — scans a scoped region of a package's source for `throw` expressions and returns each one with the thrown type and surrounding control-flow context. Three call shapes: `class` only (all throws in the class), `class` + `method` (one method), or `method` only (top-level function). Closures inside a scanned method are excluded — only direct throws in the scanned scope are reported. Shares the AST snapshot cache with `get_method_body` so a source file is never parsed twice in the same agent turn.
+
+## [0.4.0-rc.1]
 
 ### Added
 

@@ -379,7 +379,7 @@ void main() {
     setUpAll(() async {
       result = await mcp.callTool('get_symbol_documentation', {
         'package': 'http',
-        'href': 'http/Client-class.html',
+        'symbol': 'http.Client',
       });
       text = _text(result);
     });

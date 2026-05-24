@@ -20,7 +20,8 @@ const kServerInstructions =
     'Package discovery: search_packages → get_package → pub://package/{name}/readme. '
     'API exploration: call get_symbol_documentation directly when the symbol name is known; '
     'use browse_api_symbols only when the symbol name is unknown. '
-    'Follow up with get_package_source_file if implementation details are missing. '
+    'For thrown exceptions, call get_throw_statements before loading full source files. '
+    'Follow up with get_method_body or get_package_source_file only when broader implementation details are still missing. '
     'Upgrade analysis: get_changelog with from_version set → inspect breaking flags → rewrite affected code. '
     'Package comparison: search_packages → compare_packages on the top candidates. '
     'Every error response carries a machine-readable code and a suggestion field. Read suggestion before retrying. '
@@ -188,7 +189,8 @@ final getSymbolDocumentationTool = Tool(
       'Use browse_api_symbols first only when the symbol name is unknown. '
       'Use this to understand parameter types, return types, and usage notes for an API symbol. '
       'If the result is ambiguous_symbol, pick a qualifiedName from the alternatives array and retry. '
-      'If the doc comment does not cover thrown exceptions or internal behavior, call get_package_source_file next.',
+      'If the doc comment does not cover thrown exceptions, call get_throw_statements next. '
+      'If you still need broader implementation details, call get_method_body or get_package_source_file next.',
   inputSchema: ObjectSchema(
     required: ['package', 'symbol'],
     properties: {
@@ -219,7 +221,8 @@ final getPackageSourceFileTool = Tool(
   name: 'get_package_source_file',
   description:
       'Call this when get_symbol_documentation does not expose implementation details '
-      'such as thrown exceptions, internal branching logic, or undocumented invariants. '
+      'such as internal branching logic or undocumented invariants. '
+      'Prefer get_throw_statements first when you only need thrown exceptions. '
       'Derive the file path from the href returned by browse_api_symbols. '
       'On source_file_not_found, read the suggestion field — it lists the closest filename matches. '
       'If the suggestion is not sufficient, call list_package_source_files to browse the full file tree.',
@@ -309,6 +312,52 @@ final getMethodBodyTool = Tool(
         description:
             'The class, mixin, enum, or extension name containing the member. '
             'Omit to extract a top-level function instead of a class member.',
+      ),
+      'version': Schema.string(
+        description:
+            'A specific version string (e.g. "1.2.0"). '
+            'Omit to use the latest published version.',
+      ),
+    },
+  ),
+);
+
+// ─── get_throw_statements ─────────────────────────────────────────────────────
+
+/// The `get_throw_statements` [Tool] definition registered with the MCP server.
+final getThrowStatementsTool = Tool(
+  name: 'get_throw_statements',
+  description:
+      'Call this to find every `throw` expression in a class or function — '
+      'each result includes the thrown type and the surrounding control-flow context. '
+      'Use when you need to answer "what can this throw?" without loading entire source files. '
+      'Provide `class` to scan all methods in a class; '
+      'provide `class` + `method` to scan one method; '
+      'provide only `method` to scan a top-level function. '
+      'At least one of `class` or `method` is required. '
+      'On ambiguous_symbol for a top-level function, '
+      'pick a qualifiedName from the alternatives array and pass it as `method`.',
+  inputSchema: ObjectSchema(
+    required: ['package'],
+    properties: {
+      'package': Schema.string(
+        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+      ),
+      'class': Schema.string(
+        description:
+            'The class, mixin, enum, or extension name to scan. '
+            'Omit to scan a top-level function instead. '
+            'Provide without `method` to scan all throws in the entire class.',
+      ),
+      'method': Schema.string(
+        description:
+            'The method or top-level function name to scan. '
+            'When combined with `class`, scans that specific method only. '
+            'For operators, pass either "==" or "operator ==". '
+            'For the default (unnamed) constructor, pass "new". '
+            'For named constructors, pass only the constructor suffix (e.g. "fromJson"). '
+            'When `class` is omitted, treats this as a top-level function name. '
+            'On ambiguous_symbol, pass the full qualifiedName from alternatives.',
       ),
       'version': Schema.string(
         description:

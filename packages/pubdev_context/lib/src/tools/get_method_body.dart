@@ -66,6 +66,18 @@ import 'browse_api_symbols.dart';
 /// Full key format: `$kAstSnapshotCachePrefix:<package>:<version>:<filepath>`.
 const kAstSnapshotCachePrefix = 'ast';
 
+// ─── Private types ────────────────────────────────────────────────────────────
+
+/// Result of scanning a single file for a class member.
+///
+/// - `classFound == false, result == null` → class absent from this file;
+///   caller should scan the next file.
+/// - `classFound == true, result == null` → class found but member absent;
+///   caller should continue scanning for a homonymous type in another file
+///   before concluding `method_not_found`.
+/// - `classFound == true, result != null` → class and member found; done.
+typedef _MemberScanResult = ({CallToolResult? result, bool classFound});
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 /// Handles calls to the `get_method_body` MCP tool.
@@ -80,17 +92,23 @@ const kAstSnapshotCachePrefix = 'ast';
 /// sleeping.
 final class GetMethodBodyHandler {
   /// Creates a [GetMethodBodyHandler].
+  ///
+  /// Supply [astCache] to share the parsed-AST store with another handler
+  /// (e.g. `GetThrowStatementsHandler`) so that the same source file is never
+  /// parsed twice across a single agent turn.  When omitted, an internal cache
+  /// is created and owned by this handler.
   GetMethodBodyHandler({
     required PubDevClient client,
     required ResponseCache<Map<String, String>> sourceFilesCache,
     required ResponseCache<List<DartdocSymbol>> apiIndexCache,
     required void Function(LoggingLevel, Object) log,
+    ResponseCache<ParseStringResult>? astCache,
     Clock? clock,
   }) : _client = client,
        _sourceFilesCache = sourceFilesCache,
        _apiIndexCache = apiIndexCache,
        _log = log,
-       _astCache = ResponseCache(clock: clock ?? DateTime.now);
+       _astCache = astCache ?? ResponseCache(clock: clock ?? DateTime.now);
 
   final PubDevClient _client;
   final ResponseCache<Map<String, String>> _sourceFilesCache;
@@ -163,9 +181,14 @@ final class GetMethodBodyHandler {
       ...files.keys.where((k) => k.endsWith('.dart') && !k.startsWith('lib/')),
     ];
 
+    // Continue scanning ALL files: a package may have two classes with the
+    // same name in different libraries.  Stopping at the first match would
+    // return `method_not_found` from a homonymous class that doesn't have
+    // the requested member, ignoring the second class that does.
+    var classWasFound = false;
     for (final filePath in sortedPaths) {
       final content = files[filePath]!;
-      final result = await _extractMemberFromFile(
+      final (:result, :classFound) = await _extractMemberFromFile(
         package,
         version,
         filePath,
@@ -173,28 +196,44 @@ final class GetMethodBodyHandler {
         className,
         method,
       );
+      if (classFound) classWasFound = true;
       if (result != null) return result;
     }
 
-    return _domainError(
-      DomainError(
-        error: DomainErrors.classNotFound,
-        message: 'Class "$className" was not found in the source files of "$package".',
-        suggestion:
-            'Verify the class name is spelled correctly. '
-            'Use browse_api_symbols with type=class to discover class names.',
-      ),
-    );
+    return classWasFound
+        ? _domainError(
+            DomainError(
+              error: DomainErrors.methodNotFound,
+              message: 'Member "$method" was not found in class "$className".',
+              suggestion:
+                  'Verify the member name is spelled correctly. '
+                  'Use get_symbol_documentation to inspect all members of this class.',
+            ),
+          )
+        : _domainError(
+            DomainError(
+              error: DomainErrors.classNotFound,
+              message:
+                  'Class "$className" was not found in the source files of "$package".',
+              suggestion:
+                  'Verify the class name is spelled correctly. '
+                  'Use browse_api_symbols with type=class to discover class names.',
+            ),
+          );
   }
 
   /// Tries to find [className] in [filePath] and extract [method] from it.
   ///
-  /// Returns `null` when [className] is not declared in this file, allowing
-  /// the caller to continue scanning other files.
+  /// Returns `(result: null, classFound: false)` when [className] is not in
+  /// this file — the caller should continue scanning the next file.
   ///
-  /// Returns a [CallToolResult] (success or `method_not_found`) when the class
-  /// is found, regardless of whether [method] is present.
-  Future<CallToolResult?> _extractMemberFromFile(
+  /// Returns `(result: null, classFound: true)` when the class is found but
+  /// [method] is absent — the caller should keep scanning other files for a
+  /// homonymous type that does contain [method] before concluding
+  /// `method_not_found`.
+  ///
+  /// Returns `(result: nonNull, classFound: true)` on success.
+  Future<_MemberScanResult> _extractMemberFromFile(
     String package,
     String version,
     String filePath,
@@ -208,10 +247,27 @@ final class GetMethodBodyHandler {
       final members = _membersForDecl(decl, className);
       if (members == null) continue;
 
-      // Class found in this file — extract the member (or return not-found).
-      return _extractMember(members, className, method, content);
+      // Class found in this file.  Check whether the requested member exists
+      // before calling _extractMember so we can signal "class found, member
+      // absent" without conflating it with a successful extraction.
+      final normalized = _normalizeMethodName(method);
+      final hasMatch = members.any((m) {
+        if (m is MethodDeclaration) return m.name.lexeme == normalized;
+        if (m is ConstructorDeclaration) return (m.name?.lexeme ?? '') == normalized;
+        return false;
+      });
+
+      if (!hasMatch) {
+        // Class found but member absent in this file — signal to keep scanning.
+        return (result: null, classFound: true);
+      }
+
+      return (
+        result: _extractMember(members, className, method, content),
+        classFound: true,
+      );
     }
-    return null;
+    return (result: null, classFound: false);
   }
 
   // ─── Top-level function extraction ────────────────────────────────────────
@@ -234,27 +290,14 @@ final class GetMethodBodyHandler {
       symbols = await cachedIndex;
     } else {
       _log(LoggingLevel.debug, 'get_method_body: index cache miss key=$indexCacheKey');
-      final indexFuture = _client.getApiIndex(package, version: effectiveVersion);
-      _apiIndexCache.set(
-        indexCacheKey,
-        indexFuture.then(
-          (r) => switch (r) {
-            PubDevSuccess(:final value) => value,
-            PubDevFailure() => <DartdocSymbol>[],
-          },
-        ),
-        kApiDocsTtl,
-      );
       _log(LoggingLevel.info, 'get_method_body: index HTTP request package=$package');
-      final result = await indexFuture;
+      final result = await _client.getApiIndex(package, version: effectiveVersion);
       if (result case PubDevFailure(:final error)) {
-        _apiIndexCache.invalidate(indexCacheKey);
         return _domainError(
           error.error == DomainErrors.packageNotFound ? _kNoDocumentation : error,
         );
       }
       symbols = (result as PubDevSuccess<List<DartdocSymbol>>).value;
-      // Overwrite the pre-set then-mapped future with the resolved value.
       _apiIndexCache.set(indexCacheKey, Future.value(symbols), kApiDocsTtl);
     }
 
@@ -372,21 +415,11 @@ final class GetMethodBodyHandler {
     _log(LoggingLevel.debug, 'get_method_body: source cache miss key=$cacheKey');
     _log(LoggingLevel.info, 'get_method_body: HTTP tarball request package=$package');
 
-    final fetchFuture = _client.getPackageSourceFiles(package, version);
-    _sourceFilesCache.set(
-      cacheKey,
-      fetchFuture.then(
-        (r) => r is PubDevSuccess<Map<String, String>> ? r.value : <String, String>{},
-      ),
-      kSourceFileTtl,
-    );
-
-    final result = await fetchFuture;
+    final result = await _client.getPackageSourceFiles(package, version);
     if (result case PubDevSuccess(:final value)) {
       _sourceFilesCache.set(cacheKey, Future.value(value), kSourceFileTtl);
       return PubDevSuccess(value);
     }
-    _sourceFilesCache.invalidate(cacheKey);
 
     // Preserve transient errors; re-wrap package_not_found with the package name.
     final error = (result as PubDevFailure<Map<String, String>>).error;
