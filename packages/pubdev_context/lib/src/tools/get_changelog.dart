@@ -32,7 +32,7 @@ final _kNonNumericSuffix = RegExp('[^0-9].*');
 // ─── Domain error constants ───────────────────────────────────────────────────
 
 const _noDocumentation = DomainError(
-  error: DomainErrors.noDocumentation,
+  code: DomainErrors.noDocumentation,
   message: 'The package changelog contains no version headings.',
   suggestion:
       'The package may use a non-standard changelog format. '
@@ -40,7 +40,7 @@ const _noDocumentation = DomainError(
 );
 
 const _invalidInput = DomainError(
-  error: DomainErrors.invalidInput,
+  code: DomainErrors.invalidArgument,
   message: 'The from_version value is older than all entries in the changelog.',
   suggestion:
       'Supply a from_version that appears in the changelog, or omit it '

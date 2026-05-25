@@ -93,25 +93,25 @@ final kEvaluateAlternativesPrompt = Prompt(
 // ─── Domain error constants ───────────────────────────────────────────────────
 
 const _kMissingPackageName = DomainError(
-  error: DomainErrors.invalidInput,
+  code: DomainErrors.invalidArgument,
   message: 'The package_name argument is required.',
   suggestion: 'Supply a valid pub.dev package name as package_name.',
 );
 
 const _kMissingFromVersion = DomainError(
-  error: DomainErrors.invalidInput,
+  code: DomainErrors.invalidArgument,
   message: 'The from_version argument is required.',
   suggestion: 'Supply the currently installed version string as from_version.',
 );
 
 const _kMissingToVersion = DomainError(
-  error: DomainErrors.invalidInput,
+  code: DomainErrors.invalidArgument,
   message: 'The to_version argument is required.',
   suggestion: 'Supply the target upgrade version string as to_version.',
 );
 
 const _kMissingUseCase = DomainError(
-  error: DomainErrors.invalidInput,
+  code: DomainErrors.invalidArgument,
   message: 'The use_case argument is required.',
   suggestion: 'Supply a description of the task or feature the package must support as use_case.',
 );
@@ -133,7 +133,7 @@ final class AddAndSetupPackageHandler {
   /// Handles a [GetPromptRequest] for `add-and-setup-package`.
   ///
   /// Validates that `package_name` is present before constructing any message.
-  /// Throws [ArgumentError] with an `invalid_input` [DomainError] JSON payload
+  /// Throws [ArgumentError] with an `INVALID_ARGUMENT` [DomainError] JSON payload
   /// when validation fails.
   GetPromptResult call(GetPromptRequest request) {
     final args = request.arguments ?? const {};
@@ -189,7 +189,7 @@ final class AnalyzeUpgradeImpactHandler {
   /// Handles a [GetPromptRequest] for `analyze-upgrade-impact`.
   ///
   /// Validates all three required arguments before constructing any message.
-  /// Throws [ArgumentError] with an `invalid_input` [DomainError] JSON payload
+  /// Throws [ArgumentError] with an `INVALID_ARGUMENT` [DomainError] JSON payload
   /// for the first missing argument.
   GetPromptResult call(GetPromptRequest request) {
     final args = request.arguments ?? const {};
@@ -258,7 +258,7 @@ final class EvaluateAlternativesHandler {
   /// Handles a [GetPromptRequest] for `evaluate-alternatives`.
   ///
   /// Validates that `use_case` is present before constructing any message.
-  /// Throws [ArgumentError] with an `invalid_input` [DomainError] JSON payload
+  /// Throws [ArgumentError] with an `INVALID_ARGUMENT` [DomainError] JSON payload
   /// when validation fails.
   GetPromptResult call(GetPromptRequest request) {
     final args = request.arguments ?? const {};

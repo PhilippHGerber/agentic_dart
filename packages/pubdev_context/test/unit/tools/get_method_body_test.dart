@@ -107,8 +107,21 @@ CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_method_body', arguments: args);
 
 /// Decodes the first content item of [result] as a JSON error payload.
-Map<String, Object?> _errorPayload(CallToolResult result) =>
-    jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
+
+/// Extracts the `candidates` list from the `details` of an error payload.
+List<String> _candidates(Map<String, Object?> errorPayload) {
+  final details = errorPayload['details'];
+  if (details is! Map<String, Object?>) fail('expected details Map in error payload');
+  final candidates = details['candidates'];
+  if (candidates is! List<Object?>) fail('expected candidates List in details');
+  return candidates.cast<String>();
+}
 
 /// Returns the plain-text content from the first content item of [result].
 String _text(CallToolResult result) => (result.content.first as TextContent).text;
@@ -149,7 +162,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.invalidInput));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('returns invalid_input when method is missing from args', () async {
@@ -158,7 +171,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.invalidInput));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('invalid_input payload contains message and suggestion', () async {
@@ -404,7 +417,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('"new" and a named constructor can coexist — "fromValues" still resolves', () async {
@@ -494,7 +507,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.classNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('class_not_found payload has message and suggestion', () async {
@@ -534,7 +547,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('method_not_found payload contains message and suggestion', () async {
@@ -656,10 +669,10 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.ambiguousSymbol));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.ambiguousSymbol));
     });
 
-    test('ambiguous_symbol payload includes alternatives array', () async {
+    test('ambiguous_symbol payload includes candidates list in details', () async {
       apiIndexCache.set(
         '$kApiIndexCachePrefix:foo:1.0.0',
         Future.value([
@@ -673,12 +686,9 @@ void main() {
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
       );
 
-      final payload = _errorPayload(result);
-      expect(payload['alternatives'], isA<List<Object?>>());
-      expect(
-        (payload['alternatives']! as List<Object?>).cast<String>(),
-        containsAll(['foo.log', 'bar.log']),
-      );
+      final candidates = _candidates(_errorPayload(result));
+      expect(candidates, isA<List<String>>());
+      expect(candidates, containsAll(['foo.log', 'bar.log']));
     });
   });
 
@@ -699,7 +709,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('non-function symbols are excluded from top-level function search', () async {
@@ -717,7 +727,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
   });
 
@@ -828,7 +838,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
   });
 
@@ -855,7 +865,7 @@ void main() {
       );
     });
 
-    test('unqualified name with two candidates returns ambiguous_symbol with two alternatives',
+    test('unqualified name with two candidates returns ambiguous_symbol with two candidates',
         () async {
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
@@ -863,10 +873,10 @@ void main() {
 
       expect(result.isError, isTrue);
       final payload = _errorPayload(result);
-      expect(payload['error'], equals(DomainErrors.ambiguousSymbol));
-      final alternatives = (payload['alternatives']! as List<Object?>).cast<String>();
-      expect(alternatives, hasLength(2));
-      expect(alternatives, containsAll(['foo.log', 'bar.log']));
+      expect(payload['code'], equals(DomainErrors.ambiguousSymbol));
+      final candidates = _candidates(payload);
+      expect(candidates, hasLength(2));
+      expect(candidates, containsAll(['foo.log', 'bar.log']));
     });
 
     test('qualified retry "foo.log" resolves to the function body in lib/foo.dart', () async {
@@ -936,7 +946,7 @@ void main() {
         );
 
         expect(result.isError, isTrue);
-        expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+        expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
       },
     );
 
@@ -1021,7 +1031,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('second call after rate_limited also returns rate_limited, not no_documentation',
@@ -1049,8 +1059,8 @@ void main() {
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
       );
 
-      expect(_errorPayload(first)['error'], equals(DomainErrors.rateLimited));
-      expect(_errorPayload(second)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(first)['code'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(second)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('successful API index fetch returns function body and caches the result', () async {
@@ -1126,7 +1136,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.requestTimeout));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.requestTimeout));
     });
 
     test('rate_limited from tarball yields rate_limited, not package_not_found', () async {
@@ -1142,7 +1152,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('HTTP 404 from tarball still yields package_not_found (regression guard)', () async {
@@ -1158,7 +1168,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('transient tarball failure does not leave a stale entry in sourceFilesCache', () async {

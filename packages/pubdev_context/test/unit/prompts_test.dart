@@ -18,11 +18,11 @@ GetPromptRequest _upgradeImpactReq(Map<String, Object?> args) =>
 GetPromptRequest _alternativesReq(Map<String, Object?> args) =>
     GetPromptRequest(name: 'evaluate-alternatives', arguments: args);
 
-Matcher _throwsInvalidInput() => throwsA(
+Matcher _throwsInvalidArgument() => throwsA(
   isA<ArgumentError>().having(
     (e) => e.message.toString(),
     'message',
-    contains('invalid_input'),
+    contains('INVALID_ARGUMENT'),
   ),
 );
 
@@ -69,14 +69,14 @@ void main() {
       expect(_text(result.messages[0]), contains('riverpod'));
     });
 
-    test('throws ArgumentError with invalid_input when package_name is absent', () {
-      expect(() => handler.call(_addAndSetupReq({})), _throwsInvalidInput());
+    test('throws ArgumentError with INVALID_ARGUMENT when package_name is absent', () {
+      expect(() => handler.call(_addAndSetupReq({})), _throwsInvalidArgument());
     });
 
-    test('throws ArgumentError with invalid_input when package_name is empty', () {
+    test('throws ArgumentError with INVALID_ARGUMENT when package_name is empty', () {
       expect(
         () => handler.call(_addAndSetupReq({'package_name': ''})),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
   });
@@ -129,51 +129,51 @@ void main() {
       expect(_text(result.messages[0]), contains('dio'));
     });
 
-    test('throws invalid_input when package_name is absent', () {
+    test('throws INVALID_ARGUMENT when package_name is absent', () {
       expect(
         () => handler.call(_upgradeImpactReq({'from_version': '1.0.0', 'to_version': '2.0.0'})),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
 
-    test('throws invalid_input when package_name is empty', () {
+    test('throws INVALID_ARGUMENT when package_name is empty', () {
       expect(
         () => handler.call(
           _upgradeImpactReq({'package_name': '', 'from_version': '1.0.0', 'to_version': '2.0.0'}),
         ),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
 
-    test('throws invalid_input when from_version is absent', () {
+    test('throws INVALID_ARGUMENT when from_version is absent', () {
       expect(
         () => handler.call(_upgradeImpactReq({'package_name': 'dio', 'to_version': '2.0.0'})),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
 
-    test('throws invalid_input when from_version is empty', () {
+    test('throws INVALID_ARGUMENT when from_version is empty', () {
       expect(
         () => handler.call(
           _upgradeImpactReq({'package_name': 'dio', 'from_version': '', 'to_version': '2.0.0'}),
         ),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
 
-    test('throws invalid_input when to_version is absent', () {
+    test('throws INVALID_ARGUMENT when to_version is absent', () {
       expect(
         () => handler.call(_upgradeImpactReq({'package_name': 'dio', 'from_version': '1.0.0'})),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
 
-    test('throws invalid_input when to_version is empty', () {
+    test('throws INVALID_ARGUMENT when to_version is empty', () {
       expect(
         () => handler.call(
           _upgradeImpactReq({'package_name': 'dio', 'from_version': '1.0.0', 'to_version': ''}),
         ),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
   });
@@ -245,14 +245,14 @@ void main() {
       expect(_text(result.messages[0]), isNot(contains('sdk')));
     });
 
-    test('throws invalid_input when use_case is absent', () {
-      expect(() => handler.call(_alternativesReq({})), _throwsInvalidInput());
+    test('throws INVALID_ARGUMENT when use_case is absent', () {
+      expect(() => handler.call(_alternativesReq({})), _throwsInvalidArgument());
     });
 
-    test('throws invalid_input when use_case is empty', () {
+    test('throws INVALID_ARGUMENT when use_case is empty', () {
       expect(
         () => handler.call(_alternativesReq({'use_case': ''})),
-        _throwsInvalidInput(),
+        _throwsInvalidArgument(),
       );
     });
   });

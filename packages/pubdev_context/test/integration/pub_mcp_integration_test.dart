@@ -303,7 +303,7 @@ void main() {
     });
 
     test('result is not an error', () {
-      expect(detail, isNot(contains('error')));
+      expect(detail, isNot(contains('code')));
     });
   }, timeout: const Timeout(Duration(seconds: 30)));
 
@@ -418,7 +418,7 @@ void main() {
     });
 
     test('result is not an error', () {
-      expect(payload, isNot(contains('error')));
+      expect(payload, isNot(contains('code')));
     });
 
     test('packages list contains all three requested packages', () {

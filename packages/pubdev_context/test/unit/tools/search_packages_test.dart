@@ -8,6 +8,7 @@ import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/search_packages.dart';
@@ -73,8 +74,12 @@ List<Map<String, Object?>> _summaries(CallToolResult result) =>
         .toList();
 
 /// Decodes the first content item of [result] as a JSON error payload.
-Map<String, Object?> _errorPayload(CallToolResult result) =>
-    jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -109,7 +114,7 @@ void main() {
       final result = await buildHandler().call(_request({'query': 'http', 'limit': 21}));
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals('invalid_input'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
       verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
     });
 
@@ -267,7 +272,7 @@ void main() {
       final result = await buildHandler().call(_request({'query': 'missing'}));
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result), contains('error'));
+      expect(_errorPayload(result), contains('code'));
       expect(_errorPayload(result), contains('message'));
       expect(_errorPayload(result), contains('suggestion'));
     });

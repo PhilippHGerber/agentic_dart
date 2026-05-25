@@ -7,6 +7,7 @@ import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_changelog.dart';
@@ -76,8 +77,12 @@ List<Map<String, Object?>> _entries(CallToolResult result) =>
         .cast<Map<String, Object?>>();
 
 /// Decodes the first content item of [result] as a JSON error payload.
-Map<String, Object?> _errorPayload(CallToolResult result) =>
-    jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -278,7 +283,7 @@ void main() {
 
       final result = await buildHandler().call(_request({'name': 'http'}));
 
-      expect(_errorPayload(result)['error'], equals('no_documentation'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
 
     test('error payload contains a suggestion', () async {
@@ -376,7 +381,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals('invalid_input'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('invalid_input error contains a suggestion', () async {
@@ -516,7 +521,7 @@ void main() {
 
       final result = await buildHandler().call(_request({'name': 'unknown'}));
 
-      expect(_errorPayload(result)['error'], equals('package_not_found'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('HTTP error result is not cached so the next call retries', () async {

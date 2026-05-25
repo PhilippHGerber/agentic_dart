@@ -12,14 +12,14 @@
 /// | provided | omitted | All `throw` expressions in the entire class |
 /// | provided | provided | `throw` expressions in one class method only |
 /// | omitted  | provided | `throw` expressions in one top-level function |
-/// | omitted  | omitted  | `DomainError(invalid_input)` — scope required |
+/// | omitted  | omitted  | `DomainError(INVALID_ARGUMENT)` — scope required |
 ///
 /// ## Top-level function resolution
 ///
 /// Same pattern as `get_method_body`: the API index is consulted for entries
 /// where `type == "function"` and the `qualifiedName` suffix matches `method`.
-/// Exactly one match → proceed. Multiple matches → `DomainError(ambiguous_symbol)`
-/// with an `alternatives` array.
+/// Exactly one match → proceed. Multiple matches → `DomainError(AMBIGUOUS_SYMBOL)`
+/// with `error.details.candidates`.
 ///
 /// ## Response shape
 ///
@@ -55,10 +55,9 @@
 /// ## Domain errors
 ///
 /// - `package_not_found`
-/// - `class_not_found`
-/// - `method_not_found`
-/// - `invalid_input` — neither `class` nor `method` provided
-/// - `ambiguous_symbol` + `alternatives` — multiple top-level functions match
+/// - `SYMBOL_NOT_FOUND` (class absent, or method absent from class)
+/// - `INVALID_ARGUMENT` — neither `class` nor `method` provided
+/// - `AMBIGUOUS_SYMBOL` + `error.details.candidates` — multiple top-level functions match
 library;
 
 import 'dart:convert';
@@ -84,7 +83,7 @@ import 'get_method_body.dart';
 ///   caller should scan the next file.
 /// - `classFound == true, result == null` → class found but method absent;
 ///   caller should continue scanning for a homonymous type in another file
-///   before concluding `method_not_found`.
+///   before concluding `SYMBOL_NOT_FOUND`.
 /// - `classFound == true, result != null` → class and method found; done.
 typedef _MethodScanResult = ({CallToolResult? result, bool classFound});
 
@@ -144,7 +143,7 @@ final class GetThrowStatementsHandler {
     if (className == null && method == null) {
       return _domainError(
         const DomainError(
-          error: DomainErrors.invalidInput,
+          code: DomainErrors.invalidArgument,
           message: 'Either `class` or `method` must be provided.',
           suggestion:
               'To scan all throws in a class, provide `class`. '
@@ -273,7 +272,7 @@ final class GetThrowStatementsHandler {
 
     // Continue scanning ALL files: a package may have two classes with the
     // same name in different libraries.  Stopping at the first match would
-    // return `method_not_found` from a homonymous class that doesn't have
+    // return `SYMBOL_NOT_FOUND` from a homonymous class that doesn't have
     // the requested method, ignoring the second class that does.
     var classWasFound = false;
     for (final filePath in _sortedDartPaths(files.keys)) {
@@ -293,7 +292,7 @@ final class GetThrowStatementsHandler {
     return classWasFound
         ? _domainError(
             DomainError(
-              error: DomainErrors.methodNotFound,
+              code: DomainErrors.symbolNotFound,
               message: 'Method "$method" was not found in class "$className".',
               suggestion:
                   'Verify the method name is spelled correctly. '
@@ -311,7 +310,7 @@ final class GetThrowStatementsHandler {
   /// Returns `(result: null, classFound: true)` when the class is found but
   /// [method] is absent — the caller should keep scanning other files for a
   /// homonymous type that does contain [method] before concluding
-  /// `method_not_found`.
+  /// `SYMBOL_NOT_FOUND`.
   ///
   /// Returns `(result: nonNull, classFound: true)` on success.
   Future<_MethodScanResult> _scanClassMethodInFile(
@@ -389,7 +388,7 @@ final class GetThrowStatementsHandler {
     // Step 2: filter to functions matching `method` by qualifiedName suffix.
     //
     // Qualified (e.g. "foo.log"): match the full qualifiedName — exact
-    // disambiguation after a prior ambiguous_symbol response.
+    // disambiguation after a prior AMBIGUOUS_SYMBOL response.
     // Unqualified (e.g. "log"): match functions whose qualifiedName suffix
     // (after the first ".") equals `method`.
     final isQualified = method.contains('.');
@@ -406,7 +405,7 @@ final class GetThrowStatementsHandler {
     if (candidates.isEmpty) {
       return _domainError(
         DomainError(
-          error: DomainErrors.methodNotFound,
+          code: DomainErrors.symbolNotFound,
           message: 'Top-level function "$method" was not found in "$package".',
           suggestion:
               'Verify the function name. '
@@ -418,12 +417,12 @@ final class GetThrowStatementsHandler {
     if (candidates.length > 1) {
       return _domainError(
         DomainError(
-          error: DomainErrors.ambiguousSymbol,
+          code: DomainErrors.ambiguousSymbol,
           message: 'Function "$method" is ambiguous — ${candidates.length} candidates found.',
           suggestion:
-              'Retry with a fully qualified name from the alternatives list '
+              'Retry with a fully qualified name from the candidates list '
               '(e.g. pass the qualifiedName directly as the `method` value).',
-          alternatives: candidates.map((s) => s.qualifiedName).toList(),
+          details: {'candidates': candidates.map((s) => s.qualifiedName).toList()},
         ),
       );
     }
@@ -469,7 +468,7 @@ final class GetThrowStatementsHandler {
 
     return _domainError(
       DomainError(
-        error: DomainErrors.methodNotFound,
+        code: DomainErrors.symbolNotFound,
         message: 'Function body for "$method" could not be located in the source files.',
         suggestion:
             'The function may be generated, external, or defined in a part file. '
@@ -505,7 +504,7 @@ final class GetThrowStatementsHandler {
 
     final error = (result as PubDevFailure<Map<String, String>>).error;
     return PubDevFailure(
-      error.error == DomainErrors.packageNotFound ? _packageNotFoundError(package) : error,
+      error.code == DomainErrors.packageNotFound ? _packageNotFoundError(package) : error,
     );
   }
 
@@ -804,13 +803,13 @@ final class GetThrowStatementsHandler {
   // ─── Static error / result builders ──────────────────────────────────────
 
   static const _kNoDocumentation = DomainError(
-    error: DomainErrors.noDocumentation,
+    code: DomainErrors.noDocumentation,
     message: 'No API documentation found for this package.',
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
 
   static DomainError _classNotFoundError(String className) => DomainError(
-    error: DomainErrors.classNotFound,
+    code: DomainErrors.symbolNotFound,
     message: 'Class "$className" was not found in the source files of the package.',
     suggestion:
         'Verify the class name is spelled correctly. '
@@ -818,7 +817,7 @@ final class GetThrowStatementsHandler {
   );
 
   static DomainError _packageNotFoundError(String package) => DomainError(
-    error: DomainErrors.packageNotFound,
+    code: DomainErrors.packageNotFound,
     message: 'Package "$package" not found on pub.dev.',
     suggestion: 'Verify the package name and try again.',
   );

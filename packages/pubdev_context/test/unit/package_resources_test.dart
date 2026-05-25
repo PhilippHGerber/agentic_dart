@@ -159,8 +159,12 @@ ReadResourceRequest _changelogRequest(String packageName) =>
     ReadResourceRequest(uri: 'pub://package/$packageName/changelog');
 
 /// Decodes the first content item of [result] as a JSON error payload.
-Map<String, Object?> _errorPayload(ReadResourceResult result) =>
-    jsonDecode((result.contents.first as TextResourceContents).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(ReadResourceResult result) {
+  final outer = jsonDecode((result.contents.first as TextResourceContents).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
 
 /// Returns the text from the first content item of [result].
 String _text(ReadResourceResult result) => (result.contents.first as TextResourceContents).text;
@@ -410,7 +414,7 @@ void main() {
         body: '<html><body><div>No example</div></body></html>',
       );
       final result = await buildHandler().handleReadResource(_exampleRequest('missing'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.exampleNotFound));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.exampleNotFound));
     });
   });
 
@@ -469,7 +473,7 @@ void main() {
     test('returns package_not_found in the error payload', () async {
       _stubDocsPage(mockHttp, statusCode: 404, packageName: 'missing');
       final result = await buildHandler().handleReadResource(_readmeRequest('missing'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('error payload contains a suggestion', () async {
@@ -596,7 +600,7 @@ void main() {
     test('returns package_not_found in the error payload', () async {
       _stubChangelogPage(mockHttp, statusCode: 404, packageName: 'missing');
       final result = await buildHandler().handleReadResource(_changelogRequest('missing'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('error payload contains a suggestion', () async {
@@ -710,7 +714,7 @@ void main() {
     test('returns package_not_found in the error payload', () async {
       _stubIndexJson(mockHttp, statusCode: 404, packageName: 'missing');
       final result = await buildHandler().handleReadResource(_apiRequest('missing'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('error payload contains a suggestion', () async {
@@ -810,13 +814,13 @@ void main() {
     test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
       _stubDocsPage(mockHttp, statusCode: 429);
       final result = await buildHandler().handleReadResource(_readmeRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('returns a service_unavailable error payload on HTTP 503', () async {
       _stubDocsPage(mockHttp, statusCode: 503);
       final result = await buildHandler().handleReadResource(_readmeRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.serviceUnavailable));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.serviceUnavailable));
     });
   });
 
@@ -824,19 +828,19 @@ void main() {
     test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
       _stubExamplePage(mockHttp, statusCode: 429);
       final result = await buildHandler().handleReadResource(_exampleRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('returns a service_unavailable error payload on HTTP 503', () async {
       _stubExamplePage(mockHttp, statusCode: 503);
       final result = await buildHandler().handleReadResource(_exampleRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.serviceUnavailable));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.serviceUnavailable));
     });
 
     test('returns package_not_found in the error payload on 404', () async {
       _stubExamplePage(mockHttp, statusCode: 404, packageName: 'missing');
       final result = await buildHandler().handleReadResource(_exampleRequest('missing'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
     });
   });
 
@@ -844,19 +848,19 @@ void main() {
     test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
       _stubChangelogPage(mockHttp, statusCode: 429);
       final result = await buildHandler().handleReadResource(_changelogRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('returns a service_unavailable error payload on HTTP 503', () async {
       _stubChangelogPage(mockHttp, statusCode: 503);
       final result = await buildHandler().handleReadResource(_changelogRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.serviceUnavailable));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.serviceUnavailable));
     });
 
     test('returns package_not_found in the error payload on 404', () async {
       _stubChangelogPage(mockHttp, statusCode: 404, packageName: 'missing');
       final result = await buildHandler().handleReadResource(_changelogRequest('missing'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
     });
   });
 
@@ -864,13 +868,13 @@ void main() {
     test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
       _stubIndexJson(mockHttp, statusCode: 429);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('returns a service_unavailable error payload on HTTP 503', () async {
       _stubIndexJson(mockHttp, statusCode: 503);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
-      expect(_errorPayload(result!)['error'], equals(DomainErrors.serviceUnavailable));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.serviceUnavailable));
     });
   });
 

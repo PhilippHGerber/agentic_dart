@@ -188,7 +188,7 @@ final getSymbolDocumentationTool = Tool(
       'Pass the short name ("Client") or a qualified name ("Client.send") — the server resolves it automatically. '
       'Use browse_api_symbols first only when the symbol name is unknown. '
       'Use this to understand parameter types, return types, and usage notes for an API symbol. '
-      'If the result is ambiguous_symbol, pick a qualifiedName from the alternatives array and retry. '
+      'If the result is AMBIGUOUS_SYMBOL, pick a qualifiedName from error.details.candidates and retry. '
       'If the doc comment does not cover thrown exceptions, call get_throw_statements next. '
       'If you still need broader implementation details, call get_method_body or get_package_source_file next.',
   inputSchema: ObjectSchema(
@@ -200,10 +200,10 @@ final getSymbolDocumentationTool = Tool(
       'symbol': Schema.string(
         description:
             'The symbol name to look up. Accepted forms, in resolution order: '
-            '(1) full qualifiedName (e.g. "http.Client") — use this when retrying after ambiguous_symbol; '
+            '(1) full qualifiedName (e.g. "http.Client") — use this when retrying after AMBIGUOUS_SYMBOL; '
             '(2) short name (e.g. "Client"); '
             '(3) qualified suffix without library prefix (e.g. "Client.send"). '
-            'On ambiguous_symbol, pick any value from the alternatives array and pass it here.',
+            'On AMBIGUOUS_SYMBOL, pick any value from error.details.candidates and pass it here.',
       ),
       'version': Schema.string(
         description:
@@ -291,7 +291,7 @@ final getMethodBodyTool = Tool(
       'or when you need to inspect thrown exceptions and internal branching logic. '
       'For a class member, provide package, class, and method. '
       'For a top-level function, provide package and method (omit class). '
-      'On ambiguous_symbol, pick a qualifiedName from alternatives and pass it as method.',
+      'On AMBIGUOUS_SYMBOL, pick a qualifiedName from error.details.candidates and pass it as method.',
   inputSchema: ObjectSchema(
     required: ['package', 'method'],
     properties: {
@@ -305,8 +305,8 @@ final getMethodBodyTool = Tool(
             'For the default (unnamed) constructor, pass "new" (matches ClassName.new semantics). '
             'For named constructors, pass the constructor suffix (e.g. "fromJson"). '
             'For a top-level function, pass the short name (e.g. "get" for http.get) '
-            'for the initial lookup. On ambiguous_symbol, pass the full qualifiedName '
-            'from the alternatives array (e.g. "http.get") to resolve exactly.',
+            'for the initial lookup. On AMBIGUOUS_SYMBOL, pass the full qualifiedName '
+            'from error.details.candidates (e.g. "http.get") to resolve exactly.',
       ),
       'class': Schema.string(
         description:
@@ -335,8 +335,8 @@ final getThrowStatementsTool = Tool(
       'provide `class` + `method` to scan one method; '
       'provide only `method` to scan a top-level function. '
       'At least one of `class` or `method` is required. '
-      'On ambiguous_symbol for a top-level function, '
-      'pick a qualifiedName from the alternatives array and pass it as `method`.',
+      'On AMBIGUOUS_SYMBOL for a top-level function, '
+      'pick a qualifiedName from error.details.candidates and pass it as `method`.',
   inputSchema: ObjectSchema(
     required: ['package'],
     properties: {
@@ -357,7 +357,7 @@ final getThrowStatementsTool = Tool(
             'For the default (unnamed) constructor, pass "new". '
             'For named constructors, pass only the constructor suffix (e.g. "fromJson"). '
             'When `class` is omitted, treats this as a top-level function name. '
-            'On ambiguous_symbol, pass the full qualifiedName from alternatives.',
+            'On AMBIGUOUS_SYMBOL, pass the full qualifiedName from error.details.candidates.',
       ),
       'version': Schema.string(
         description:

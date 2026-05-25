@@ -85,24 +85,23 @@ final class RetryPolicy {
 
   static DomainError _errorForStatus(int statusCode) => switch (statusCode) {
     404 => const DomainError(
-      error: DomainErrors.packageNotFound,
+      code: DomainErrors.packageNotFound,
       message: 'Package not found on pub.dev.',
       suggestion: 'Verify the package name and try again.',
-      docs: 'https://pub.dev',
     ),
     429 => const DomainError(
-      error: DomainErrors.rateLimited,
+      code: DomainErrors.rateLimited,
       message: 'pub.dev rate-limited this request.',
       suggestion: 'Wait a moment and retry.',
     ),
     _ when statusCode >= 500 => const DomainError(
-      error: DomainErrors.serviceUnavailable,
+      code: DomainErrors.serviceUnavailable,
       message: 'pub.dev is temporarily unavailable.',
       suggestion: 'Try again in a few seconds.',
     ),
     _ => DomainError(
-      error: 'http_error_$statusCode',
-      message: 'pub.dev returned HTTP $statusCode.',
+      code: DomainErrors.unexpectedResponse,
+      message: 'pub.dev returned an unexpected HTTP $statusCode response.',
       suggestion: 'Check the pub.dev status page.',
     ),
   };
@@ -110,21 +109,21 @@ final class RetryPolicy {
   static DomainError _exhaustedError(List<int> failures) {
     if (failures.every((c) => c == _timeoutSentinel)) {
       return const DomainError(
-        error: DomainErrors.requestTimeout,
+        code: DomainErrors.requestTimeout,
         message: 'pub.dev did not respond within the allotted time.',
         suggestion: 'Check your network connection and try again.',
       );
     }
     if (failures.every((c) => c == 429)) {
       return const DomainError(
-        error: DomainErrors.rateLimited,
+        code: DomainErrors.rateLimited,
         message: 'pub.dev rate-limited all retry attempts.',
         suggestion: 'Wait a moment and retry.',
       );
     }
     if (failures.every((c) => c >= 500)) {
       return const DomainError(
-        error: DomainErrors.serviceUnavailable,
+        code: DomainErrors.serviceUnavailable,
         message: 'pub.dev was unavailable across all retry attempts.',
         suggestion: 'Check the pub.dev status page and try again later.',
       );
@@ -182,7 +181,7 @@ const _kBaseUrl = 'https://pub.dev';
 const _kAccept = 'application/vnd.pub.v2+json';
 
 const _unexpectedResponse = DomainError(
-  error: DomainErrors.unexpectedResponse,
+  code: DomainErrors.unexpectedResponse,
   message: 'pub.dev returned an unexpected response format.',
   suggestion: 'Try again later or check the pub.dev status page.',
 );
@@ -418,10 +417,10 @@ final class PubDevClient {
     final url = '$_kBaseUrl/documentation/$package/$version/$href';
     final result = await _retry.execute(() => _getRaw(url));
     return switch (result) {
-      PubDevFailure<String>(:final error) when error.error == DomainErrors.packageNotFound =>
+      PubDevFailure<String>(:final error) when error.code == DomainErrors.packageNotFound =>
         const PubDevFailure(
           DomainError(
-            error: DomainErrors.symbolNotFound,
+            code: DomainErrors.symbolNotFound,
             message: 'Symbol documentation page not found.',
             suggestion: 'Verify the symbol name is correct and the package has dartdoc output.',
           ),
@@ -496,7 +495,7 @@ final class PubDevClient {
     } on Object {
       return const PubDevFailure(
         DomainError(
-          error: DomainErrors.unexpectedResponse,
+          code: DomainErrors.unexpectedResponse,
           message: 'Failed to decode the package tarball.',
           suggestion: 'Try again later or check the pub.dev status page.',
         ),
@@ -512,7 +511,7 @@ final class PubDevClient {
     if (example.isEmpty) {
       return const PubDevFailure(
         DomainError(
-          error: DomainErrors.exampleNotFound,
+          code: DomainErrors.exampleNotFound,
           message: 'Package example not found.',
           suggestion: 'Check whether the package publishes an example tab on pub.dev.',
         ),

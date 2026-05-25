@@ -24,7 +24,7 @@ import '../data/models.dart';
 import '../data/pub_client.dart';
 
 /// Well-known error code returned when the caller supplies an invalid input.
-const _kInvalidInput = 'invalid_input';
+const String _kInvalidInput = DomainErrors.invalidArgument;
 
 /// Handles calls to the `search_packages` MCP tool.
 ///
@@ -66,7 +66,7 @@ final class SearchPackagesHandler {
     if (limit > 20) {
       return _domainError(
         const DomainError(
-          error: _kInvalidInput,
+          code: _kInvalidInput,
           message: 'limit must not exceed 20.',
           suggestion: 'Set limit to a value between 1 and 20 and retry.',
         ),

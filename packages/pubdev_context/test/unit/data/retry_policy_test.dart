@@ -44,7 +44,7 @@ void main() {
     test('error code is package_not_found on 404', () async {
       final result = await _fastRetry().execute<int>(() async => _throwStatus(404));
       expect(
-        (result as PubDevFailure<int>).error.error,
+        (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.packageNotFound),
       );
     });
@@ -115,7 +115,7 @@ void main() {
     test('returns service_unavailable after exhausting 5xx retries', () async {
       final result = await _fastRetry().execute<int>(() async => _throwStatus(500));
       expect(
-        (result as PubDevFailure<int>).error.error,
+        (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.serviceUnavailable),
       );
     });
@@ -145,7 +145,7 @@ void main() {
     test('returns rate_limited when all failures are 429', () async {
       final result = await _fastRetry().execute<int>(() async => _throwStatus(429));
       expect(
-        (result as PubDevFailure<int>).error.error,
+        (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.rateLimited),
       );
     });
@@ -161,7 +161,7 @@ void main() {
         _throwStatus(count == 1 ? 429 : 500);
       });
       expect(
-        (result as PubDevFailure<int>).error.error,
+        (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.serviceUnavailable),
       );
     });
@@ -169,7 +169,7 @@ void main() {
     test('all 429 failures produce rate_limited', () async {
       final result = await _fastRetry().execute<int>(() async => _throwStatus(429));
       expect(
-        (result as PubDevFailure<int>).error.error,
+        (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.rateLimited),
       );
     });
@@ -177,7 +177,7 @@ void main() {
     test('all 500 failures produce service_unavailable', () async {
       final result = await _fastRetry().execute<int>(() async => _throwStatus(500));
       expect(
-        (result as PubDevFailure<int>).error.error,
+        (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.serviceUnavailable),
       );
     });
@@ -200,7 +200,7 @@ void main() {
         () async => throw TimeoutException('timed out'),
       );
       expect(
-        (result as PubDevFailure<int>).error.error,
+        (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.requestTimeout),
       );
     });

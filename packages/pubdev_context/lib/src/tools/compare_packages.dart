@@ -66,7 +66,7 @@ final class ComparePackagesHandler {
     if (names.length < 2) {
       return _domainError(
         const DomainError(
-          error: DomainErrors.invalidInput,
+          code: DomainErrors.invalidArgument,
           message: 'names must contain at least 2 package names.',
           suggestion: 'Provide between 2 and 5 package names in the names array.',
         ),
@@ -75,7 +75,7 @@ final class ComparePackagesHandler {
     if (names.length > 5) {
       return _domainError(
         const DomainError(
-          error: DomainErrors.invalidInput,
+          code: DomainErrors.invalidArgument,
           message: 'names must not exceed 5 package names.',
           suggestion: 'Provide between 2 and 5 package names in the names array.',
         ),
@@ -97,16 +97,16 @@ final class ComparePackagesHandler {
         case PubDevFailure(:final error):
           _log(
             LoggingLevel.warning,
-            'compare_packages: failed name=$name error=${error.error}',
+            'compare_packages: failed name=$name error=${error.code}',
           );
-          errors[name] = error.error;
+          errors[name] = error.code;
       }
     }
 
     if (details.isEmpty) {
       return _domainError(
         const DomainError(
-          error: DomainErrors.serviceUnavailable,
+          code: DomainErrors.serviceUnavailable,
           message: 'All requested packages failed to load.',
           suggestion: 'Verify that the package names are correct and retry.',
         ),

@@ -65,8 +65,12 @@ List<Map<String, Object?>> _symbols(CallToolResult result) =>
         .toList();
 
 /// Decodes the first content item of [result] as a JSON error payload.
-Map<String, Object?> _errorPayload(CallToolResult result) =>
-    jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -103,7 +107,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.invalidInput));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
       verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
     });
 
@@ -343,7 +347,7 @@ void main() {
       );
 
       // Should be no_results, not an error about the type being unrecognised
-      expect(_errorPayload(result)['error'], equals('no_results'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noResults));
     });
 
     test('type filter applied after ranking preserves rank order within the type', () async {
@@ -397,7 +401,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals('no_results'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noResults));
     });
 
     test('no_results payload contains a suggestion', () async {
@@ -418,7 +422,7 @@ void main() {
         _request({'package': 'http', 'query': 'close', 'type': 'library'}),
       );
 
-      expect(_errorPayload(result)['error'], equals('no_results'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noResults));
     });
   });
 
@@ -433,7 +437,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.noDocumentation));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
 
     test('no_documentation payload contains a suggestion', () async {
@@ -453,7 +457,7 @@ void main() {
         _request({'package': 'http', 'query': 'client'}),
       );
 
-      expect(_errorPayload(result)['error'], equals(DomainErrors.noDocumentation));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
 
     test('returns no_documentation when the index is an empty array from the server', () async {
@@ -472,7 +476,7 @@ void main() {
         _request({'package': 'http', 'query': 'client'}),
       );
 
-      expect(_errorPayload(result)['error'], equals(DomainErrors.noDocumentation));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
   });
 
@@ -487,7 +491,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('propagates a service_unavailable error when pub.dev returns HTTP 503', () async {
@@ -498,7 +502,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.serviceUnavailable));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.serviceUnavailable));
     });
 
     test('error payload always contains message and suggestion fields', () async {

@@ -67,10 +67,9 @@ const _kApiSuffix = '/api';
 // ── Shared error value ────────────────────────────────────────────────────────
 
 const _kPackageNotFound = DomainError(
-  error: DomainErrors.packageNotFound,
+  code: DomainErrors.packageNotFound,
   message: 'Package not found on pub.dev.',
   suggestion: 'Verify the package name and try again.',
-  docs: 'https://pub.dev',
 );
 
 // ── PackageResourcesHandler ───────────────────────────────────────────────────
@@ -258,7 +257,7 @@ final class PackageResourcesHandler {
     final result = await future;
     return switch (result) {
       PubDevSuccess(:final value) => _readmeResult(request.uri, value),
-      PubDevFailure(:final error) when error.error == DomainErrors.packageNotFound =>
+      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
         _domainErrorResult(request.uri, _kPackageNotFound),
       PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
     };
@@ -294,7 +293,7 @@ final class PackageResourcesHandler {
     final result = await future;
     return switch (result) {
       PubDevSuccess(:final value) => _readmeResult(request.uri, value),
-      PubDevFailure(:final error) when error.error == DomainErrors.packageNotFound =>
+      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
         _domainErrorResult(request.uri, _kPackageNotFound),
       PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
     };
@@ -330,7 +329,7 @@ final class PackageResourcesHandler {
     final result = await future;
     return switch (result) {
       PubDevSuccess(:final value) => _readmeResult(request.uri, value),
-      PubDevFailure(:final error) when error.error == DomainErrors.packageNotFound =>
+      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
         _domainErrorResult(request.uri, _kPackageNotFound),
       PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
     };
@@ -366,7 +365,7 @@ final class PackageResourcesHandler {
     final result = await future;
     return switch (result) {
       PubDevSuccess(:final value) => _apiResult(request.uri, value),
-      PubDevFailure(:final error) when error.error == DomainErrors.packageNotFound =>
+      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
         _domainErrorResult(request.uri, _kPackageNotFound),
       PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
     };

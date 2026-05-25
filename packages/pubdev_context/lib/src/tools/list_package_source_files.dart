@@ -60,7 +60,7 @@ final class ListPackageSourceFilesHandler {
     if (files == null) {
       return _domainError(
         DomainError(
-          error: DomainErrors.packageNotFound,
+          code: DomainErrors.packageNotFound,
           message: 'Package "$name" not found on pub.dev.',
           suggestion: 'Verify the package name and try again.',
         ),

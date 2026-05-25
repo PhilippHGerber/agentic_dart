@@ -116,8 +116,21 @@ CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_symbol_documentation', arguments: args);
 
 /// Decodes the first content item of [result] as a JSON error payload.
-Map<String, Object?> _errorPayload(CallToolResult result) =>
-    jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
+
+/// Extracts the `candidates` list from the `details` of an error payload.
+List<String> _candidates(Map<String, Object?> errorPayload) {
+  final details = errorPayload['details'];
+  if (details is! Map<String, Object?>) fail('expected details Map in error payload');
+  final candidates = details['candidates'];
+  if (candidates is! List<Object?>) fail('expected candidates List in details');
+  return candidates.cast<String>();
+}
 
 /// Returns the plain-text content from the first content item of [result].
 String _text(CallToolResult result) => (result.content.first as TextContent).text;
@@ -394,12 +407,10 @@ void main() {
       // Initial call — ambiguous.
       final first = await handler.call(_request({'package': 'http', 'symbol': 'Client'}));
       expect(first.isError, isTrue);
-      expect(_errorPayload(first)['error'], equals(DomainErrors.ambiguousSymbol));
+      expect(_errorPayload(first)['code'], equals(DomainErrors.ambiguousSymbol));
 
-      // Pick the first alternative and retry.
-      final alternatives =
-          (_errorPayload(first)['alternatives']! as List<Object?>).cast<String>();
-      final retrySymbol = alternatives.first;
+      // Pick the first candidate and retry.
+      final retrySymbol = _candidates(_errorPayload(first)).first;
 
       final expectedHref = retrySymbol == 'http.Client'
           ? 'http/Client-class.html'
@@ -472,10 +483,10 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.ambiguousSymbol));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.ambiguousSymbol));
     });
 
-    test('ambiguous_symbol payload includes alternatives array', () async {
+    test('ambiguous_symbol payload includes candidates list in details', () async {
       final classA = _sym(
         name: 'Client',
         qualifiedName: 'http.Client',
@@ -498,12 +509,9 @@ void main() {
         _request({'package': 'http', 'symbol': 'Client'}),
       );
 
-      final payload = _errorPayload(result);
-      expect(payload['alternatives'], isA<List<Object?>>());
-      expect(
-        (payload['alternatives']! as List<Object?>).cast<String>(),
-        containsAll(['http.Client', 'browser_client.Client']),
-      );
+      final candidates = _candidates(_errorPayload(result));
+      expect(candidates, isA<List<String>>());
+      expect(candidates, containsAll(['http.Client', 'browser_client.Client']));
     });
 
     test('returns ambiguous_symbol when multiple matches have no class entry', () async {
@@ -528,7 +536,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.ambiguousSymbol));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.ambiguousSymbol));
     });
 
     test('ambiguous_symbol payload contains message and suggestion', () async {
@@ -574,7 +582,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.symbolNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('returns symbol_not_found when the resolved href returns HTTP 404', () async {
@@ -590,7 +598,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.symbolNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('symbol_not_found payload contains message and suggestion', () async {
@@ -625,7 +633,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.noDocumentation));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
 
     test('returns no_documentation when the index endpoint returns 404', () async {
@@ -636,7 +644,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.noDocumentation));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
   });
 
@@ -786,7 +794,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.symbolNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
   });
 
@@ -891,7 +899,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('propagates service_unavailable when the symbol doc page returns HTTP 503', () async {
@@ -907,7 +915,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.serviceUnavailable));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.serviceUnavailable));
     });
 
     test('error payload always contains message and suggestion fields', () async {

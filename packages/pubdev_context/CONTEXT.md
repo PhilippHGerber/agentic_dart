@@ -1,81 +1,101 @@
 # pubdev_context
 
-An MCP server that bridges LLM agents to the pub.dev public REST API. It exposes Dart/Flutter package data as structured tools, with all errors formatted for LLM consumption.
+An MCP server that gives LLM agents structured, version-aware, token-efficient access to Dart and Flutter packages on pub.dev.
 
 ## Language
 
-**Resource**:
-A static MCP resource with a fixed URI (e.g. `pub://meta/scoring`). Registered with `addResource`. Always accessible without parameters — the URI is the complete address.
-_Avoid_: static resource, endpoint, file
+### Distribution units
 
-**ResourceTemplate**:
-A parameterised MCP resource whose URI contains template variables (e.g. `pub://package/{name}/readme`). Registered with `addResourceTemplate`. Requires the caller to supply values for each `{variable}` segment.
-_Avoid_: dynamic resource, parameterised endpoint
+**Package**:
+A pub.dev distribution unit identified by name and version. Contains one or more libraries.
+_Avoid_: Module, gem, dependency (for this concept)
 
-**ResourceHandler**:
-The Dart class that implements resource read logic (`MetaResourcesHandler`, `PackageResourcesHandler`). Mirrors the **ToolHandler** pattern — no knowledge of how the resource is described to the LLM; it only processes `ReadResourceRequest` and returns `ReadResourceResult`.
-_Avoid_: resource, handler, implementation
+**Library**:
+A named Dart grouping (via the `library` directive or implicit file-level library) that forms the organizational unit within a package's public API. A package exposes one or more libraries.
+_Avoid_: Module, namespace
 
-**Prompt**:
-A pre-configured agent workflow registered with `addPrompt`. Exposes a named, parameterised workflow (e.g. `add-and-setup-package`) that an MCP client can surface to the user as a one-click action.
-_Avoid_: template, workflow, slash command
+**Symbol**:
+A single named, documentable Dart declaration that dartdoc assigns a kind and indexes in `index.json`. Covers classes, methods, functions, constructors, enums, mixins, extensions, typedefs, accessors, and top-level constants/properties.
+_Excludes_: Libraries and packages — those are distinct concepts.
+_Avoid_: API element, declaration, member (use "member" only for class-scoped symbols when scope is clear)
 
-**PackageSummary**:
-The compact package view returned by search and compare operations. Derived fields (`activeMaintenance`, `isFlutterFavorite`) are computed inline from the API response — no extra HTTP calls.
-_Avoid_: package info, package data, search result
+### Versioning
 
-**PackageDetail**:
-The full package view returned by the `get_package` tool. A strict superset of **PackageSummary** data; also includes `dependencies`, `versionsRecent`, and `readmeExcerpt`.
-_Avoid_: package info, full package, expanded package
+**Latest Stable Version**:
+The newest published version of a package that carries no pre-release segment (no `-alpha`, `-beta`, `-rc`, `-dev` suffix). Used as the automatic fallback whenever a caller omits `version`. Resolved from pub.dev's versions list at call time.
+_Avoid_: Latest version (ambiguous — could include pre-releases)
 
-**activeMaintenance**:
-A derived boolean on **PackageSummary** and **PackageDetail**: `true` when `daysSinceUpdate < 365` OR `pubPoints >= 130`. Computed during model construction from the API response — never via an extra API call.
-_Avoid_: maintained, active, recently updated
+**Resolved Version**:
+A top-level field in the JSON response of any tool that accepts a `version` parameter (whether the caller supplied it or the server auto-resolved it). Value is the exact semver string used (e.g. `"1.2.0"`). Not present on version-agnostic tools (`search_packages`, `list_package_source_files`) or on `compare_packages` (which already includes `version` per package in the Comparison Matrix).
+_Avoid_: Inferred version, effective version
 
-**DomainError**:
-A structured failure value with four fields: `error` (machine-readable code), `message` (human explanation), `suggestion` (actionable recovery advice), and optional `docs` (URL). Designed specifically for LLM consumption — the LLM must be able to self-recover from any `DomainError` without external help.
-_Avoid_: error, exception, failure message
+**Package Resource URI**:
+The canonical address of a versioned package artifact served by this server, e.g. `pub://package/http@1.2.0/readme`. Always includes an explicit `@{version}` segment; `latest` is a legal version value and resolves to the Latest Stable Version. The versionless form is not supported. See ADR 0001.
+_Avoid_: Resource URL, resource path
 
-**Tool**:
-An MCP tool exposed to the LLM agent. Each tool maps to one or more pub.dev endpoints and always returns either a typed value or a **DomainError** — it never throws.
-_Avoid_: command, endpoint, function
+**Version Listing**:
+The output of `list_package_versions`: three bucketed lists — `stable`, `prerelease`, `retracted` — each sorted newest-first, each entry carrying the version string and `publishedAt` date. Version-level retraction status is included here; package-level discontinuation belongs on `get_package`. Post-V1: pagination / truncation for packages with 100+ versions.
+_Avoid_: Version history, version catalog
 
-**ToolDefinition**:
-The `Tool` + `ObjectSchema` pair that describes a tool to the MCP client. The complete LLM-facing contract: name, description, and parameter descriptions. Lives in `tool_definitions.dart` alongside the server instructions string.
-_Avoid_: tool spec, tool schema, tool config
+### Symbols and source
 
-**ToolHandler**:
-The Dart class that implements a tool's logic (`GetPackageHandler`, `SearchPackagesHandler`, etc.). Has no knowledge of how the tool is described to the LLM — it only processes `CallToolRequest` and returns `CallToolResult`.
-_Avoid_: tool, handler, implementation
+**Symbol Identity**:
+The exact, unambiguous address of a symbol: fully-qualified name + enclosing library URI + package version (e.g. `CueTimelineController`, `package:cue/cue.dart`, `1.2.0`). The output format returned by `find_symbols` and consumed by `get_symbol_documentation` and `get_source_slice`.
+_Avoid_: Symbol reference, symbol path
 
-**HtmlToMarkdown**:
-The single shared HTML-to-Markdown converter (`lib/src/data/html_to_markdown.dart`). All five pub.dev HTML extraction paths — symbol docs, changelog, full README, README excerpt, and package example — delegate here. Output is structured Markdown (headings, fenced code blocks, lists) optimised for LLM token efficiency and information density. Callers vary only the section-isolation parameters (`isolateTag`, `isolateClass`) and optional `maxChars` truncation. Tag-to-Markdown rules are defined once.
-_Avoid_: HTML extractor, HTML parser, HTML stripper, plain-text extractor
+**Symbol Search**:
+A case-insensitive substring and fuzzy match against symbol names and short descriptions within a single package's dartdoc `index.json`. Requires an explicit package name; returns up to 20 Symbol Search Results with a `hasMore` flag. Backed by the same cached artifact as `browse_api_symbols`.
+_Avoid_: Global symbol search, cross-package search (V1 is single-package only)
 
-**AstSnapshot**:
-The parsed, unresolved representation of a single Dart source file, produced by `parseString()` from `package:analyzer`. Used by `get_method_body` and `get_throw_statements` for structural extraction (method bodies, throw statements) without cross-file type resolution. Cached separately from the raw source text under `ast:<name>:<version>:<filepath>` with a 1-hour TTL.
-_Avoid_: AST, parsed file, analyzer result, resolved AST
+**Symbol Search Result**:
+One entry in the output of `find_symbols`: `{ name, qualifiedName, kind, library, enclosedBy, description, href }`. `enclosedBy` is null for top-level symbols and holds the container name (e.g. a class name) for methods, constructors, and accessors.
 
-**SymbolResolution**:
-The internal two-pass lookup performed by `get_symbol_documentation` that maps a human-readable symbol name to a dartdoc `href` using the cached API index (`api_index:<package>`). Pass 1: exact match on the `name` field. Pass 2 (when pass 1 is ambiguous or empty): suffix match on `qualifiedName` with the library prefix stripped, allowing agents to pass qualified forms such as `"Client.send"` to disambiguate from `"BaseClient.send"`. When multiple matches survive both passes, the class-level entry is preferred; if exactly one class entry exists, it is used silently. A `DomainError` with an `alternatives` field is returned when multiple class entries exist, or when no class entry exists and multiple matches remain. Never exposed to the LLM agent — the agent supplies a name or qualified name, not an `href`.
-_Avoid_: href lookup, index search, symbol search
+**Source Slice**:
+An extract of Dart source code from a package file, produced by `get_source_slice`. Two modes: (1) *line-range* — caller supplies `lineStart`/`lineEnd`, honored exactly with no truncation; (2) *symbol-bounded* — caller supplies a symbol name, server uses the AST to locate the node and applies optional `maxLines` truncation if the body exceeds the limit, returning `truncated: true` and `effectiveLineEnd` when cut.
+_Avoid_: Source excerpt, code snippet (for this server's specific tool output)
 
-## Relationships
+**API Diff**:
+The output of `get_api_diff`: sets of added and removed libraries, classes, fields, and methods between two package versions, computed by diffing the dartdoc `index.json` artifacts for each version. V1 limitation: no structural diff (parameter changes, nullability). If dartdoc is missing for either version the tool hard-fails with `DOCUMENTATION_NOT_FOUND` and a `suggestedNextStep` pointing to `browse_api_symbols` per version as a manual workaround.
+_Avoid_: Breaking change report (the tool detects structural additions/removals, not semantic breaking changes)
 
-- A **PackageDetail** is a strict superset of **PackageSummary** data
-- Every failed **Tool** response carries exactly one **DomainError**
-- **activeMaintenance** is computed from `daysSinceUpdate` and `pubPoints` — it is never stored on pub.dev or fetched via a separate call
-- A **ResourceHandler** and a **ToolHandler** are parallel patterns — both process requests without knowing their LLM-facing description
-- Every failed **Resource** read returns a structured **DomainError** payload (not an MCP protocol error)
+### Errors
+
+**Tool Error**:
+A failed tool result returned via MCP `CallToolResult` with `isError: true`. Content is a single JSON block: `{ "error": { "code": "…", "message": "…", "retryable": bool, "suggestion": "…", "suggestedNextStep": {…}, "details": {…} } }`. `suggestedNextStep` and `details` are optional. See ADR 0002.
+_Avoid_: Exception, thrown error (no Dart exceptions cross module boundaries), error string
+
+**Error Code**:
+A `SCREAMING_SNAKE_CASE` string identifying a failure category. Defined codes: `AMBIGUOUS_SYMBOL`, `SYMBOL_NOT_FOUND`, `PACKAGE_NOT_FOUND`, `DOCUMENTATION_NOT_FOUND`, `RATE_LIMITED`, `PACKAGE_TOO_LARGE`, `INVALID_ARGUMENT`, `SERVICE_UNAVAILABLE`, `REQUEST_TIMEOUT`, `NO_DOCUMENTATION`, `UNEXPECTED_RESPONSE`.
+_Avoid_: Error type, error string, exception code
+
+### Caching and infrastructure
+
+**Tarball Disk Cache**:
+An LRU, size-capped on-disk store of downloaded `.tar.gz` package archives, keyed by `{name}@{version}`. Default location: `~/.cache/pubdev_context/` (XDG cache dir), overridable via `--cache-dir`. Default cap: 500 MB. Per-tarball download limit: 50 MB; exceeded downloads abort and return a `PACKAGE_TOO_LARGE` Tool Error. Survives server restarts.
+_Avoid_: File cache, package cache (ambiguous with in-memory caches)
+
+### Tool outputs
+
+**Comparison Matrix**:
+The fixed output of `compare_packages`: a JSON object mapping every available hard metric (scores, platforms, sdk constraints, dependency count, maintenance signals, license, publisher) to a per-package value map. No caller-supplied criteria filter — the full matrix is always returned; the LLM selects what is relevant. Metrics requiring tarball access (`api-surface`, `example-quality`) are post-V1.
+_Avoid_: Criteria matrix, filtered comparison
+
+---
 
 ## Example dialogue
 
-> **Dev:** "If the score endpoint returns a malformed date, does `activeMaintenance` go wrong?"
-> **Domain expert:** "No — `activeMaintenance` is derived from `daysSinceUpdate`, which is computed by `_daysSince()`. That function returns `0` on a parse failure independently of the `publishedAt` field on **PackageDetail**. The two are separate paths."
-
-> **Dev:** "Should a **Tool** throw if pub.dev returns a 500?"
-> **Domain expert:** "Never. The **Tool** catches that in `RetryPolicy`, exhausts its retries, and returns a **DomainError** with `error: service_unavailable` and a `suggestion` the LLM can act on."
-
-## Flagged ambiguities
-
-- "package info" was used loosely to mean both **PackageSummary** and **PackageDetail** — these are distinct types with different field sets and different call sites.
+> **Dev:** I want to find the `StreamController` class in the `async` package — which tool do I use?
+>
+> **Expert:** `find_symbols` — it takes the package name and a query. The `package` argument is mandatory; the server returns `INVALID_ARGUMENT` immediately if you omit it. Pass `query: "StreamController"` and it searches the dartdoc index, returning a list of Symbol Search Results — name, kind, library, enclosedBy, and an href. Each result is a Symbol Identity you can hand straight to `get_symbol_documentation`.
+>
+> **Dev:** What if I just want to browse what's in the package without knowing a symbol name?
+>
+> **Expert:** That's `browse_api_symbols` — give it a package and a depth, it returns the API tree as an outline. `find_symbols` is query-driven; `browse_api_symbols` is structural exploration.
+>
+> **Dev:** If I call `get_source_slice` on a huge class and don't want the whole thing —
+>
+> **Expert:** Pass `maxLines`. The server returns the signature, opening brace, a truncation comment, and closing brace, with `truncated: true` and `effectiveLineEnd` so you know where it cut. If you need an exact range instead, use the line-range mode with `lineStart`/`lineEnd` — that's never truncated.
+>
+> **Dev:** I forgot to pass a version to `get_package` — what happens?
+>
+> **Expert:** The server resolves the Latest Stable Version — newest non-pre-release — and runs the call. The response always includes `resolvedVersion` as the first key so you know exactly which version was used. From there you can pin that version in all your follow-up calls.

@@ -215,8 +215,21 @@ DartdocSymbol _sym({
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_throw_statements', arguments: args);
 
-Map<String, Object?> _errorPayload(CallToolResult result) =>
-    jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
+
+/// Extracts the `candidates` list from the `details` of an error payload.
+List<String> _candidates(Map<String, Object?> errorPayload) {
+  final details = errorPayload['details'];
+  if (details is! Map<String, Object?>) fail('expected details Map in error payload');
+  final candidates = details['candidates'];
+  if (candidates is! List<Object?>) fail('expected candidates List in details');
+  return candidates.cast<String>();
+}
 
 List<Map<String, Object?>> _records(CallToolResult result) =>
     (jsonDecode((result.content.first as TextContent).text) as List<Object?>)
@@ -256,7 +269,7 @@ void main() {
       final result = await buildHandler().call(_request({'package': 'foo', 'version': '1.0.0'}));
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.invalidInput));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('returns invalid_input when method is empty string and no class', () async {
@@ -265,7 +278,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.invalidInput));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('invalid_input payload has message and suggestion', () async {
@@ -608,7 +621,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.classNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('returns class_not_found for class+method scan of unknown class', () async {
@@ -622,7 +635,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.classNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('class_not_found payload has message and suggestion', () async {
@@ -657,7 +670,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('method_not_found payload has message and suggestion', () async {
@@ -797,10 +810,10 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.ambiguousSymbol));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.ambiguousSymbol));
     });
 
-    test('ambiguous_symbol payload includes alternatives array', () async {
+    test('ambiguous_symbol payload includes candidates list in details', () async {
       apiIndexCache.set(
         '$kApiIndexCachePrefix:foo:1.0.0',
         Future.value([
@@ -814,12 +827,9 @@ void main() {
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
       );
 
-      final payload = _errorPayload(result);
-      expect(payload['alternatives'], isA<List<Object?>>());
-      expect(
-        (payload['alternatives']! as List<Object?>).cast<String>(),
-        containsAll(['foo.log', 'bar.log']),
-      );
+      final candidates = _candidates(_errorPayload(result));
+      expect(candidates, isA<List<String>>());
+      expect(candidates, containsAll(['foo.log', 'bar.log']));
     });
 
     test('qualified retry resolves to correct function', () async {
@@ -867,7 +877,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
     test('non-function symbols excluded from top-level function search', () async {
@@ -889,7 +899,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
   });
 
@@ -909,7 +919,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
   });
 
@@ -1425,7 +1435,7 @@ class Svc {
         );
 
         expect(result.isError, isTrue);
-        expect(_errorPayload(result)['error'], equals(DomainErrors.methodNotFound));
+        expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
       },
     );
 
@@ -1450,7 +1460,7 @@ class Svc {
         );
 
         expect(result.isError, isTrue);
-        expect(_errorPayload(result)['error'], equals(DomainErrors.classNotFound));
+        expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
       },
     );
   });
@@ -1515,8 +1525,8 @@ class Svc {
 
         // Both calls must surface the real error — neither may return
         // no_documentation or an empty array masquerading as success.
-        expect(_errorPayload(r1)['error'], equals(DomainErrors.rateLimited));
-        expect(_errorPayload(r2)['error'], equals(DomainErrors.rateLimited));
+        expect(_errorPayload(r1)['code'], equals(DomainErrors.rateLimited));
+        expect(_errorPayload(r2)['code'], equals(DomainErrors.rateLimited));
       },
     );
   });
@@ -1556,8 +1566,8 @@ class Svc {
         final r1 = await f1;
         final r2 = await f2;
 
-        expect(_errorPayload(r1)['error'], equals(DomainErrors.rateLimited));
-        expect(_errorPayload(r2)['error'], equals(DomainErrors.rateLimited));
+        expect(_errorPayload(r1)['code'], equals(DomainErrors.rateLimited));
+        expect(_errorPayload(r2)['code'], equals(DomainErrors.rateLimited));
       },
     );
   });
@@ -1582,7 +1592,7 @@ class Svc {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('rate_limited from API index returns rate_limited, not no_documentation', () async {
@@ -1602,7 +1612,7 @@ class Svc {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('second call after rate_limited also returns rate_limited', () async {
@@ -1625,8 +1635,8 @@ class Svc {
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
       );
 
-      expect(_errorPayload(first)['error'], equals(DomainErrors.rateLimited));
-      expect(_errorPayload(second)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(first)['code'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(second)['code'], equals(DomainErrors.rateLimited));
     });
   });
 
@@ -1656,7 +1666,7 @@ class Svc {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.requestTimeout));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.requestTimeout));
     });
 
     test('rate_limited from tarball yields rate_limited', () async {
@@ -1672,7 +1682,7 @@ class Svc {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.rateLimited));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('HTTP 404 from tarball yields package_not_found', () async {
@@ -1688,7 +1698,7 @@ class Svc {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('transient tarball failure does not leave stale entry in sourceFilesCache', () async {

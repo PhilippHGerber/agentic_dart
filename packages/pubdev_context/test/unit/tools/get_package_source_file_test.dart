@@ -9,6 +9,7 @@ import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_package_source_file.dart';
 import 'package:test/test.dart';
@@ -124,8 +125,12 @@ const _defaultFiles = {
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_package_source_file', arguments: args);
 
-Map<String, Object?> _errorPayload(CallToolResult result) =>
-    jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+Map<String, Object?> _errorPayload(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final inner = outer['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
 
 String _content(CallToolResult result) => (result.content.first as TextContent).text;
 
@@ -214,7 +219,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals('package_not_found'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
   });
 
@@ -227,7 +232,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals('invalid_input'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('invalid_input error contains a suggestion', () async {
@@ -250,7 +255,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals('source_file_not_found'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.sourceFileNotFound));
     });
 
     test('suggestion includes filename match when a file with the same name exists', () async {
@@ -300,7 +305,7 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['error'], equals('package_not_found'));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
   });
 

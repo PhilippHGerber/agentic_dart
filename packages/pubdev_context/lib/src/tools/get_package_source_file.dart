@@ -42,7 +42,7 @@ final class GetPackageSourceFileHandler {
     if (path == null) {
       return _domainError(
         const DomainError(
-          error: DomainErrors.invalidInput,
+          code: DomainErrors.invalidArgument,
           message: 'Path contains invalid segments.',
           suggestion:
               'Use a relative path without ".." components '
@@ -76,7 +76,7 @@ final class GetPackageSourceFileHandler {
       final suggestion = _closestMatchSuggestion(path, files.keys);
       return _domainError(
         DomainError(
-          error: DomainErrors.sourceFileNotFound,
+          code: DomainErrors.sourceFileNotFound,
           message: 'Source file "$path" not found in $name $version.',
           suggestion: suggestion,
         ),
@@ -132,7 +132,7 @@ final class GetPackageSourceFileHandler {
   }
 
   static DomainError _notFoundError(String name) => DomainError(
-    error: DomainErrors.packageNotFound,
+    code: DomainErrors.packageNotFound,
     message: 'Package "$name" not found on pub.dev.',
     suggestion: 'Verify the package name and try again.',
   );

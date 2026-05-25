@@ -8,6 +8,7 @@ import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/compare_packages.dart';
@@ -105,6 +106,13 @@ CallToolRequest _request(List<String> names) =>
 Map<String, Object?> _payload(CallToolResult result) =>
     jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
 
+/// Extracts the inner `error` object from a failed result's nested error schema.
+Map<String, Object?> _errorInner(CallToolResult result) {
+  final inner = _payload(result)['error'];
+  if (inner is! Map<String, Object?>) throw StateError('No nested error object');
+  return inner;
+}
+
 /// Extracts the `matrix` sub-map from a successful result payload.
 Map<String, Object?> _matrixOf(CallToolResult result) =>
     _payload(result)['matrix']! as Map<String, Object?>;
@@ -147,7 +155,7 @@ void main() {
     test('names with one entry returns an invalid_input domain error', () async {
       final result = await buildHandler().call(_request(['http']));
 
-      expect(_payload(result)['error'], equals('invalid_input'));
+      expect(_errorInner(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('names with six entries sets isError to true', () async {
@@ -159,13 +167,13 @@ void main() {
     test('names with six entries returns an invalid_input domain error', () async {
       final result = await buildHandler().call(_request(['a', 'b', 'c', 'd', 'e', 'f']));
 
-      expect(_payload(result)['error'], equals('invalid_input'));
+      expect(_errorInner(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
     test('invalid_input error includes a suggestion', () async {
       final result = await buildHandler().call(_request(['http']));
 
-      expect(_payload(result), contains('suggestion'));
+      expect(_errorInner(result), contains('suggestion'));
     });
   });
 
@@ -355,7 +363,7 @@ void main() {
       final result = await buildHandler().call(_request(['http', 'unknown']));
       final errors = _payload(result)['errors']! as Map<String, Object?>;
 
-      expect(errors['unknown'], equals('package_not_found'));
+      expect(errors['unknown'], equals(DomainErrors.packageNotFound));
     });
 
     test('successful package is present in the matrix', () async {
@@ -390,13 +398,13 @@ void main() {
     test('domain error code is service_unavailable when all packages fail', () async {
       final result = await buildHandler().call(_request(['unknown1', 'unknown2']));
 
-      expect(_payload(result)['error'], equals('service_unavailable'));
+      expect(_errorInner(result)['code'], equals(DomainErrors.serviceUnavailable));
     });
 
     test('domain error includes a suggestion when all packages fail', () async {
       final result = await buildHandler().call(_request(['unknown1', 'unknown2']));
 
-      expect(_payload(result), contains('suggestion'));
+      expect(_errorInner(result), contains('suggestion'));
     });
   });
 

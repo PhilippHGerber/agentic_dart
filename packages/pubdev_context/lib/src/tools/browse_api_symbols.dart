@@ -11,9 +11,9 @@
 /// warm each other's cache. Cache hits are logged at [LoggingLevel.debug].
 ///
 /// Domain errors:
-/// - `no_documentation`: `index.json` is missing or empty for the package.
-/// - `no_results`: the query or type filter yields zero matching symbols.
-/// - `invalid_input`: `limit` exceeds 25.
+/// - `NO_DOCUMENTATION`: `index.json` is missing or empty for the package.
+/// - `NO_RESULTS`: the query or type filter yields zero matching symbols.
+/// - `INVALID_ARGUMENT`: `limit` exceeds 25.
 ///
 /// See `issues/pub-dev-mcp/09-search-api-symbols-tool.md`.
 library;
@@ -75,7 +75,7 @@ final class BrowseApiSymbolsHandler {
     if (limit > 25) {
       return _domainError(
         const DomainError(
-          error: DomainErrors.invalidInput,
+          code: DomainErrors.invalidArgument,
           message: 'limit must not exceed 25.',
           suggestion: 'Set limit to a value between 1 and 25 and retry.',
         ),
@@ -114,7 +114,7 @@ final class BrowseApiSymbolsHandler {
 
     return switch (result) {
       PubDevSuccess(:final value) => _buildResponse(value, query, type, limit),
-      PubDevFailure(:final error) when error.error == DomainErrors.packageNotFound => _domainError(
+      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound => _domainError(
         _kNoDocumentation,
       ),
       PubDevFailure(:final error) => _domainError(error),
@@ -151,7 +151,7 @@ final class BrowseApiSymbolsHandler {
     if (filtered.isEmpty) {
       return _domainError(
         const DomainError(
-          error: 'no_results',
+          code: DomainErrors.noResults,
           message: 'No symbols matched the query or type filter.',
           suggestion: 'Try a broader query, remove the type filter, or verify the package name.',
         ),
@@ -166,7 +166,7 @@ final class BrowseApiSymbolsHandler {
   }
 
   static const _kNoDocumentation = DomainError(
-    error: DomainErrors.noDocumentation,
+    code: DomainErrors.noDocumentation,
     message: 'No API documentation found for this package.',
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );

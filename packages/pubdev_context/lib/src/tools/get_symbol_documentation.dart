@@ -10,8 +10,8 @@
 ///
 /// **Pass 0 — exact `qualifiedName` match:** check for entries where
 /// `qualifiedName == symbol`. This is the primary retry path after an
-/// `ambiguous_symbol` error: callers pass a value from the returned
-/// `alternatives` array and the match is always unambiguous.
+/// `AMBIGUOUS_SYMBOL` error: callers pass a value from the returned
+/// `error.details.candidates` array and the match is always unambiguous.
 ///
 /// **Pass 1 — exact `name` match:** scan the API index for entries where
 /// `name == symbol`. If exactly one match, use it. If zero matches, proceed
@@ -26,7 +26,7 @@
 /// class-level entry (`type == "class"`) is preferred. If exactly one class
 /// entry exists, it is used. If multiple class entries exist, or no class
 /// entry exists and multiple matches remain, a [DomainErrors.ambiguousSymbol]
-/// error is returned with an `alternatives` array of candidate `qualifiedName`
+/// error is returned with `error.details.candidates` listing `qualifiedName`
 /// values.
 ///
 /// ## Cache keys
@@ -40,11 +40,11 @@
 ///
 /// ## Domain errors
 ///
-/// - `no_documentation`: the package has no dartdoc output.
-/// - `symbol_not_found`: the symbol name could not be resolved, or the resolved
+/// - `NO_DOCUMENTATION`: the package has no dartdoc output.
+/// - `SYMBOL_NOT_FOUND`: the symbol name could not be resolved, or the resolved
 ///   href returns HTTP 404.
-/// - `ambiguous_symbol`: the symbol name matches multiple entries; `alternatives`
-///   lists the candidate `qualifiedName` values. Retry with any listed value.
+/// - `AMBIGUOUS_SYMBOL`: the symbol name matches multiple entries;
+///   `error.details.candidates` lists `qualifiedName` values. Retry with any.
 ///
 /// See issues #28, #32, #33.
 library;
@@ -159,7 +159,7 @@ final class GetSymbolDocumentationHandler {
 
       final indexResult = await indexFuture;
       if (indexResult case PubDevFailure(:final error)
-          when error.error == DomainErrors.packageNotFound) {
+          when error.code == DomainErrors.packageNotFound) {
         return _domainError(_kNoDocumentation);
       }
       if (indexResult case PubDevFailure(:final error)) return _domainError(error);
@@ -175,7 +175,7 @@ final class GetSymbolDocumentationHandler {
     return switch (match) {
       _NoMatch() => _domainError(
         DomainError(
-          error: DomainErrors.symbolNotFound,
+          code: DomainErrors.symbolNotFound,
           message: "Symbol '$symbol' was not found in the API index for package '$package'.",
           suggestion:
               'Verify the symbol name is correct. '
@@ -184,13 +184,13 @@ final class GetSymbolDocumentationHandler {
       ),
       _AmbiguousMatch(:final alternatives) => _domainError(
         DomainError(
-          error: DomainErrors.ambiguousSymbol,
+          code: DomainErrors.ambiguousSymbol,
           message:
               "Symbol '$symbol' is ambiguous — ${alternatives.length} candidates were found.",
           suggestion:
-              'Retry with a more qualified name from the alternatives list '
+              'Retry with a more qualified name from the candidates list '
               '(e.g. use the qualifiedName directly).',
-          alternatives: alternatives,
+          details: {'candidates': alternatives},
         ),
       ),
       _SingleMatch(:final href) => await _fetchDoc(package, href, effectiveVersion),
@@ -202,8 +202,8 @@ final class GetSymbolDocumentationHandler {
   /// Resolves [symbol] against [symbols] using a three-pass strategy.
   ///
   /// **Pass 0** — exact [DartdocSymbol.qualifiedName] match. This is the
-  /// primary retry path after an `ambiguous_symbol` error: callers pass a
-  /// value from the `alternatives` array and the match is always unambiguous.
+  /// primary retry path after an `AMBIGUOUS_SYMBOL` error: callers pass a
+  /// value from `error.details.candidates` and the match is always unambiguous.
   ///
   /// **Pass 1** — exact [DartdocSymbol.name] match.
   ///
@@ -291,13 +291,13 @@ final class GetSymbolDocumentationHandler {
   // ── Static helpers ─────────────────────────────────────────────────────────
 
   static const _kSymbolNotFound = DomainError(
-    error: DomainErrors.symbolNotFound,
+    code: DomainErrors.symbolNotFound,
     message: 'Symbol documentation page not found.',
     suggestion: 'Verify the symbol name is correct and the package has dartdoc output.',
   );
 
   static const _kNoDocumentation = DomainError(
-    error: DomainErrors.noDocumentation,
+    code: DomainErrors.noDocumentation,
     message: 'No API documentation found for this package.',
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );

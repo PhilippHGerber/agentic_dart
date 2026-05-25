@@ -101,7 +101,7 @@ void main() {
       _stubGet(mock, '/documentation/nope/latest/', _json('', status: 404));
       final result = await _client(mock).getPackage('nope');
       expect(
-        (result as PubDevFailure<PackageDetail>).error.error,
+        (result as PubDevFailure<PackageDetail>).error.code,
         equals(DomainErrors.packageNotFound),
       );
     });
@@ -450,13 +450,13 @@ void main() {
     test('returns example_not_found when the example section is absent', () async {
       _stubGet(mock, '/packages/missing/example', _json('<html><body></body></html>'));
       final result = await _client(mock).getExample('missing');
-      expect((result as PubDevFailure<String>).error.error, equals(DomainErrors.exampleNotFound));
+      expect((result as PubDevFailure<String>).error.code, equals(DomainErrors.exampleNotFound));
     });
 
     test('returns package_not_found on 404', () async {
       _stubGet(mock, '/packages/nope/example', _json('', status: 404));
       final result = await _client(mock).getExample('nope');
-      expect((result as PubDevFailure<String>).error.error, equals(DomainErrors.packageNotFound));
+      expect((result as PubDevFailure<String>).error.code, equals(DomainErrors.packageNotFound));
     });
   });
 
@@ -468,7 +468,7 @@ void main() {
       _stubGet(mock, '/api/packages/http/score', _json('[1,2,3]'));
       final result = await _client(mock).getScore('http');
       expect(
-        (result as PubDevFailure<PackageScore>).error.error,
+        (result as PubDevFailure<PackageScore>).error.code,
         equals(DomainErrors.unexpectedResponse),
       );
     });
@@ -480,7 +480,7 @@ void main() {
       _stubGet(mock, '/documentation/http/latest/', _json(''));
       final result = await _client(mock).getPackage('http');
       expect(
-        (result as PubDevFailure<PackageDetail>).error.error,
+        (result as PubDevFailure<PackageDetail>).error.code,
         equals(DomainErrors.unexpectedResponse),
       );
     });
@@ -490,7 +490,7 @@ void main() {
       _stubGet(mock, '/documentation/http/latest/index.json', _json('{"key":"value"}'));
       final result = await _client(mock).getApiIndex('http');
       expect(
-        (result as PubDevFailure<List<DartdocSymbol>>).error.error,
+        (result as PubDevFailure<List<DartdocSymbol>>).error.code,
         equals(DomainErrors.unexpectedResponse),
       );
     });

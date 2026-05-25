@@ -9,7 +9,7 @@
 /// |---------|----------|-----------|
 /// | provided | provided | Extract named member from the class |
 /// | omitted  | provided | Extract top-level function with that name |
-/// | either   | omitted  | `DomainError(invalid_input)` |
+/// | either   | omitted  | `DomainError(INVALID_ARGUMENT)` |
 ///
 /// ## Method resolution when `class` is provided
 ///
@@ -28,8 +28,8 @@
 /// If exactly one entry matches, the source file is derived from the `href`
 /// field (e.g. `"http/get.html"` → `lib/http.dart`) and parsed; if that
 /// derivation fails the search falls back to scanning all Dart source files.
-/// Multiple matches return `DomainError(ambiguous_symbol)` with an
-/// `alternatives` array.
+/// Multiple matches return `DomainError(AMBIGUOUS_SYMBOL)` with
+/// `error.details.candidates`.
 ///
 /// ## Caches
 ///
@@ -44,10 +44,9 @@
 /// ## Domain errors
 ///
 /// - `package_not_found`
-/// - `class_not_found` (class was provided but not in any source file)
-/// - `method_not_found` (member absent from class, or top-level function absent)
-/// - `ambiguous_symbol` + `alternatives` (multiple top-level functions match)
-/// - `invalid_input` (method was omitted)
+/// - `SYMBOL_NOT_FOUND` (class was provided but not in any source file, or member absent)
+/// - `AMBIGUOUS_SYMBOL` + `error.details.candidates` (multiple top-level functions match)
+/// - `INVALID_ARGUMENT` (method was omitted)
 library;
 
 import 'package:analyzer/dart/analysis/results.dart';
@@ -74,7 +73,7 @@ const kAstSnapshotCachePrefix = 'ast';
 ///   caller should scan the next file.
 /// - `classFound == true, result == null` → class found but member absent;
 ///   caller should continue scanning for a homonymous type in another file
-///   before concluding `method_not_found`.
+///   before concluding `SYMBOL_NOT_FOUND`.
 /// - `classFound == true, result != null` → class and member found; done.
 typedef _MemberScanResult = ({CallToolResult? result, bool classFound});
 
@@ -136,7 +135,7 @@ final class GetMethodBodyHandler {
     if (method.isEmpty) {
       return _domainError(
         DomainError(
-          error: DomainErrors.invalidInput,
+          code: DomainErrors.invalidArgument,
           message: 'The `method` parameter is required.',
           suggestion: className != null
               ? 'Provide the method name to extract from class "$className".'
@@ -183,7 +182,7 @@ final class GetMethodBodyHandler {
 
     // Continue scanning ALL files: a package may have two classes with the
     // same name in different libraries.  Stopping at the first match would
-    // return `method_not_found` from a homonymous class that doesn't have
+    // return `SYMBOL_NOT_FOUND` from a homonymous class that doesn't have
     // the requested member, ignoring the second class that does.
     var classWasFound = false;
     for (final filePath in sortedPaths) {
@@ -203,7 +202,7 @@ final class GetMethodBodyHandler {
     return classWasFound
         ? _domainError(
             DomainError(
-              error: DomainErrors.methodNotFound,
+              code: DomainErrors.symbolNotFound,
               message: 'Member "$method" was not found in class "$className".',
               suggestion:
                   'Verify the member name is spelled correctly. '
@@ -212,7 +211,7 @@ final class GetMethodBodyHandler {
           )
         : _domainError(
             DomainError(
-              error: DomainErrors.classNotFound,
+              code: DomainErrors.symbolNotFound,
               message:
                   'Class "$className" was not found in the source files of "$package".',
               suggestion:
@@ -230,7 +229,7 @@ final class GetMethodBodyHandler {
   /// Returns `(result: null, classFound: true)` when the class is found but
   /// [method] is absent — the caller should keep scanning other files for a
   /// homonymous type that does contain [method] before concluding
-  /// `method_not_found`.
+  /// `SYMBOL_NOT_FOUND`.
   ///
   /// Returns `(result: nonNull, classFound: true)` on success.
   Future<_MemberScanResult> _extractMemberFromFile(
@@ -294,7 +293,7 @@ final class GetMethodBodyHandler {
       final result = await _client.getApiIndex(package, version: effectiveVersion);
       if (result case PubDevFailure(:final error)) {
         return _domainError(
-          error.error == DomainErrors.packageNotFound ? _kNoDocumentation : error,
+          error.code == DomainErrors.packageNotFound ? _kNoDocumentation : error,
         );
       }
       symbols = (result as PubDevSuccess<List<DartdocSymbol>>).value;
@@ -309,7 +308,7 @@ final class GetMethodBodyHandler {
     // - Unqualified (e.g. "log"): match any function whose qualifiedName suffix
     //   (after the first ".") equals `method`.
     // - Qualified (e.g. "foo.log"): the caller is retrying after an
-    //   ambiguous_symbol response; match the full qualifiedName exactly so that
+    //   AMBIGUOUS_SYMBOL response; match the full qualifiedName exactly so that
     //   exactly one candidate is selected.
     final isQualified = method.contains('.');
     final unqualifiedName = isQualified
@@ -327,7 +326,7 @@ final class GetMethodBodyHandler {
     if (candidates.isEmpty) {
       return _domainError(
         DomainError(
-          error: DomainErrors.methodNotFound,
+          code: DomainErrors.symbolNotFound,
           message: 'Top-level function "$method" was not found in "$package".',
           suggestion:
               'Verify the function name. '
@@ -339,13 +338,13 @@ final class GetMethodBodyHandler {
     if (candidates.length > 1) {
       return _domainError(
         DomainError(
-          error: DomainErrors.ambiguousSymbol,
+          code: DomainErrors.ambiguousSymbol,
           message:
               'Function "$method" is ambiguous — ${candidates.length} candidates found.',
           suggestion:
-              'Retry with a fully qualified name from the alternatives list '
+              'Retry with a fully qualified name from the candidates list '
               '(e.g. pass the qualifiedName directly as the `method` value).',
-          alternatives: candidates.map((s) => s.qualifiedName).toList(),
+          details: {'candidates': candidates.map((s) => s.qualifiedName).toList()},
         ),
       );
     }
@@ -359,11 +358,11 @@ final class GetMethodBodyHandler {
     //
     // Two modes depending on whether the caller qualified the name:
     //
-    // • Qualified retry (e.g. "foo.log" after ambiguous_symbol):
+    // • Qualified retry (e.g. "foo.log" after AMBIGUOUS_SYMBOL):
     //   Search ONLY the hint-derived paths.  Falling back to a global scan
     //   would risk returning the wrong homonymous function from another
     //   library — the whole point of the qualified retry is disambiguation.
-    //   If the hint paths don't cover the file, method_not_found is the
+    //   If the hint paths don't cover the file, SYMBOL_NOT_FOUND is the
     //   honest result.
     //
     // • Unqualified lookup (e.g. "log"):
@@ -390,7 +389,7 @@ final class GetMethodBodyHandler {
 
     return _domainError(
       DomainError(
-        error: DomainErrors.methodNotFound,
+        code: DomainErrors.symbolNotFound,
         message: 'Function body for "$method" could not be located in the source files.',
         suggestion:
             'The function may be generated, external, or defined in a part file. '
@@ -424,7 +423,7 @@ final class GetMethodBodyHandler {
     // Preserve transient errors; re-wrap package_not_found with the package name.
     final error = (result as PubDevFailure<Map<String, String>>).error;
     return PubDevFailure(
-      error.error == DomainErrors.packageNotFound
+      error.code == DomainErrors.packageNotFound
           ? _packageNotFoundError(package)
           : error,
     );
@@ -501,7 +500,7 @@ final class GetMethodBodyHandler {
   /// When both a getter and setter share the same name, both are returned in
   /// one response, each prefixed by a `// getter` or `// setter` comment.
   ///
-  /// Returns `method_not_found` when no match is found.
+  /// Returns `SYMBOL_NOT_FOUND` when no match is found.
   static CallToolResult _extractMember(
     Iterable<ClassMember> members,
     String className,
@@ -534,7 +533,7 @@ final class GetMethodBodyHandler {
     if (getter == null && setter == null && other == null) {
       return _domainError(
         DomainError(
-          error: DomainErrors.methodNotFound,
+          code: DomainErrors.symbolNotFound,
           message: 'Member "$method" was not found in class "$className".',
           suggestion:
               'Verify the member name is spelled correctly. '
@@ -620,13 +619,13 @@ final class GetMethodBodyHandler {
   // ─── Static error / result builders ───────────────────────────────────────
 
   static const _kNoDocumentation = DomainError(
-    error: DomainErrors.noDocumentation,
+    code: DomainErrors.noDocumentation,
     message: 'No API documentation found for this package.',
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
 
   static DomainError _packageNotFoundError(String package) => DomainError(
-    error: DomainErrors.packageNotFound,
+    code: DomainErrors.packageNotFound,
     message: 'Package "$package" not found on pub.dev.',
     suggestion: 'Verify the package name and try again.',
   );
