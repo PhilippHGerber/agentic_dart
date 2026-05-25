@@ -39,9 +39,17 @@ void main() {
       expect(config.logLevel, equals(LogLevel.warning));
     });
 
-    test('cacheDir is null by default', () {
+    test('cacheDir falls back to an absolute temp-directory path when HOME is unavailable', () {
       final config = PubMcpConfig.fromArguments([], environment: {});
-      expect(config.cacheDir, isNull);
+      // Verify absolute path: starts with the system temp directory and ends
+      // with the expected leaf name. The exact separator is platform-specific.
+      expect(config.cacheDir, startsWith(Directory.systemTemp.path));
+      expect(config.cacheDir, endsWith('pubdev_context'));
+    });
+
+    test('maxCacheSizeBytes defaults to 500 MiB', () {
+      final config = PubMcpConfig.fromArguments([], environment: {});
+      expect(config.maxCacheSizeBytes, equals(kDefaultMaxCacheSizeBytes));
     });
   });
 
@@ -77,6 +85,22 @@ void main() {
       );
       expect(config.cacheDir, equals('/tmp/cache'));
     });
+
+    test('--max-cache-size 100MB sets maxCacheSizeBytes', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--max-cache-size', '100MB'],
+        environment: {},
+      );
+      expect(config.maxCacheSizeBytes, equals(100000000));
+    });
+
+    test('--max-cache-size=64MiB sets maxCacheSizeBytes', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--max-cache-size=64MiB'],
+        environment: {},
+      );
+      expect(config.maxCacheSizeBytes, equals(64 * 1024 * 1024));
+    });
   });
 
   group('PubMcpConfig environment variables', () {
@@ -94,6 +118,30 @@ void main() {
         environment: {'pubdev_context_CACHE_DIR': '/env/cache'},
       );
       expect(config.cacheDir, equals('/env/cache'));
+    });
+
+    test('pubdev_context_MAX_CACHE_SIZE sets maxCacheSizeBytes when no flag is present', () {
+      final config = PubMcpConfig.fromArguments(
+        [],
+        environment: {'pubdev_context_MAX_CACHE_SIZE': '42MiB'},
+      );
+      expect(config.maxCacheSizeBytes, equals(42 * 1024 * 1024));
+    });
+
+    test('uses XDG_CACHE_HOME when cache dir is not explicitly set', () {
+      final config = PubMcpConfig.fromArguments(
+        [],
+        environment: {'XDG_CACHE_HOME': '/xdg/cache'},
+      );
+      expect(config.cacheDir, equals('/xdg/cache/pubdev_context'));
+    });
+
+    test('falls back to HOME/.cache/pubdev_context when XDG_CACHE_HOME is unset', () {
+      final config = PubMcpConfig.fromArguments(
+        [],
+        environment: {'HOME': '/home/tester'},
+      );
+      expect(config.cacheDir, equals('/home/tester/.cache/pubdev_context'));
     });
   });
 
@@ -113,6 +161,14 @@ void main() {
       );
       expect(config.cacheDir, equals('/flag/cache'));
     });
+
+    test('--max-cache-size flag overrides pubdev_context_MAX_CACHE_SIZE env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--max-cache-size', '10MiB'],
+        environment: {'pubdev_context_MAX_CACHE_SIZE': '1MiB'},
+      );
+      expect(config.maxCacheSizeBytes, equals(10 * 1024 * 1024));
+    });
   });
 
   group('PubMcpConfig const constructor', () {
@@ -121,15 +177,25 @@ void main() {
       expect(config.logLevel, equals(LogLevel.warning));
     });
 
-    test('const constructor has null cacheDir by default', () {
+    test('const constructor has default cacheDir', () {
       const config = PubMcpConfig();
-      expect(config.cacheDir, isNull);
+      expect(config.cacheDir, equals('.cache/pubdev_context'));
+    });
+
+    test('const constructor has default maxCacheSizeBytes', () {
+      const config = PubMcpConfig();
+      expect(config.maxCacheSizeBytes, equals(kDefaultMaxCacheSizeBytes));
     });
 
     test('const constructor accepts explicit values', () {
-      const config = PubMcpConfig(logLevel: LogLevel.debug, cacheDir: '/cache');
+      const config = PubMcpConfig(
+        logLevel: LogLevel.debug,
+        cacheDir: '/cache',
+        maxCacheSizeBytes: 123,
+      );
       expect(config.logLevel, equals(LogLevel.debug));
       expect(config.cacheDir, equals('/cache'));
+      expect(config.maxCacheSizeBytes, equals(123));
     });
   });
 
@@ -150,6 +216,112 @@ void main() {
       );
       expect(result.exitCode, equals(0));
       expect(result.stdout.toString(), contains('Usage:'));
+      expect(result.stdout.toString(), contains('--max-cache-size'));
+    });
+  });
+
+  group('binary bad-flag error handling', () {
+    test('invalid --max-cache-size prints readable error and exits 64', () async {
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        ['run', 'bin/pubdev_context.dart', '--max-cache-size=foo'],
+      );
+      expect(result.exitCode, equals(64));
+      expect(result.stderr.toString(), contains('Invalid cache size'));
+      expect(result.stderr.toString(), contains('--help'));
+    });
+
+    test('invalid --log-level prints readable error and exits 64', () async {
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        ['run', 'bin/pubdev_context.dart', '--log-level=verbose'],
+      );
+      expect(result.exitCode, equals(64));
+      expect(result.stderr.toString(), contains('Unknown log level'));
+      expect(result.stderr.toString(), contains('--help'));
+    });
+  });
+
+  group('PubMcpConfig bare flag without value', () {
+    test('--log-level without value throws FormatException', () {
+      expect(
+        () => PubMcpConfig.fromArguments(['--log-level'], environment: {}),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('--log-level'),
+          ),
+        ),
+      );
+    });
+
+    test('--cache-dir without value throws FormatException', () {
+      expect(
+        () => PubMcpConfig.fromArguments(['--cache-dir'], environment: {}),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('--cache-dir'),
+          ),
+        ),
+      );
+    });
+
+    test('--max-cache-size without value throws FormatException', () {
+      expect(
+        () => PubMcpConfig.fromArguments(['--max-cache-size'], environment: {}),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('--max-cache-size'),
+          ),
+        ),
+      );
+    });
+
+    test('--log-level without value at end of multi-flag list throws FormatException', () {
+      expect(
+        () => PubMcpConfig.fromArguments(
+          ['--cache-dir', '/tmp/cache', '--log-level'],
+          environment: {},
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
+  group('binary bare-flag error handling', () {
+    test('--log-level without value prints readable error and exits 64', () async {
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        ['run', 'bin/pubdev_context.dart', '--log-level'],
+      );
+      expect(result.exitCode, equals(64));
+      expect(result.stderr.toString(), contains('--log-level'));
+      expect(result.stderr.toString(), contains('--help'));
+    });
+
+    test('--cache-dir without value prints readable error and exits 64', () async {
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        ['run', 'bin/pubdev_context.dart', '--cache-dir'],
+      );
+      expect(result.exitCode, equals(64));
+      expect(result.stderr.toString(), contains('--cache-dir'));
+      expect(result.stderr.toString(), contains('--help'));
+    });
+
+    test('--max-cache-size without value prints readable error and exits 64', () async {
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        ['run', 'bin/pubdev_context.dart', '--max-cache-size'],
+      );
+      expect(result.exitCode, equals(64));
+      expect(result.stderr.toString(), contains('--max-cache-size'));
+      expect(result.stderr.toString(), contains('--help'));
     });
   });
 }

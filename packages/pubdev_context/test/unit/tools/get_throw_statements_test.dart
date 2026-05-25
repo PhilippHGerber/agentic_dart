@@ -255,6 +255,7 @@ void main() {
   setUp(() {
     mockHttp = _MockHttpClient();
     registerFallbackValue(Uri.parse('https://pub.dev'));
+    registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     sourceFilesCache = ResponseCache();
     apiIndexCache = ResponseCache();
@@ -1543,13 +1544,14 @@ class Svc {
           kApiDocsTtl,
         );
 
-        final completer = Completer<http.Response>();
+        final completer = Completer<http.StreamedResponse>();
         when(
-          () => mockHttp.get(
+          () => mockHttp.send(
             any(
-              that: predicate<Uri>((u) => u.toString().contains('/archive.tar.gz')),
+              that: predicate<http.BaseRequest>(
+                (r) => r.url.toString().contains('/archive.tar.gz'),
+              ),
             ),
-            headers: any(named: 'headers'),
           ),
         ).thenAnswer((_) => completer.future);
 
@@ -1561,7 +1563,7 @@ class Svc {
           _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
         );
 
-        completer.complete(http.Response('', 429));
+        completer.complete(http.StreamedResponse(const Stream.empty(), 429));
 
         final r1 = await f1;
         final r2 = await f2;
@@ -1655,9 +1657,12 @@ class Svc {
 
     test('request_timeout from tarball yields request_timeout', () async {
       when(
-        () => mockHttp.get(
-          any(that: predicate<Uri>((u) => u.toString().contains('/archive.tar.gz'))),
-          headers: any(named: 'headers'),
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
         ),
       ).thenAnswer((_) async => throw TimeoutException('network timeout'));
 
@@ -1671,11 +1676,14 @@ class Svc {
 
     test('rate_limited from tarball yields rate_limited', () async {
       when(
-        () => mockHttp.get(
-          any(that: predicate<Uri>((u) => u.toString().contains('/archive.tar.gz'))),
-          headers: any(named: 'headers'),
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
         ),
-      ).thenAnswer((_) async => http.Response('', 429));
+      ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 429));
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
@@ -1687,11 +1695,14 @@ class Svc {
 
     test('HTTP 404 from tarball yields package_not_found', () async {
       when(
-        () => mockHttp.get(
-          any(that: predicate<Uri>((u) => u.toString().contains('/archive.tar.gz'))),
-          headers: any(named: 'headers'),
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
         ),
-      ).thenAnswer((_) async => http.Response('Not Found', 404));
+      ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 404));
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
@@ -1703,11 +1714,14 @@ class Svc {
 
     test('transient tarball failure does not leave stale entry in sourceFilesCache', () async {
       when(
-        () => mockHttp.get(
-          any(that: predicate<Uri>((u) => u.toString().contains('/archive.tar.gz'))),
-          headers: any(named: 'headers'),
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
         ),
-      ).thenAnswer((_) async => http.Response('', 429));
+      ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 429));
 
       await buildHandler().call(
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),

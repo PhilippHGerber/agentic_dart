@@ -6,9 +6,12 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
+import 'package:pubdev_context/src/cache/tarball_disk_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
@@ -30,11 +33,40 @@ http.Response _jsonFile(String name, {int status = 200}) =>
 /// A [RetryPolicy] that never delays.
 RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
 
+Uint8List _buildTarGz(Map<String, String> files) {
+  final archive = Archive();
+  for (final entry in files.entries) {
+    archive.addFile(ArchiveFile.string(entry.key, entry.value));
+  }
+  final tar = TarEncoder().encodeBytes(archive);
+  return const GZipEncoder().encodeBytes(tar);
+}
+
+void _stubTarballStream(
+  _MockHttpClient mock,
+  List<int> bytes, {
+  String name = 'foo',
+  String version = '1.0.0',
+}) {
+  when(
+    () => mock.send(
+      any(
+        that: predicate<http.BaseRequest>(
+          (r) =>
+              r.method == 'GET' &&
+              r.url.toString().contains('/api/packages/$name/versions/$version/archive.tar.gz'),
+        ),
+      ),
+    ),
+  ).thenAnswer((_) async => http.StreamedResponse(Stream.value(bytes), 200));
+}
+
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 _MockHttpClient _setUp() {
   final mock = _MockHttpClient();
   registerFallbackValue(Uri.parse('https://pub.dev'));
+  registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
   return mock;
 }
 
@@ -497,6 +529,166 @@ void main() {
   });
 
   // ─── close ──────────────────────────────────────────────────────────────────
+
+  group('PubDevClient.getPackageSourceFiles', () {
+    test('uses tarball disk cache before making HTTP requests', () async {
+      final mock = _setUp();
+      final tempDir = Directory.systemTemp.createTempSync('pubdev_context_tarball_cache_');
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+
+      final cache = TarballDiskCache(directoryPath: tempDir.path);
+      await cache.write(
+        'foo',
+        '1.0.0',
+        _buildTarGz({'lib/src/foo.dart': 'void foo() {}'}),
+      );
+
+      final client = PubDevClient(
+        httpClient: mock,
+        retryPolicy: _instant,
+        tarballCache: cache,
+      );
+
+      final result = await client.getPackageSourceFiles('foo', '1.0.0');
+      expect(result, isA<PubDevSuccess<Map<String, String>>>());
+      final files = (result as PubDevSuccess<Map<String, String>>).value;
+      expect(files['lib/src/foo.dart'], equals('void foo() {}'));
+
+      verifyNever(() => mock.get(any(), headers: any(named: 'headers')));
+      verifyNever(() => mock.send(any()));
+    });
+
+    test('returns package_too_large when streamed tarball exceeds 50MB', () async {
+      final mock = _setUp();
+      final chunk = List<int>.filled(20 * 1024 * 1024, 1);
+
+      when(
+        () => mock.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/api/packages/foo/versions/1.0.0/archive.tar.gz'),
+            ),
+          ),
+        ),
+      ).thenAnswer(
+        (_) async => http.StreamedResponse(
+          Stream<List<int>>.fromIterable([chunk, chunk, chunk]),
+          200,
+        ),
+      );
+
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant);
+      final result = await client.getPackageSourceFiles('foo', '1.0.0');
+
+      expect(result, isA<PubDevFailure<Map<String, String>>>());
+      final error = (result as PubDevFailure<Map<String, String>>).error;
+      expect(error.code, equals(DomainErrors.packageTooLarge));
+    });
+
+    test('stores downloaded tarball in disk cache for subsequent calls', () async {
+      final mock = _setUp();
+      final tempDir = Directory.systemTemp.createTempSync('pubdev_context_tarball_cache_');
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+
+      final tarballBytes = _buildTarGz({'lib/src/foo.dart': 'void foo() {}'});
+      _stubTarballStream(mock, tarballBytes);
+
+      final cache = TarballDiskCache(directoryPath: tempDir.path);
+      final client = PubDevClient(
+        httpClient: mock,
+        retryPolicy: _instant,
+        tarballCache: cache,
+      );
+
+      final first = await client.getPackageSourceFiles('foo', '1.0.0');
+      expect(first, isA<PubDevSuccess<Map<String, String>>>());
+      verify(() => mock.send(any())).called(1);
+
+      final second = await client.getPackageSourceFiles('foo', '1.0.0');
+      expect(second, isA<PubDevSuccess<Map<String, String>>>());
+      verifyNever(() => mock.get(any(), headers: any(named: 'headers')));
+      verifyNoMoreInteractions(mock);
+    });
+
+    test('does not poison disk cache when the first downloaded tarball is malformed', () async {
+      final mock = _setUp();
+      final tempDir = Directory.systemTemp.createTempSync('pubdev_context_tarball_cache_');
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+
+      final validTarball = _buildTarGz({'lib/src/foo.dart': 'void foo() {}'});
+      var calls = 0;
+      when(
+        () => mock.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/api/packages/foo/versions/1.0.0/archive.tar.gz'),
+            ),
+          ),
+        ),
+      ).thenAnswer((_) async {
+        calls++;
+        return http.StreamedResponse(
+          Stream.value(calls == 1 ? <int>[1, 2, 3, 4] : validTarball),
+          200,
+        );
+      });
+
+      final cache = TarballDiskCache(directoryPath: tempDir.path);
+      final client = PubDevClient(
+        httpClient: mock,
+        retryPolicy: _instant,
+        tarballCache: cache,
+      );
+
+      final first = await client.getPackageSourceFiles('foo', '1.0.0');
+      expect(first, isA<PubDevFailure<Map<String, String>>>());
+      expect(
+        (first as PubDevFailure<Map<String, String>>).error.code,
+        equals(DomainErrors.unexpectedResponse),
+      );
+
+      final second = await client.getPackageSourceFiles('foo', '1.0.0');
+      expect(second, isA<PubDevSuccess<Map<String, String>>>());
+      expect(
+        (second as PubDevSuccess<Map<String, String>>).value['lib/src/foo.dart'],
+        equals('void foo() {}'),
+      );
+
+      expect(calls, equals(2));
+    });
+
+    test('returns invalid_argument when name contains path traversal characters', () async {
+      final client = _client(_setUp());
+      final result = await client.getPackageSourceFiles('../evil', '1.0.0');
+      expect(result, isA<PubDevFailure<Map<String, String>>>());
+      expect(
+        (result as PubDevFailure<Map<String, String>>).error.code,
+        equals(DomainErrors.invalidArgument),
+      );
+    });
+
+    test('returns invalid_argument when version contains a path separator', () async {
+      final client = _client(_setUp());
+      final result = await client.getPackageSourceFiles('foo', '1.0.0/../evil');
+      expect(result, isA<PubDevFailure<Map<String, String>>>());
+      expect(
+        (result as PubDevFailure<Map<String, String>>).error.code,
+        equals(DomainErrors.invalidArgument),
+      );
+    });
+  });
 
   group('PubDevClient.close', () {
     test('delegates close to the underlying http client', () {

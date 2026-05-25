@@ -7,10 +7,12 @@ library;
 
 import 'dart:async' show Completer, TimeoutException;
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 
+import '../cache/tarball_disk_cache.dart';
 import 'domain_error.dart';
 import 'html_to_markdown.dart';
 import 'models.dart';
@@ -88,6 +90,11 @@ final class RetryPolicy {
       code: DomainErrors.packageNotFound,
       message: 'Package not found on pub.dev.',
       suggestion: 'Verify the package name and try again.',
+    ),
+    413 => const DomainError(
+      code: DomainErrors.packageTooLarge,
+      message: 'Package tarball exceeds the maximum allowed download size.',
+      suggestion: 'Try a smaller package version or inspect metadata without downloading sources.',
     ),
     429 => const DomainError(
       code: DomainErrors.rateLimited,
@@ -204,15 +211,34 @@ final class PubDevClient {
     RetryPolicy? retryPolicy,
     Duration requestTimeout = const Duration(seconds: 10),
     int maxConcurrency = 5,
+    TarballDiskCache? tarballCache,
   }) : _http = httpClient ?? http.Client(),
        _retry = retryPolicy ?? RetryPolicy(),
        _timeout = requestTimeout,
-       _semaphore = _Semaphore(maxConcurrency);
+       _semaphore = _Semaphore(maxConcurrency),
+       _tarballCache = tarballCache;
 
   final http.Client _http;
   final RetryPolicy _retry;
   final Duration _timeout;
   final _Semaphore _semaphore;
+  final TarballDiskCache? _tarballCache;
+
+  static const int _kMaxTarballBytes = 50 * 1024 * 1024;
+
+  // Mirrors the validation in TarballDiskCache._fileFor so that invalid inputs
+  // are rejected with a structured DomainError before any I/O is attempted.
+  static final _kSafePackageName = RegExp(r'^[a-zA-Z0-9_]+$');
+  static final _kSafeVersionString = RegExp(r'^[0-9a-zA-Z.+_-]+$');
+
+  /// Multiplier applied to [_timeout] to derive the total download deadline.
+  ///
+  /// [_timeout] controls the per-chunk idle deadline (no data for _timeout →
+  /// abort). This factor converts it into a hard wall-clock cap for the entire
+  /// streaming download. At the default 10 s timeout a factor of 10 yields a
+  /// 100-second total deadline — enough for 50 MB at ~500 KB/s while still
+  /// bounding runaway slow-drip connections.
+  static const int _kDownloadTimeoutFactor = 10;
 
   /// Closes the underlying HTTP client and releases its resources.
   ///
@@ -475,13 +501,45 @@ final class PubDevClient {
     String name,
     String version,
   ) async {
+    if (!_kSafePackageName.hasMatch(name) || !_kSafeVersionString.hasMatch(version)) {
+      return const PubDevFailure(
+        DomainError(
+          code: DomainErrors.invalidArgument,
+          message: 'Package name or version contains invalid characters.',
+          suggestion:
+              'Use a valid pub.dev package name (letters, digits, underscores) '
+              'and a valid version string (e.g. "1.0.0").',
+        ),
+      );
+    }
+
+    final cachedBytes = await _tarballCache?.read(name, version);
+    if (cachedBytes != null) {
+      return _extractTarballFiles(cachedBytes);
+    }
+
     final url = '$_kBaseUrl/api/packages/$name/versions/$version/archive.tar.gz';
-    final result = await _retry.execute(() => _getRawBytes(url));
+    final result = await _retry.execute(
+      () => _downloadBytesWithLimit(url, maxBytes: _kMaxTarballBytes),
+    );
     if (result case PubDevFailure<List<int>>(:final error)) {
       return PubDevFailure(error);
     }
 
     final bytes = (result as PubDevSuccess<List<int>>).value;
+    final extracted = _extractTarballFiles(bytes);
+    if (extracted case PubDevFailure<Map<String, String>>(:final error)) {
+      return PubDevFailure(error);
+    }
+
+    // Persist only validated tarballs so malformed downloads cannot poison
+    // the cache for future requests.
+    await _tarballCache?.write(name, version, bytes);
+
+    return extracted;
+  }
+
+  static PubDevResult<Map<String, String>> _extractTarballFiles(List<int> bytes) {
     try {
       final decompressed = const GZipDecoder().decodeBytes(bytes);
       final archive = TarDecoder().decodeBytes(decompressed);
@@ -567,14 +625,43 @@ final class PubDevClient {
     }
   }
 
-  Future<List<int>> _getRawBytes(String url) async {
+  Future<List<int>> _downloadBytesWithLimit(String url, {required int maxBytes}) async {
     await _semaphore.acquire();
     try {
-      final response = await _http
-          .get(Uri.parse(url), headers: const {'Accept': _kAccept})
-          .timeout(_timeout);
-      if (response.statusCode == 200) return response.bodyBytes;
-      throw HttpStatusException(response.statusCode);
+      final uri = Uri.parse(url);
+      final request = http.Request('GET', uri);
+      request.headers['Accept'] = _kAccept;
+
+      final response = await _http.send(request).timeout(_timeout);
+
+      if (response.statusCode != 200) {
+        throw HttpStatusException(response.statusCode);
+      }
+
+      final bytes = BytesBuilder(copy: false);
+      var receivedBytes = 0;
+      final downloadDeadline = DateTime.now().add(_timeout * _kDownloadTimeoutFactor);
+
+      // _timeout acts as a per-chunk idle deadline (stream.timeout resets on
+      // every event). The deadline check below enforces a hard wall-clock cap
+      // on the entire download so a slow-drip server cannot hold a semaphore
+      // slot open indefinitely. Throwing inside `await for` triggers
+      // subscription.cancel(), which properly closes the stream.
+      await for (final chunk in response.stream.timeout(_timeout)) {
+        receivedBytes += chunk.length;
+        if (receivedBytes > maxBytes) {
+          throw const HttpStatusException(413);
+        }
+        if (DateTime.now().isAfter(downloadDeadline)) {
+          throw TimeoutException(
+            'Download exceeded total time limit',
+            _timeout * _kDownloadTimeoutFactor,
+          );
+        }
+        bytes.add(chunk);
+      }
+
+      return bytes.takeBytes();
     } finally {
       _semaphore.release();
     }

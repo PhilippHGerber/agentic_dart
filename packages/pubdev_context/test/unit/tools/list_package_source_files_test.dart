@@ -1,6 +1,7 @@
 /// Unit tests for [ListPackageSourceFilesHandler].
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -34,9 +35,6 @@ Uint8List _buildTarGz(Map<String, String> files) {
   return const GZipEncoder().encodeBytes(tar);
 }
 
-http.Response _tarGzResponse(Map<String, String> files) =>
-    http.Response.bytes(_buildTarGz(files), 200);
-
 void _stubTarball(
   _MockHttpClient mock,
   Map<String, String> files, {
@@ -44,15 +42,16 @@ void _stubTarball(
   String version = '1.0.0',
 }) {
   when(
-    () => mock.get(
+    () => mock.send(
       any(
-        that: predicate<Uri>(
-          (u) => u.toString().contains('/api/packages/$name/versions/$version/archive.tar.gz'),
+        that: predicate<http.BaseRequest>(
+          (r) => r.url.toString().contains(
+            '/api/packages/$name/versions/$version/archive.tar.gz',
+          ),
         ),
       ),
-      headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => _tarGzResponse(files));
+  ).thenAnswer((_) async => http.StreamedResponse(Stream.value(_buildTarGz(files)), 200));
 }
 
 void _stubPackageInfo(_MockHttpClient mock, {String name = 'foo', String version = '1.0.0'}) {
@@ -149,6 +148,7 @@ void main() {
   setUp(() {
     mockHttp = _MockHttpClient();
     registerFallbackValue(Uri.parse('https://pub.dev'));
+    registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     cache = ResponseCache();
     loggedMessages.clear();
@@ -300,8 +300,14 @@ void main() {
   group('package not found', () {
     test('returns package_not_found when tarball returns 404', () async {
       when(
-        () => mockHttp.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => _notFound());
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
+        ),
+      ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 404));
 
       final result = await buildHandler().call(
         _request({'name': 'missing', 'version': '1.0.0'}),
@@ -309,6 +315,37 @@ void main() {
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+    });
+  });
+
+  // ─── Package too large ───────────────────────────────────────────────────
+
+  group('package too large', () {
+    test('returns package_too_large when tarball exceeds 50MB', () async {
+      final chunk = List<int>.filled(20 * 1024 * 1024, 0);
+      when(
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains(
+                '/api/packages/too_big/versions/1.0.0/archive.tar.gz',
+              ),
+            ),
+          ),
+        ),
+      ).thenAnswer(
+        (_) async => http.StreamedResponse(
+          Stream<List<int>>.fromIterable([chunk, chunk, chunk]),
+          200,
+        ),
+      );
+
+      final result = await buildHandler().call(
+        _request({'name': 'too_big', 'version': '1.0.0'}),
+      );
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageTooLarge));
     });
   });
 
@@ -323,9 +360,12 @@ void main() {
       await handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
 
       verify(
-        () => mockHttp.get(
-          any(that: predicate<Uri>((u) => u.toString().contains('/archive.tar.gz'))),
-          headers: any(named: 'headers'),
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
         ),
       ).called(1);
     });
@@ -342,6 +382,40 @@ void main() {
           .where((m) => m.$1 == LoggingLevel.debug)
           .map((m) => m.$2.toString());
       expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
+    });
+
+    test('concurrent calls share one in-flight download (stampede prevention)', () async {
+      // Use a Completer so the HTTP response is withheld until both calls have
+      // had a chance to progress past their cache checks.
+      final responseCompleter = Completer<http.StreamedResponse>();
+      when(
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
+        ),
+      ).thenAnswer((_) => responseCompleter.future);
+
+      final handler = buildHandler();
+
+      // Both futures are started in the same synchronous turn. f1 suspends at
+      // `_http.send` only AFTER it has written the in-flight Completer into the
+      // cache; f2 therefore sees a cache hit and joins the same Future rather
+      // than issuing its own HTTP request.
+      final f1 = handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
+      final f2 = handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
+
+      // Deliver the response now that both calls are suspended on the shared
+      // future.
+      responseCompleter.complete(
+        http.StreamedResponse(Stream.value(_buildTarGz(_defaultFiles)), 200),
+      );
+
+      await Future.wait([f1, f2]);
+
+      verify(() => mockHttp.send(any())).called(1);
     });
   });
 }

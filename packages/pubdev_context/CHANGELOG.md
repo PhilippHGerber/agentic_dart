@@ -3,6 +3,13 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+
+- On-disk tarball cache for package source archives with persisted LRU eviction (default cap: 500 MiB), plus CLI configuration via `--cache-dir` and `--max-cache-size`.
+
+
 ## [0.4.0-rc.2]
 
 ### Added

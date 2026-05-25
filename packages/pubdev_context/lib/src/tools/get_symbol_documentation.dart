@@ -158,8 +158,9 @@ final class GetSymbolDocumentationHandler {
       _log(LoggingLevel.info, 'get_symbol_documentation: index HTTP request package=$package');
 
       final indexResult = await indexFuture;
-      if (indexResult case PubDevFailure(:final error)
-          when error.code == DomainErrors.packageNotFound) {
+      if (indexResult case PubDevFailure(
+        :final error,
+      ) when error.code == DomainErrors.packageNotFound) {
         return _domainError(_kNoDocumentation);
       }
       if (indexResult case PubDevFailure(:final error)) return _domainError(error);
@@ -185,8 +186,7 @@ final class GetSymbolDocumentationHandler {
       _AmbiguousMatch(:final alternatives) => _domainError(
         DomainError(
           code: DomainErrors.ambiguousSymbol,
-          message:
-              "Symbol '$symbol' is ambiguous — ${alternatives.length} candidates were found.",
+          message: "Symbol '$symbol' is ambiguous — ${alternatives.length} candidates were found.",
           suggestion:
               'Retry with a more qualified name from the candidates list '
               '(e.g. use the qualifiedName directly).',

@@ -5,6 +5,7 @@
 /// `GetPackageSourceFileHandler` — once the tarball is warm, listing is free.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
@@ -56,16 +57,11 @@ final class ListPackageSourceFilesHandler {
       '${fileExtension != null ? ' ext=$fileExtension' : ''}',
     );
 
-    final files = await _loadSourceFiles(name, version);
-    if (files == null) {
-      return _domainError(
-        DomainError(
-          code: DomainErrors.packageNotFound,
-          message: 'Package "$name" not found on pub.dev.',
-          suggestion: 'Verify the package name and try again.',
-        ),
-      );
+    final filesResult = await _loadSourceFiles(name, version);
+    if (filesResult case PubDevFailure(:final error)) {
+      return _domainError(error);
     }
+    final files = (filesResult as PubDevSuccess<Map<String, String>>).value;
 
     final directory = _normalizeDirectory(rawDirectory);
     var paths = files.keys.toList();
@@ -91,32 +87,54 @@ final class ListPackageSourceFilesHandler {
     );
   }
 
-  Future<Map<String, String>?> _loadSourceFiles(String name, String version) async {
+  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(
+    String name,
+    String version,
+  ) async {
     final cacheKey = 'source:$name:$version';
     final cached = _cache.get(cacheKey);
     if (cached != null) {
       _log(LoggingLevel.debug, 'list_package_source_files: cache hit key=$cacheKey');
-      return cached;
+      try {
+        return PubDevSuccess(await cached);
+      } on Object {
+        // The in-flight request that was sharing this future failed; fall
+        // through to issue an independent request.
+      }
     }
 
     _log(LoggingLevel.debug, 'list_package_source_files: cache miss key=$cacheKey');
     _log(LoggingLevel.info, 'list_package_source_files: HTTP tarball request name=$name');
 
-    // Store the in-flight future before awaiting to prevent cache stampedes.
-    final fetchFuture = _client.getPackageSourceFiles(name, version);
-    _cache.set(
-      cacheKey,
-      fetchFuture.then((r) => r is PubDevSuccess<Map<String, String>> ? r.value : {}),
-      kSourceFileTtl,
-    );
+    // Store the in-flight future before awaiting so that concurrent callers for
+    // the same key share this single download instead of issuing duplicates
+    // (cache-stampede prevention, as required by ResponseCache's contract).
+    final completer = Completer<Map<String, String>>();
+    _cache.set(cacheKey, completer.future, kSourceFileTtl);
 
-    final result = await fetchFuture;
+    final result = await _client.getPackageSourceFiles(name, version);
     if (result case PubDevSuccess(:final value)) {
-      _cache.set(cacheKey, Future.value(value), kSourceFileTtl);
-      return value;
+      completer.complete(value);
+      return PubDevSuccess(value);
     }
+
+    final error = (result as PubDevFailure<Map<String, String>>).error;
+    // Unblock any concurrent waiters with an error, then evict the entry so
+    // the next independent request gets a clean miss.
+    // `ignore()` registers a no-op error handler so Dart does not report an
+    // unhandled Future error when no concurrent caller is actually waiting.
+    completer.future.ignore();
+    completer.completeError(StateError('fetch failed: ${error.code}'));
     _cache.invalidate(cacheKey);
-    return null;
+    return PubDevFailure(
+      error.code == DomainErrors.packageNotFound
+          ? DomainError(
+              code: DomainErrors.packageNotFound,
+              message: 'Package "$name" not found on pub.dev.',
+              suggestion: 'Verify the package name and try again.',
+            )
+          : error,
+    );
   }
 
   static String? _normalizeDirectory(String? raw) {

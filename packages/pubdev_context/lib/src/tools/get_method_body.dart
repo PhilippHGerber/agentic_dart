@@ -140,7 +140,7 @@ final class GetMethodBodyHandler {
           suggestion: className != null
               ? 'Provide the method name to extract from class "$className".'
               : 'Provide the method name. '
-                  'To extract a class member, also provide the `class` parameter.',
+                    'To extract a class member, also provide the `class` parameter.',
         ),
       );
     }
@@ -212,8 +212,7 @@ final class GetMethodBodyHandler {
         : _domainError(
             DomainError(
               code: DomainErrors.symbolNotFound,
-              message:
-                  'Class "$className" was not found in the source files of "$package".',
+              message: 'Class "$className" was not found in the source files of "$package".',
               suggestion:
                   'Verify the class name is spelled correctly. '
                   'Use browse_api_symbols with type=class to discover class names.',
@@ -311,9 +310,7 @@ final class GetMethodBodyHandler {
     //   AMBIGUOUS_SYMBOL response; match the full qualifiedName exactly so that
     //   exactly one candidate is selected.
     final isQualified = method.contains('.');
-    final unqualifiedName = isQualified
-        ? method.substring(method.lastIndexOf('.') + 1)
-        : method;
+    final unqualifiedName = isQualified ? method.substring(method.lastIndexOf('.') + 1) : method;
 
     final candidates = symbols.where((s) {
       if (s.type != 'function') return false;
@@ -339,8 +336,7 @@ final class GetMethodBodyHandler {
       return _domainError(
         DomainError(
           code: DomainErrors.ambiguousSymbol,
-          message:
-              'Function "$method" is ambiguous — ${candidates.length} candidates found.',
+          message: 'Function "$method" is ambiguous — ${candidates.length} candidates found.',
           suggestion:
               'Retry with a fully qualified name from the candidates list '
               '(e.g. pass the qualifiedName directly as the `method` value).',
@@ -423,9 +419,7 @@ final class GetMethodBodyHandler {
     // Preserve transient errors; re-wrap package_not_found with the package name.
     final error = (result as PubDevFailure<Map<String, String>>).error;
     return PubDevFailure(
-      error.code == DomainErrors.packageNotFound
-          ? _packageNotFoundError(package)
-          : error,
+      error.code == DomainErrors.packageNotFound ? _packageNotFoundError(package) : error,
     );
   }
 
