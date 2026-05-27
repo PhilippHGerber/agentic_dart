@@ -85,7 +85,7 @@ base class PubMcpServer extends MCPServer
        _metaHttpOwned = metaHttpClient == null,
        super.fromStreamChannel(
          implementation: Implementation(
-           name: 'pubdev_context',
+           name: 'dart_pubdev',
            version: packageVersion,
          ),
          instructions: kServerInstructions,

@@ -156,9 +156,9 @@ void main() {
     // ─── Initialization ─────────────────────────────────────────────────────────
 
     group('initialize', () {
-      test('responds with server name pubdev_context', () async {
+      test('responds with server name dart_pubdev', () async {
         final result = await doInitialize();
-        expect(result.serverInfo.name, equals('pubdev_context'));
+        expect(result.serverInfo.name, equals('dart_pubdev'));
       });
 
       test('responds with the current package version', () async {
