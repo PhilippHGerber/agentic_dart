@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
+import 'package:pubdev_context/src/cache/memory_cache.dart';
 import 'package:pubdev_context/src/cache/tarball_disk_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
@@ -1206,6 +1207,248 @@ void main() {
         (result as PubDevFailure<PackageScore>).error.code,
         equals(DomainErrors.packageNotFound),
       );
+    });
+  });
+
+  // ─── Package Info Cache ──────────────────────────────────────────────────────
+
+  group('PubDevClient — Package Info Cache', () {
+    /// Stubs the bare `GET /api/packages/$name` info endpoint (never `/score`
+    /// or `/versions/…`) with [status] and the `package_info.json` fixture,
+    /// counting every hit. Returns a getter for the observed call count.
+    int Function() stubInfo(_MockHttpClient mock, String name, {int status = 200}) {
+      var calls = 0;
+      when(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.path == '/api/packages/$name')),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async {
+        calls++;
+        return http.Response(_readFixture('package_info.json'), status);
+      });
+      return () => calls;
+    }
+
+    PubDevClient clientWithCache(
+      _MockHttpClient mock, {
+      WireTrace? trace,
+    }) => PubDevClient(
+      httpClient: mock,
+      retryPolicy: _instant,
+      packageInfoCache: ResponseCache<Map<String, Object?>>(trace: trace),
+      trace: trace,
+    );
+
+    test('a cache miss fetches from pub.dev and returns the value', () async {
+      final mock = _setUp();
+      final infoCalls = stubInfo(mock, 'http');
+      final client = clientWithCache(mock);
+
+      final result = await client.resolveLatestStable('http');
+
+      expect((result as PubDevSuccess<String>).value, equals('1.6.0'));
+      expect(infoCalls(), equals(1));
+    });
+
+    test('a second resolveLatestStable within TTL serves from cache, no HTTP request', () async {
+      final mock = _setUp();
+      final infoCalls = stubInfo(mock, 'http');
+      final client = clientWithCache(mock);
+
+      final first = await client.resolveLatestStable('http');
+      final second = await client.resolveLatestStable('http');
+
+      expect((first as PubDevSuccess<String>).value, equals('1.6.0'));
+      expect((second as PubDevSuccess<String>).value, equals('1.6.0'));
+      expect(infoCalls(), equals(1));
+    });
+
+    test('a second listVersions within TTL serves from the same cached info payload', () async {
+      final mock = _setUp();
+      final infoCalls = stubInfo(mock, 'http');
+      final client = clientWithCache(mock);
+
+      final first = await client.listVersions('http');
+      final second = await client.listVersions('http');
+
+      expect(first, isA<PubDevSuccess<List<PackageVersion>>>());
+      expect(second, isA<PubDevSuccess<List<PackageVersion>>>());
+      expect(infoCalls(), equals(1));
+    });
+
+    test('resolveLatestStable and listVersions share one cached info fetch', () async {
+      final mock = _setUp();
+      final infoCalls = stubInfo(mock, 'http');
+      final client = clientWithCache(mock);
+
+      await client.resolveLatestStable('http');
+      await client.listVersions('http');
+
+      expect(infoCalls(), equals(1));
+    });
+
+    test('a cache hit emits a ⚡ cache hit line under the ambient Correlation Id', () async {
+      final mock = _setUp();
+      final infoCalls = stubInfo(mock, 'http');
+      final sink = _RecordingSink();
+      final trace = WireTrace.withSink(
+        sink,
+        serverVersion: '0.0.0-test',
+        maxPreviewBytes: 2048,
+        concurrency: 5,
+        cacheDir: '/tmp',
+      );
+      final client = clientWithCache(mock, trace: trace);
+
+      await runZoned(() async {
+        await client.resolveLatestStable('http');
+        await client.resolveLatestStable('http');
+      }, zoneValues: {wireTraceZoneIdKey: '#100'});
+
+      expect(infoCalls(), equals(1));
+      expect(
+        sink.lines.any((l) => l.contains('⚡ cache hit') && l.contains('http')),
+        isTrue,
+      );
+    });
+
+    test('resolveLatestStable then getPackage fetch the info endpoint only once', () async {
+      final mock = _setUp();
+      final infoCalls = stubInfo(mock, 'http');
+      _stubGet(mock, '/api/packages/http/score', _jsonFile('package_score.json'));
+      _stubGet(mock, '/documentation/http/latest/', _json('<html></html>'));
+      final client = clientWithCache(mock);
+
+      await client.resolveLatestStable('http');
+      final pkg = await client.getPackage('http');
+
+      expect(pkg, isA<PubDevSuccess<PackageDetail>>());
+      expect(infoCalls(), equals(1));
+    });
+
+    test('two concurrent calls for the same package share one in-flight request', () async {
+      final mock = _setUp();
+      var calls = 0;
+      final gate = Completer<void>();
+      when(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.path == '/api/packages/http')),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async {
+        calls++;
+        await gate.future;
+        return http.Response(_readFixture('package_info.json'), 200);
+      });
+      final client = clientWithCache(mock);
+
+      final futures = Future.wait([
+        client.resolveLatestStable('http'),
+        client.resolveLatestStable('http'),
+      ]);
+      gate.complete();
+      final results = await futures;
+
+      expect(results.every((r) => r is PubDevSuccess<String>), isTrue);
+      expect(calls, equals(1));
+    });
+
+    test('a failed fetch is not cached — the next call retries against pub.dev', () async {
+      final mock = _setUp();
+      var calls = 0;
+      when(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.path == '/api/packages/http')),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async {
+        calls++;
+        return calls == 1
+            ? http.Response('', 404)
+            : http.Response(_readFixture('package_info.json'), 200);
+      });
+      final client = clientWithCache(mock);
+
+      final first = await client.resolveLatestStable('http');
+      final second = await client.resolveLatestStable('http');
+
+      expect((first as PubDevFailure<String>).error.code, equals(DomainErrors.packageNotFound));
+      expect((second as PubDevSuccess<String>).value, equals('1.6.0'));
+      expect(calls, equals(2));
+    });
+
+    test('getScore is unaffected by the info cache — each call issues its own request', () async {
+      final mock = _setUp();
+      var scoreCalls = 0;
+      when(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.path == '/api/packages/http/score')),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async {
+        scoreCalls++;
+        return _jsonFile('package_score.json');
+      });
+      final client = clientWithCache(mock);
+
+      await client.getScore('http');
+      await client.getScore('http');
+
+      expect(scoreCalls, equals(2));
+    });
+
+    test('getMetrics is unaffected by the info cache — each call issues its own request', () async {
+      final mock = _setUp();
+      var metricsCalls = 0;
+      when(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.path == '/api/packages/http/metrics')),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async {
+        metricsCalls++;
+        return _jsonFile('package_metrics.json');
+      });
+      final client = clientWithCache(mock);
+
+      await client.getMetrics('http');
+      await client.getMetrics('http');
+
+      expect(metricsCalls, equals(2));
+    });
+
+    test('getPackageVersion is unaffected by the info cache — the version endpoint is hit every call', () async {
+      final mock = _setUp();
+      final versionJson = jsonEncode({
+        'version': '1.5.0',
+        'pubspec': {
+          'name': 'http',
+          'version': '1.5.0',
+          'description': 'A composable HTTP library.',
+          'environment': {'sdk': '^3.4.0'},
+          'dependencies': <String, Object?>{},
+          'dev_dependencies': <String, Object?>{},
+        },
+        'published': '2025-08-07T22:35:23.863279Z',
+      });
+      var versionCalls = 0;
+      when(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.path == '/api/packages/http/versions/1.5.0')),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async {
+        versionCalls++;
+        return _json(versionJson);
+      });
+      _stubGet(mock, '/api/packages/http/score', _jsonFile('package_score.json'));
+      final client = clientWithCache(mock);
+
+      await client.getPackageVersion('http', '1.5.0');
+      await client.getPackageVersion('http', '1.5.0');
+
+      expect(versionCalls, equals(2));
     });
   });
 }

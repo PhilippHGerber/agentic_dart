@@ -113,8 +113,11 @@ Future<void> main(List<String> args) async {
         )
       : null;
 
+  final packageInfoCache = ResponseCache<Map<String, Object?>>(trace: trace);
+
   final client = PubDevClient(
     tarballCache: tarballCache,
+    packageInfoCache: packageInfoCache,
     maxConcurrency: config.maxConcurrentRequests,
     trace: trace,
   );

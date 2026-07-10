@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 
+import '../cache/memory_cache.dart';
 import '../cache/tarball_disk_cache.dart';
 import '../trace/wire_trace.dart';
 import 'domain_error.dart';
@@ -248,6 +249,14 @@ final class PubDevClient {
   /// for each individual HTTP call; the [RetryPolicy] may issue multiple calls
   /// up to [RetryPolicy.maxAttempts] before returning a failure.
   ///
+  /// [tarballCache] and [packageInfoCache], when supplied, are consulted
+  /// transparently inside the relevant methods: the former persists downloaded
+  /// tarballs to disk, the latter memoises `GET /api/packages/{name}` responses
+  /// (shared by [resolveLatestStable], [getPackage], [listVersions], and search
+  /// enrichment) so that endpoint is fetched at most once per package per
+  /// [kPackageMetadataTtl] window. Both are constructed once in server wiring and
+  /// passed the same [trace] so their `⚡ cache hit` lines appear automatically.
+  ///
   /// When an enabled [trace] is supplied, every outbound pub.dev request and its
   /// response are logged to the Wire Trace, correlated — via the ambient [Zone]
   /// id read at call time — to the LLM request that triggered them. When [trace]
@@ -260,12 +269,14 @@ final class PubDevClient {
     Duration requestTimeout = const Duration(seconds: 10),
     int maxConcurrency = 5,
     TarballDiskCache? tarballCache,
+    ResponseCache<Map<String, Object?>>? packageInfoCache,
     WireTrace? trace,
   }) : _http = httpClient ?? http.Client(),
        _retry = retryPolicy ?? RetryPolicy(),
        _timeout = requestTimeout,
        _semaphore = _Semaphore(maxConcurrency),
        _tarballCache = tarballCache,
+       _packageInfoCache = packageInfoCache,
        _trace = trace;
 
   final http.Client _http;
@@ -273,6 +284,7 @@ final class PubDevClient {
   final Duration _timeout;
   final _Semaphore _semaphore;
   final TarballDiskCache? _tarballCache;
+  final ResponseCache<Map<String, Object?>>? _packageInfoCache;
   final WireTrace? _trace;
 
   static const int _kMaxTarballBytes = 50 * 1024 * 1024;
@@ -306,7 +318,7 @@ final class PubDevClient {
   /// README excerpt from the documentation page.
   Future<PubDevResult<PackageDetail>> getPackage(String name) async {
     final (infoResult, scoreResult) = await (
-      _fetchJson('$_kBaseUrl/api/packages/$name'),
+      _fetchPackageInfo(name),
       _fetchJson('$_kBaseUrl/api/packages/$name/score'),
     ).wait;
 
@@ -543,7 +555,7 @@ final class PubDevClient {
   /// pub.dev, or [DomainErrors.unexpectedResponse] when no stable version can be
   /// determined from the response.
   Future<PubDevResult<String>> resolveLatestStable(String packageName) async {
-    final result = await _fetchJson('$_kBaseUrl/api/packages/$packageName');
+    final result = await _fetchPackageInfo(packageName);
     return switch (result) {
       PubDevFailure<Map<String, Object?>>(:final error) => PubDevFailure(error),
       PubDevSuccess<Map<String, Object?>>(:final value) => _findLatestStable(value),
@@ -581,7 +593,7 @@ final class PubDevClient {
   /// Returns [DomainErrors.packageNotFound] when the package does not exist on
   /// pub.dev, or [DomainErrors.unexpectedResponse] when the body is malformed.
   Future<PubDevResult<List<PackageVersion>>> listVersions(String name) async {
-    final result = await _fetchJson('$_kBaseUrl/api/packages/$name');
+    final result = await _fetchPackageInfo(name);
     return switch (result) {
       PubDevFailure<Map<String, Object?>>(:final error) => PubDevFailure(error),
       PubDevSuccess<Map<String, Object?>>(:final value) => PubDevSuccess(
@@ -725,6 +737,59 @@ final class PubDevClient {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
+
+  /// Fetches `GET /api/packages/{name}` through the Package Info Cache.
+  ///
+  /// [resolveLatestStable], [getPackage]'s info-half, [listVersions], and
+  /// [_fetchSummary] all route through here, so the endpoint's full-metadata
+  /// payload (every version included) is fetched from pub.dev at most once per
+  /// [kPackageMetadataTtl] window per package name — shared across those callers
+  /// and across concurrent requests. The in-flight [Future] is stored before it
+  /// is awaited, so two concurrent misses for the same name share one HTTP call
+  /// (single-flight via [ResponseCache.set]).
+  ///
+  /// A failed fetch is **never** cached: the entry is evicted so the next call
+  /// gets a clean miss and retries against pub.dev, per the cache-poisoning
+  /// avoidance convention. When no cache was injected the call falls through
+  /// directly to [_fetchJson] with no memoisation.
+  Future<PubDevResult<Map<String, Object?>>> _fetchPackageInfo(String name) async {
+    final cache = _packageInfoCache;
+    if (cache == null) {
+      return _fetchJson('$_kBaseUrl/api/packages/$name');
+    }
+
+    final cached = cache.get(name);
+    if (cached != null) {
+      try {
+        return PubDevSuccess(await cached);
+      } on Object {
+        // The in-flight request sharing this future failed; fall through to
+        // issue an independent request rather than replaying the failure.
+      }
+    }
+
+    // Store the in-flight future before awaiting so concurrent callers for the
+    // same name share this single request (cache-stampede prevention, per
+    // ResponseCache's contract).
+    final completer = Completer<Map<String, Object?>>();
+    cache.set(name, completer.future, kPackageMetadataTtl);
+
+    final result = await _fetchJson('$_kBaseUrl/api/packages/$name');
+    switch (result) {
+      case PubDevSuccess(:final value):
+        completer.complete(value);
+        return result;
+      case PubDevFailure(:final error):
+        // Unblock any concurrent waiters with an error, then evict the entry so
+        // the next independent call gets a clean miss. `ignore()` registers a
+        // no-op error handler so Dart does not report an unhandled Future error
+        // when no concurrent caller is actually waiting on this future.
+        completer.future.ignore();
+        completer.completeError(StateError('package info fetch failed: ${error.code}'));
+        cache.invalidate(name);
+        return result;
+    }
+  }
 
   /// Fetches [url] with retry and parses the body as a JSON object.
   ///
@@ -1045,7 +1110,7 @@ final class PubDevClient {
 
   Future<PackageSummary?> _fetchSummary(String name) async {
     final (infoResult, scoreResult) = await (
-      _fetchJson('$_kBaseUrl/api/packages/$name'),
+      _fetchPackageInfo(name),
       _fetchJson('$_kBaseUrl/api/packages/$name/score'),
     ).wait;
     if (infoResult is PubDevFailure<Map<String, Object?>> ||
