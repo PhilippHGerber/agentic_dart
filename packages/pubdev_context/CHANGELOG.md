@@ -3,7 +3,7 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## [0.4.0-rc.4]
 
 ### Added
 
