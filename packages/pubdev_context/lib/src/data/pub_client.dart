@@ -241,6 +241,21 @@ const _unexpectedResponse = DomainError(
 /// [PubDevResult]. No raw HTTP or JSON escapes this class. All requests include
 /// the `Accept: application/vnd.pub.v2+json` header. Retry behaviour is
 /// delegated to the [RetryPolicy] supplied at construction time.
+///
+/// This client is not a purely stateless-per-call gateway: it owns two caches,
+/// each consulted transparently before the corresponding request reaches the
+/// network.
+///
+/// - The **Tarball Disk Cache** ([TarballDiskCache]) persists downloaded package
+///   tarballs to disk and is checked inside [getPackageSourceFiles].
+/// - The **Package Info Cache** (an in-memory, TTL-bound, single-flight
+///   [ResponseCache]) memoises `GET /api/packages/{name}` responses so that
+///   endpoint is fetched at most once per package per [kPackageMetadataTtl]
+///   window. It is shared by [resolveLatestStable], [getPackage], [listVersions],
+///   and search enrichment, all of which route through one private fetch helper.
+///
+/// Both caches are optional constructor dependencies; when omitted, the client
+/// falls back to fetching fresh on every call.
 final class PubDevClient {
   /// Creates a [PubDevClient].
   ///
@@ -249,13 +264,10 @@ final class PubDevClient {
   /// for each individual HTTP call; the [RetryPolicy] may issue multiple calls
   /// up to [RetryPolicy.maxAttempts] before returning a failure.
   ///
-  /// [tarballCache] and [packageInfoCache], when supplied, are consulted
-  /// transparently inside the relevant methods: the former persists downloaded
-  /// tarballs to disk, the latter memoises `GET /api/packages/{name}` responses
-  /// (shared by [resolveLatestStable], [getPackage], [listVersions], and search
-  /// enrichment) so that endpoint is fetched at most once per package per
-  /// [kPackageMetadataTtl] window. Both are constructed once in server wiring and
-  /// passed the same [trace] so their `⚡ cache hit` lines appear automatically.
+  /// [tarballCache] and [packageInfoCache] are the two caches described in the
+  /// class doc above; when supplied they are consulted transparently inside the
+  /// relevant methods. Both are constructed once in server wiring and passed the
+  /// same [trace] so their `⚡ cache hit` lines appear automatically.
   ///
   /// When an enabled [trace] is supplied, every outbound pub.dev request and its
   /// response are logged to the Wire Trace, correlated — via the ambient [Zone]
