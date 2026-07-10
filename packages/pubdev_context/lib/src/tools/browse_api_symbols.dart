@@ -5,10 +5,14 @@
 /// [DartdocSymbol.desc]-only matches. An optional `type` filter is applied
 /// after ranking. Results are capped at `limit`.
 ///
-/// Cache key format: `api_index:<package>` (see [kApiIndexCachePrefix]).
+/// When `version` is omitted the handler resolves the latest stable version
+/// via [PubDevClient.resolveLatestStable]. Every success response includes
+/// `resolvedVersion` as its first JSON key.
+///
+/// Cache key format: `api_index:<package>:<resolvedVersion>`.
 /// The API index is cached with a [kApiDocsTtl] TTL and the cache key is
-/// intentionally shared with the package resource handler so that both modules
-/// warm each other's cache. Cache hits are logged at [LoggingLevel.debug].
+/// intentionally shared with the symbol-documentation handler so that both
+/// modules warm each other's cache. Cache hits are logged at [LoggingLevel.debug].
 ///
 /// Domain errors:
 /// - `NO_DOCUMENTATION`: `index.json` is missing or empty for the package.
@@ -27,10 +31,10 @@ import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 
-/// Cache-key prefix used by both [BrowseApiSymbolsHandler] and the package
-/// resource handler (issue 11) to share the dartdoc symbol index cache.
+/// Cache-key prefix used by both [BrowseApiSymbolsHandler] and the symbol-
+/// documentation handler to share the dartdoc symbol index cache.
 ///
-/// Full key format: `$kApiIndexCachePrefix:<packageName>`.
+/// Full key format: `$kApiIndexCachePrefix:<packageName>:<version>`.
 const kApiIndexCachePrefix = 'api_index';
 
 /// Handles calls to the `browse_api_symbols` MCP tool.
@@ -42,9 +46,9 @@ final class BrowseApiSymbolsHandler {
   /// Creates a [BrowseApiSymbolsHandler].
   ///
   /// [client] is the pub.dev HTTP gateway. [cache] is the shared TTL store
-  /// for dartdoc symbol indexes; pass the same instance to the package resource
-  /// handler so both modules warm each other's cache. [log] receives structured
-  /// log events at the appropriate [LoggingLevel].
+  /// for dartdoc symbol indexes; pass the same instance to the symbol-
+  /// documentation handler so both modules warm each other's cache.
+  /// [log] receives structured log events at the appropriate [LoggingLevel].
   const BrowseApiSymbolsHandler({
     required PubDevClient client,
     required ResponseCache<List<DartdocSymbol>> cache,
@@ -59,7 +63,8 @@ final class BrowseApiSymbolsHandler {
 
   /// Handles a [CallToolRequest] for `browse_api_symbols`.
   ///
-  /// Validates `limit` against the 25-result cap, consults the cache, and
+  /// Resolves the version (via [PubDevClient.resolveLatestStable] when absent),
+  /// validates `limit` against the 25-result cap, consults the cache, and
   /// delegates to [PubDevClient.getApiIndex]. Exact [DartdocSymbol.name]
   /// matches are ranked before [DartdocSymbol.desc]-only matches; the optional
   /// `type` filter is applied after ranking. Returns [CallToolResult.isError]
@@ -71,6 +76,7 @@ final class BrowseApiSymbolsHandler {
     final query = (args['query'] as String?) ?? '';
     final type = args['type'] as String?;
     final limit = (args['limit'] as int?) ?? 10;
+    final suppliedVersion = args['version'] as String?;
 
     if (limit > 25) {
       return _domainError(
@@ -82,20 +88,39 @@ final class BrowseApiSymbolsHandler {
       );
     }
 
-    _log(LoggingLevel.info, 'browse_api_symbols: package=$package query=$query limit=$limit');
+    _log(
+      LoggingLevel.info,
+      'browse_api_symbols: package=$package query=$query limit=$limit'
+      '${suppliedVersion != null ? ' version=$suppliedVersion' : ''}',
+    );
 
-    final cacheKey = '$kApiIndexCachePrefix:$package';
+    // ── Resolve version ────────────────────────────────────────────────────────
+
+    final String resolvedVersion;
+    if (suppliedVersion != null) {
+      resolvedVersion = suppliedVersion;
+    } else {
+      _log(LoggingLevel.info, 'browse_api_symbols: resolving latest stable version for $package');
+      final versionResult = await _client.resolveLatestStable(package);
+      if (versionResult case PubDevFailure(:final error)) return _domainError(error);
+      resolvedVersion = (versionResult as PubDevSuccess<String>).value;
+      _log(LoggingLevel.debug, 'browse_api_symbols: resolved version=$resolvedVersion');
+    }
+
+    // ── Cache lookup ───────────────────────────────────────────────────────────
+
+    final cacheKey = '$kApiIndexCachePrefix:$package:$resolvedVersion';
 
     final cached = _cache.get(cacheKey);
     if (cached != null) {
       _log(LoggingLevel.debug, 'browse_api_symbols: cache hit key=$cacheKey');
       final symbols = await cached;
-      return _buildResponse(symbols, query, type, limit);
+      return _buildResponse(symbols, query, type, limit, resolvedVersion);
     }
 
     _log(LoggingLevel.debug, 'browse_api_symbols: cache miss key=$cacheKey');
 
-    final future = _client.getApiIndex(package);
+    final future = _client.getApiIndex(package, version: resolvedVersion);
 
     _cache.set(
       cacheKey,
@@ -113,7 +138,7 @@ final class BrowseApiSymbolsHandler {
     final result = await future;
 
     return switch (result) {
-      PubDevSuccess(:final value) => _buildResponse(value, query, type, limit),
+      PubDevSuccess(:final value) => _buildResponse(value, query, type, limit, resolvedVersion),
       PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound => _domainError(
         _kNoDocumentation,
       ),
@@ -130,6 +155,7 @@ final class BrowseApiSymbolsHandler {
     String query,
     String? type,
     int limit,
+    String resolvedVersion,
   ) {
     if (symbols.isEmpty) return _domainError(_kNoDocumentation);
 
@@ -160,7 +186,12 @@ final class BrowseApiSymbolsHandler {
 
     return CallToolResult(
       content: [
-        TextContent(text: jsonEncode(_symbolsToJson(filtered.take(limit).toList()))),
+        TextContent(
+          text: jsonEncode({
+            'resolvedVersion': resolvedVersion,
+            'symbols': _symbolsToJson(filtered.take(limit).toList()),
+          }),
+        ),
       ],
     );
   }

@@ -486,6 +486,53 @@ final class PackageMetrics {
   );
 }
 
+// ─── PackageVersion ───────────────────────────────────────────────────────────
+
+/// A single published version of a package.
+///
+/// Sourced from one entry of the `versions` array in the
+/// `GET /api/packages/{name}` response. [retracted] reflects version-level
+/// retraction from pub.dev; package-level discontinuation is not represented
+/// here. [isPrerelease] is derived from the semver string.
+final class PackageVersion {
+  /// Creates a [PackageVersion] with the given fields.
+  const PackageVersion({
+    required this.version,
+    required this.publishedAt,
+    required this.retracted,
+  });
+
+  /// Constructs a [PackageVersion] from one entry of the `versions` array.
+  ///
+  /// The `retracted` flag is absent from pub.dev responses for versions that
+  /// have not been retracted; a missing value is treated as `false`.
+  factory PackageVersion.fromJson(Map<String, Object?> json) => PackageVersion(
+    version: _optStr(json, 'version') ?? '',
+    publishedAt: DateTime.tryParse(_optStr(json, 'published') ?? ''),
+    retracted: (json['retracted'] as bool?) ?? false,
+  );
+
+  /// The semver version string (e.g. `"1.2.0"` or `"1.3.0-beta.1"`).
+  final String version;
+
+  /// When this version was published, or `null` when the field is absent or unparseable.
+  final DateTime? publishedAt;
+
+  /// Whether this version has been retracted on pub.dev.
+  final bool retracted;
+
+  /// Whether this version is a pre-release (its semver carries a `-` suffix).
+  bool get isPrerelease => version.contains('-');
+
+  /// Returns a copy of this version with the given fields replaced.
+  PackageVersion copyWith({String? version, DateTime? publishedAt, bool? retracted}) =>
+      PackageVersion(
+        version: version ?? this.version,
+        publishedAt: publishedAt ?? this.publishedAt,
+        retracted: retracted ?? this.retracted,
+      );
+}
+
 // ─── ChangelogEntry ───────────────────────────────────────────────────────────
 
 /// A single version entry from a package changelog.
@@ -550,18 +597,25 @@ final class DartdocSymbol {
     required this.href,
     required this.type,
     required this.desc,
+    this.enclosedBy,
   });
 
   /// Constructs a [DartdocSymbol] from a single entry in `index.json`.
   ///
   /// The raw `kind` integer is mapped to a readable [type] string; any
   /// unrecognised value is kept as its decimal string representation.
+  ///
+  /// [enclosedBy] is populated from the raw `enclosedBy.name` only when the
+  /// enclosing entity is a non-library container (a class, enum, mixin, …).
+  /// Top-level symbols whose container is the library itself (kind `9`) —
+  /// and symbols with no `enclosedBy` — carry a `null` [enclosedBy].
   factory DartdocSymbol.fromJson(Map<String, Object?> json) => DartdocSymbol(
     name: _optStr(json, 'name') ?? '',
     qualifiedName: _optStr(json, 'qualifiedName') ?? '',
     href: _optStr(json, 'href') ?? '',
     type: _kindToType((json['kind'] as int?) ?? -1),
     desc: _optStr(json, 'desc') ?? '',
+    enclosedBy: _parseEnclosedBy(json['enclosedBy']),
   );
 
   /// The short symbol name (e.g. `"Client"`).
@@ -581,6 +635,13 @@ final class DartdocSymbol {
   /// The short description from the dartdoc comment, if any.
   final String desc;
 
+  /// The name of the enclosing container for methods, constructors, accessors
+  /// and other members (e.g. `"BrowserClient"`).
+  ///
+  /// `null` for top-level symbols — classes, enums, extensions, top-level
+  /// functions, and library entries — whose container is the library itself.
+  final String? enclosedBy;
+
   /// Returns a copy of this symbol with the given fields replaced.
   DartdocSymbol copyWith({
     String? name,
@@ -588,13 +649,25 @@ final class DartdocSymbol {
     String? href,
     String? type,
     String? desc,
+    String? enclosedBy,
   }) => DartdocSymbol(
     name: name ?? this.name,
     qualifiedName: qualifiedName ?? this.qualifiedName,
     href: href ?? this.href,
     type: type ?? this.type,
     desc: desc ?? this.desc,
+    enclosedBy: enclosedBy ?? this.enclosedBy,
   );
+
+  /// Extracts the enclosing container name from a raw `enclosedBy` entry.
+  ///
+  /// Returns `null` when the entry is absent, malformed, or refers to a
+  /// library (kind `9`) — so that top-level symbols report no container.
+  static String? _parseEnclosedBy(Object? raw) {
+    if (raw is! Map<String, Object?>) return null;
+    if ((raw['kind'] as int?) == 9) return null; // library container
+    return _optStr(raw, 'name');
+  }
 
   // Ordinal positions from dartdoc's Kind enum (lib/src/model/kind.dart).
   static String _kindToType(int kind) => switch (kind) {

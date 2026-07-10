@@ -1,8 +1,22 @@
 /// Unit tests for [ResponseCache] and the TTL constants in memory_cache.dart.
 library;
 
+import 'dart:async';
+
 import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:test/test.dart';
+
+/// A [WireTraceSink] that records emitted lines in memory.
+final class _RecordingSink implements WireTraceSink {
+  final List<String> lines = <String>[];
+
+  @override
+  void writeLine(String line) => lines.add(line);
+
+  @override
+  void close() {}
+}
 
 void main() {
   late DateTime fakeNow;
@@ -214,6 +228,90 @@ void main() {
       cache.set('key', fresh, const Duration(minutes: 5));
 
       expect(cache.get('key'), same(fresh));
+    });
+  });
+
+  group('ResponseCache — cache-hit tracing', () {
+    late _RecordingSink sink;
+    late WireTrace trace;
+    late ResponseCache<String> cache;
+
+    setUp(() {
+      fakeNow = DateTime(2026);
+      sink = _RecordingSink();
+      trace = WireTrace.withSink(
+        sink,
+        serverVersion: '0.0.0-test',
+        maxPreviewBytes: 2048,
+        concurrency: 5,
+        cacheDir: '/tmp',
+      );
+      cache = ResponseCache(clock: fakeClock, trace: trace);
+    });
+
+    /// The `⚡ cache hit` lines emitted so far (header lines excluded).
+    List<String> hitLines() =>
+        sink.lines.where((l) => l.contains('⚡ cache hit')).toList();
+
+    /// Reads [key] as if inside a traced request carrying Correlation Id [id].
+    /// The looked-up future is intentionally discarded — the tests assert on the
+    /// trace side effect, not the value.
+    void getInTracedRequest(String id, String key) => runZoned(
+      () {
+        final _ = cache.get(key);
+      },
+      zoneValues: {wireTraceZoneIdKey: id},
+    );
+
+    test('a hit inside a traced request emits one cache-hit line with key and age', () {
+      cache.set('versions:http', Future.value('v'), const Duration(minutes: 15));
+      fakeNow = fakeNow.add(const Duration(seconds: 12));
+
+      getInTracedRequest('#007', 'versions:http');
+
+      expect(hitLines(), hasLength(1));
+      expect(hitLines().single, contains('#007'));
+      expect(hitLines().single, contains('cache hit  versions:http'));
+      expect(hitLines().single, contains('age 12s'));
+    });
+
+    test('a hit outside any traced request (no Correlation Id) emits nothing', () {
+      cache.set('versions:http', Future.value('v'), const Duration(minutes: 15));
+
+      // No Zone id — models an autocomplete lookup, which must not be traced.
+      final _ = cache.get('versions:http');
+
+      expect(hitLines(), isEmpty);
+    });
+
+    test('a miss emits nothing even inside a traced request', () {
+      getInTracedRequest('#001', 'absent');
+
+      expect(hitLines(), isEmpty);
+    });
+
+    test('an expired entry is a miss and emits nothing', () {
+      cache.set('versions:http', Future.value('v'), const Duration(minutes: 15));
+      fakeNow = fakeNow.add(const Duration(minutes: 15, microseconds: 1));
+
+      getInTracedRequest('#001', 'versions:http');
+
+      expect(hitLines(), isEmpty);
+    });
+
+    test('an untraced cache (trace: null) never logs', () {
+      final untraced = ResponseCache<String>(clock: fakeClock)
+        ..set('k', Future.value('v'), const Duration(minutes: 5));
+
+      // A hit inside a traced Zone still emits nothing: the cache holds no trace.
+      runZoned(
+        () {
+          final _ = untraced.get('k');
+        },
+        zoneValues: {wireTraceZoneIdKey: '#001'},
+      );
+
+      expect(hitLines(), isEmpty);
     });
   });
 }

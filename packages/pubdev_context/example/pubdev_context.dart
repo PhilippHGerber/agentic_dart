@@ -39,6 +39,7 @@ Future<void> main() async {
     client: PubDevClient(),
     searchCache: ResponseCache<List<PackageSummary>>(),
     packageCache: ResponseCache<PackageDetail>(),
+    packageVersionsCache: ResponseCache<List<PackageVersion>>(),
     changelogCache: ResponseCache<List<ChangelogEntry>>(),
     changelogRawCache: ResponseCache<String>(),
     apiIndexCache: ResponseCache<List<DartdocSymbol>>(),

@@ -1,6 +1,7 @@
 /// Unit tests for [ComparePackagesHandler].
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -91,6 +92,30 @@ void _stubSuccess(_MockHttpClient mock, String name) {
     urlFragment: '/api/packages/$name/score',
     response: _ok(_packageScoreJson()),
   );
+}
+
+/// Stubs a successful `getPackage` for [name], but gates the package-info
+/// endpoint on a [Completer] so the fetch cannot complete until the returned
+/// completer is completed. The `score` and documentation endpoints resolve
+/// immediately. Used to force out-of-order completion between packages.
+Completer<void> _stubGatedInfo(_MockHttpClient mock, String name) {
+  final gate = Completer<void>();
+  _stubUrl(mock: mock, urlFragment: '/documentation/$name/latest/', response: _notFound());
+  when(
+    () => mock.get(
+      any(that: predicate<Uri>((u) => u.toString().endsWith('/api/packages/$name'))),
+      headers: any(named: 'headers'),
+    ),
+  ).thenAnswer((_) async {
+    await gate.future;
+    return _ok(_packageInfoJson(name));
+  });
+  _stubUrl(
+    mock: mock,
+    urlFragment: '/api/packages/$name/score',
+    response: _ok(_packageScoreJson()),
+  );
+  return gate;
 }
 
 /// Stubs the package endpoint for [name] to return 404.
@@ -408,55 +433,88 @@ void main() {
     });
   });
 
-  // ─── Sequential pacing ───────────────────────────────────────────────────────
+  // ─── Concurrent fetching ──────────────────────────────────────────────────────
 
-  group('sequential pacing', () {
+  group('concurrent fetching', () {
     test(
-      'at least 100 ms elapses between consecutive HTTP requests',
+      'issues package fetches concurrently (more than one package in flight)',
       () async {
-        _stubSuccess(mockHttp, 'http');
-        _stubSuccess(mockHttp, 'dio');
+        // Gate the info endpoint of each package on a shared completer so every
+        // package parks its fetch in flight. Score/documentation resolve
+        // immediately, so each package contributes exactly one parked request —
+        // peak in-flight therefore counts overlapping *packages*. A sequential
+        // await-in-a-loop regression would hold peak at 1.
+        const names = ['http', 'dio', 'shelf'];
+        final gate = Completer<void>();
+        var inFlight = 0;
+        var peak = 0;
+        for (final name in names) {
+          _stubUrl(
+            mock: mockHttp,
+            urlFragment: '/documentation/$name/latest/',
+            response: _notFound(),
+          );
+          when(
+            () => mockHttp.get(
+              any(that: predicate<Uri>((u) => u.toString().endsWith('/api/packages/$name'))),
+              headers: any(named: 'headers'),
+            ),
+          ).thenAnswer((_) async {
+            inFlight++;
+            if (inFlight > peak) peak = inFlight;
+            await gate.future;
+            inFlight--;
+            return _ok(_packageInfoJson(name));
+          });
+          _stubUrl(
+            mock: mockHttp,
+            urlFragment: '/api/packages/$name/score',
+            response: _ok(_packageScoreJson()),
+          );
+        }
 
-        final requestTimes = <DateTime>[];
-        final handler = buildHandler(
-          log: (level, msg) {
-            if (msg.toString().contains('HTTP request')) {
-              requestTimes.add(DateTime.now());
-            }
-          },
-        );
+        final future = buildHandler().call(_request(names));
+        // Let the concurrent fetches reach the wire and park on the gate.
+        for (var i = 0; i < 5; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
 
-        await handler.call(_request(['http', 'dio']));
-
-        expect(requestTimes.length, equals(2));
         expect(
-          requestTimes[1].difference(requestTimes[0]).inMilliseconds,
-          greaterThanOrEqualTo(100),
+          peak,
+          greaterThan(1),
+          reason: 'multiple packages should be fetched at once, not one at a time',
         );
+
+        gate.complete();
+        await future; // Drain so no futures outlive the test.
       },
-      timeout: const Timeout(Duration(seconds: 5)),
+      timeout: const Timeout(Duration(seconds: 10)),
     );
 
     test(
-      'requests are issued in the order the names are provided',
+      'output order matches input order even when a later package resolves first',
       () async {
-        _stubSuccess(mockHttp, 'http');
-        _stubSuccess(mockHttp, 'dio');
-        _stubSuccess(mockHttp, 'shelf');
+        // 'aaa' is gated so it cannot finish until we release it; 'zzz' resolves
+        // immediately. This forces out-of-order completion (zzz before aaa) while
+        // 'aaa' precedes 'zzz' in the input.
+        final aaaGate = _stubGatedInfo(mockHttp, 'aaa');
+        _stubSuccess(mockHttp, 'zzz');
 
-        final requestedNames = <String>[];
-        final handler = buildHandler(
-          log: (level, msg) {
-            final s = msg.toString();
-            if (s.contains('HTTP request name=')) {
-              requestedNames.add(s.split('name=').last);
-            }
-          },
-        );
+        final future = buildHandler().call(_request(['aaa', 'zzz']));
+        // Give 'zzz' the chance to complete ahead of the still-gated 'aaa'.
+        for (var i = 0; i < 5; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        aaaGate.complete();
 
-        await handler.call(_request(['http', 'dio', 'shelf']));
+        final result = await future;
 
-        expect(requestedNames, equals(['http', 'dio', 'shelf']));
+        expect(_payload(result)['packages'], equals(['aaa', 'zzz']));
+        // The matrix is keyed by field; each field's inner map is folded in
+        // request order, so package columns stay in input order regardless of
+        // which package's fetch completed first.
+        final nameColumn = _matrixOf(result)['name']! as Map<String, Object?>;
+        expect(nameColumn.keys.toList(), equals(['aaa', 'zzz']));
       },
       timeout: const Timeout(Duration(seconds: 10)),
     );

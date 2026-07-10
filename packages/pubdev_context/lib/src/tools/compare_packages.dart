@@ -4,8 +4,8 @@
 /// [_ComparisonMatrix]. Packages are fetched using the shared package-metadata
 /// cache (same key format as `GetPackageHandler`) so prior `get_package` calls
 /// are served from cache at no extra cost. Requests for uncached packages are
-/// issued strictly sequentially with a [_kInterRequestDelay] gap to avoid
-/// triggering pub.dev rate limits.
+/// gated by the global concurrency limiter inside [PubDevClient], which caps
+/// the number of in-flight pub.dev requests across the whole server.
 ///
 /// Domain errors are returned as [CallToolResult] with [CallToolResult.isError]
 /// `true` and a structured JSON payload — exceptions are never swallowed
@@ -25,16 +25,13 @@ import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 
-/// The minimum delay between consecutive pub.dev HTTP requests.
-const _kInterRequestDelay = Duration(milliseconds: 100);
-
 /// Handles calls to the `compare_packages` MCP tool.
 ///
 /// Constructor dependencies are `client`, `cache`, and `log`. The `cache`
 /// should be the same [ResponseCache] instance shared with `GetPackageHandler`
-/// so that prior `get_package` calls are reused. All packages are fetched
-/// sequentially; each consecutive pair is separated by at least
-/// [_kInterRequestDelay] to respect pub.dev rate limits.
+/// so that prior `get_package` calls are reused. Packages are fetched
+/// concurrently; the global concurrency limiter inside [PubDevClient] bounds
+/// the number of simultaneous pub.dev requests.
 final class ComparePackagesHandler {
   /// Creates a [ComparePackagesHandler].
   ///
@@ -55,10 +52,10 @@ final class ComparePackagesHandler {
 
   /// Handles a [CallToolRequest] for `compare_packages`.
   ///
-  /// Validates that `names` contains between 2 and 5 entries. Fetches each
-  /// package sequentially, pausing [_kInterRequestDelay] between requests.
-  /// Returns [CallToolResult.isError] `true` when all packages fail or when
-  /// input validation fails.
+  /// Validates that `names` contains between 2 and 5 entries. Fetches the
+  /// packages concurrently; the [PubDevClient] concurrency limiter bounds how
+  /// many requests are in flight at once. Returns [CallToolResult.isError]
+  /// `true` when all packages fail or when input validation fails.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final names = ((args['names'] as List<Object?>?) ?? const []).whereType<String>().toList();
@@ -87,11 +84,13 @@ final class ComparePackagesHandler {
     final errors = <String, String>{};
     final details = <String, PackageDetail>{};
 
+    // Fetch all packages concurrently; the PubDevClient concurrency limiter
+    // bounds how many requests are actually in flight at any moment. Results
+    // are folded back in request order so the response is deterministic.
+    final results = await Future.wait(names.map(_fetchPackage));
     for (var i = 0; i < names.length; i++) {
-      if (i > 0) await Future<void>.delayed(_kInterRequestDelay);
       final name = names[i];
-      final result = await _fetchPackage(name);
-      switch (result) {
+      switch (results[i]) {
         case PubDevSuccess(:final value):
           details[name] = value;
         case PubDevFailure(:final error):
@@ -122,6 +121,14 @@ final class ComparePackagesHandler {
     );
   }
 
+  /// Fetches one package, mapping any thrown error to a [PubDevFailure].
+  ///
+  /// This handler fans out across [Future.wait]; an exception escaping here
+  /// (e.g. a `TimeoutException` from the README fetch or a socket error not
+  /// caught by [PubDevClient]'s [RetryPolicy]) would abort the *entire*
+  /// comparison rather than demote a single package into the `errors` map.
+  /// Guaranteeing a [PubDevResult] return keeps the documented
+  /// graceful-degradation contract intact.
   Future<PubDevResult<PackageDetail>> _fetchPackage(String name) async {
     final cacheKey = 'package:$name:';
     final cached = _cache.get(cacheKey);
@@ -131,11 +138,25 @@ final class ComparePackagesHandler {
     }
     _log(LoggingLevel.debug, 'compare_packages: cache miss key=$cacheKey');
     _log(LoggingLevel.info, 'compare_packages: HTTP request name=$name');
-    final result = await _client.getPackage(name);
-    if (result case PubDevSuccess(:final value)) {
-      _cache.set(cacheKey, Future.value(value), kPackageMetadataTtl);
+    try {
+      final result = await _client.getPackage(name);
+      if (result case PubDevSuccess(:final value)) {
+        _cache.set(cacheKey, Future.value(value), kPackageMetadataTtl);
+      }
+      return result;
+    } on Object catch (error) {
+      _log(
+        LoggingLevel.warning,
+        'compare_packages: unexpected error name=$name error=$error',
+      );
+      return const PubDevFailure(
+        DomainError(
+          code: DomainErrors.serviceUnavailable,
+          message: 'Failed to fetch package metadata from pub.dev.',
+          suggestion: 'Check your network connection and retry.',
+        ),
+      );
     }
-    return result;
   }
 
   static Map<String, Map<String, Object?>> _buildMatrix(

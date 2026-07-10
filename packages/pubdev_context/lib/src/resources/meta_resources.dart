@@ -1,13 +1,18 @@
 /// Resource handlers for the `pub://meta/` namespace.
 ///
-/// Serves two resources via [ResourcesSupport.addResource]:
+/// Serves these resources via [ResourcesSupport.addResource]:
 ///   - `pub://meta/scoring`      — plain-text explanation of the pub.dev
 ///     160-point scoring system; content is embedded at compile time.
 ///   - `pub://meta/sdk-versions` — current stable Dart and Flutter SDK
 ///     versions fetched from Google Storage and returned as JSON.
+///   - `pub://meta/instructions` — the compile-time [kServerInstructions]
+///     handshake manual, re-exposed as a read-only resource so a human or
+///     meta-agent can prompt the LLM to re-read it.
 ///
-/// Both resources are cached with a [kMetaResourcesTtl] (24-hour) TTL.
-/// See issue #10.
+/// The scoring and SDK-versions resources are cached with a
+/// [kMetaResourcesTtl] (24-hour) TTL. The instructions resource is served
+/// straight from the compile-time constant with no HTTP call or caching.
+/// See issue #10 and issue #11.
 library;
 
 import 'dart:convert';
@@ -16,6 +21,7 @@ import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 
 import '../cache/memory_cache.dart';
+import '../tools/tool_definitions.dart' show kServerInstructions;
 
 // ─── URIs ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +33,9 @@ const _kSdkVersionsUri = 'pub://meta/sdk-versions';
 
 /// URI for the resource manifest resource.
 const _kResourcesUri = 'pub://meta/resources';
+
+/// URI for the server instructions resource.
+const _kInstructionsUri = 'pub://meta/instructions';
 
 // ─── Cache keys ───────────────────────────────────────────────────────────────
 
@@ -83,6 +92,17 @@ final kResourcesResource = Resource(
       'Read this first to discover all resource URIs available on this server. '
       'Returns a JSON array; each entry has uri, mimeType, and description.',
   mimeType: 'application/json',
+);
+
+/// [Resource] descriptor for `pub://meta/instructions`.
+final kInstructionsResource = Resource(
+  uri: _kInstructionsUri,
+  name: 'Server instructions',
+  description:
+      'Read this to re-read the server manual — the same instructions delivered '
+      'during the MCP handshake. Use it when a workflow feels off or you have '
+      'lost track of which tools and resources this server exposes.',
+  mimeType: 'text/plain',
 );
 
 // ─── Static content ───────────────────────────────────────────────────────────
@@ -218,6 +238,15 @@ final class MetaResourcesHandler {
   /// the server layer and never makes an HTTP call.
   Future<ReadResourceResult> handleResources(ReadResourceRequest request) async =>
       _textResult(request.uri, _resourcesManifest, 'application/json');
+
+  /// Handles a [ReadResourceRequest] for `pub://meta/instructions`.
+  ///
+  /// Returns the compile-time constant [kServerInstructions] verbatim with MIME
+  /// type `text/plain`. This is the identical content passed in the MCP
+  /// handshake `instructions` field — one constant, two delivery paths. No HTTP
+  /// call is made and no caching is performed.
+  Future<ReadResourceResult> handleInstructions(ReadResourceRequest request) async =>
+      _textResult(request.uri, kServerInstructions, 'text/plain');
 
   /// Handles a [ReadResourceRequest] for `pub://meta/scoring`.
   ///

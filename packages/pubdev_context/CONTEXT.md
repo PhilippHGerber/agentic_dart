@@ -74,6 +74,17 @@ _Avoid_: Error type, error string, exception code
 An LRU, size-capped on-disk store of downloaded `.tar.gz` package archives, keyed by `{name}@{version}`. Default location: `~/.cache/pubdev_context/` (XDG cache dir), overridable via `--cache-dir`. Default cap: 500 MB. Per-tarball download limit: 50 MB; exceeded downloads abort and return a `PACKAGE_TOO_LARGE` Tool Error. Survives server restarts.
 _Avoid_: File cache, package cache (ambiguous with in-memory caches)
 
+### Observability
+
+**Wire Trace**:
+The human-readable, chronological file log that records every message crossing the server's two boundaries — the **LLM boundary** (inbound tool/resource calls and the results returned to the LLM) and the **pub.dev boundary** (outbound HTTP requests and their responses). Each line is tagged with a **Correlation Id** so a single LLM request and the pub.dev calls it triggered can be read together. Format is human-first pretty text (never JSON). Written live to a dedicated file the server owns, so `tail -f` works during a session. Bodies are logged as size-capped previews (tarballs: metadata only; HTML endpoints: converted-markdown preview only).
+_Distinct from_: the MCP `log()` notification mechanism (`notifications/message`, client-facing, gated by the client-settable `--log-level`), which is unchanged and orthogonal.
+_Avoid_: Wire log, trace log, debug log, audit log.
+
+**Correlation Id**:
+A short opaque token (e.g. `#a3f`) assigned to one inbound LLM request and propagated — via a Dart `Zone` — into every pub.dev call that request triggers, so all their Wire Trace lines share the same id. Enables following one request's full story with `grep` even when concurrent requests interleave.
+_Avoid_: Request id, trace id, span id (reserve those if OpenTelemetry is ever adopted).
+
 ### Tool outputs
 
 **Comparison Matrix**:

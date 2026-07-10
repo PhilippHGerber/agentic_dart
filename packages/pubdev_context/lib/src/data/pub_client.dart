@@ -5,7 +5,7 @@
 /// this module; every public method returns a typed [PubDevResult].
 library;
 
-import 'dart:async' show Completer, TimeoutException;
+import 'dart:async' show Completer, TimeoutException, Zone;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -13,6 +13,7 @@ import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 
 import '../cache/tarball_disk_cache.dart';
+import '../trace/wire_trace.dart';
 import 'domain_error.dart';
 import 'html_to_markdown.dart';
 import 'models.dart';
@@ -53,10 +54,25 @@ final class RetryPolicy {
 
   /// Executes [operation], retrying on transient HTTP failures and timeouts.
   ///
-  /// Returns [PubDevSuccess] on the first successful response, or
-  /// [PubDevFailure] once retries are exhausted or a non-retryable error
-  /// is encountered.
-  Future<PubDevResult<T>> execute<T>(Future<T> Function() operation) async {
+  /// [operation] receives the zero-based attempt number, so a caller can annotate
+  /// a retried request (attempt `> 0`) in diagnostics. Returns [PubDevSuccess] on
+  /// the first successful response, or [PubDevFailure] once retries are exhausted
+  /// or a non-retryable error is encountered.
+  ///
+  /// When a retryable failure will be followed by another attempt, [onRetry] is
+  /// invoked with the failure, the one-based retry number, and the backoff delay
+  /// about to be waited. When a retryable failure is instead the last attempt
+  /// (retries exhausted), [onGiveUp] is invoked with that final failure. Together
+  /// they let the caller log every retryable response exactly once — as a retry
+  /// line while more attempts remain, or as a plain response line on give-up —
+  /// without this policy depending on any diagnostics subsystem. Neither is
+  /// called for a non-retryable failure (the caller has already observed that
+  /// response) nor for a timeout (which carries no status or path to render).
+  Future<PubDevResult<T>> execute<T>(
+    Future<T> Function(int attempt) operation, {
+    void Function(HttpStatusException failure, int retryNumber, Duration backoff)? onRetry,
+    void Function(HttpStatusException failure)? onGiveUp,
+  }) async {
     final failures = <int>[];
     var delay = initialDelay;
 
@@ -69,7 +85,7 @@ final class RetryPolicy {
       }
 
       try {
-        return PubDevSuccess(await operation());
+        return PubDevSuccess(await operation(attempt));
       } on TimeoutException {
         failures.add(_timeoutSentinel);
       } on HttpStatusException catch (e) {
@@ -79,11 +95,25 @@ final class RetryPolicy {
           return PubDevFailure(_errorForStatus(e.statusCode));
         }
         failures.add(e.statusCode);
+        // Another attempt follows only while attempts remain. `delay` still holds
+        // the backoff about to be waited at the top of the next iteration (it is
+        // advanced only after that wait), so it is the correct value here.
+        if (attempt + 1 < maxAttempts) {
+          onRetry?.call(e, attempt + 1, delay);
+        } else {
+          onGiveUp?.call(e);
+        }
       }
     }
 
     return PubDevFailure(_exhaustedError(failures));
   }
+
+  /// Whether [statusCode] is one this policy retries — a transient 429 or 5xx.
+  ///
+  /// Exposed so a caller that logs responses can defer a retryable failure's
+  /// line to [execute]'s `onRetry`/`onGiveUp` hooks and avoid double-logging it.
+  static bool isRetryableStatus(int statusCode) => _retryStatusCodes.contains(statusCode);
 
   static DomainError _errorForStatus(int statusCode) => switch (statusCode) {
     404 => const DomainError(
@@ -145,12 +175,23 @@ final class RetryPolicy {
 ///
 /// [RetryPolicy] inspects [statusCode] to decide whether to retry or fail.
 /// This is an internal transport type — it never crosses module boundaries.
+///
+/// [path] and [latency] carry the failing request's endpoint and observed
+/// round-trip time so a retry can be logged to the Wire Trace. They are optional
+/// because some failures (a hard byte-limit rejection) are constructed without a
+/// live response to measure.
 class HttpStatusException implements Exception {
   /// Creates an exception for the given HTTP [statusCode].
-  const HttpStatusException(this.statusCode);
+  const HttpStatusException(this.statusCode, {this.path, this.latency});
 
   /// The HTTP status code that caused the failure.
   final int statusCode;
+
+  /// The request path (no scheme or host) that produced this status, if known.
+  final String? path;
+
+  /// The observed round-trip latency of the failing request, if measured.
+  final Duration? latency;
 }
 
 // ─── Semaphore ────────────────────────────────────────────────────────────────
@@ -206,23 +247,33 @@ final class PubDevClient {
   /// for testing without live network calls. [requestTimeout] sets the deadline
   /// for each individual HTTP call; the [RetryPolicy] may issue multiple calls
   /// up to [RetryPolicy.maxAttempts] before returning a failure.
+  ///
+  /// When an enabled [trace] is supplied, every outbound pub.dev request and its
+  /// response are logged to the Wire Trace, correlated — via the ambient [Zone]
+  /// id read at call time — to the LLM request that triggered them. When [trace]
+  /// is null nothing is built or logged; this long-lived client is shared across
+  /// requests, so it reads the Correlation Id from [Zone.current] on each call
+  /// rather than holding one.
   PubDevClient({
     http.Client? httpClient,
     RetryPolicy? retryPolicy,
     Duration requestTimeout = const Duration(seconds: 10),
     int maxConcurrency = 5,
     TarballDiskCache? tarballCache,
+    WireTrace? trace,
   }) : _http = httpClient ?? http.Client(),
        _retry = retryPolicy ?? RetryPolicy(),
        _timeout = requestTimeout,
        _semaphore = _Semaphore(maxConcurrency),
-       _tarballCache = tarballCache;
+       _tarballCache = tarballCache,
+       _trace = trace;
 
   final http.Client _http;
   final RetryPolicy _retry;
   final Duration _timeout;
   final _Semaphore _semaphore;
   final TarballDiskCache? _tarballCache;
+  final WireTrace? _trace;
 
   static const int _kMaxTarballBytes = 50 * 1024 * 1024;
 
@@ -271,8 +322,13 @@ final class PubDevClient {
 
     String? readmeExcerpt;
     try {
-      final html = await _getRaw('$_kBaseUrl/documentation/$name/latest/');
-      readmeExcerpt = HtmlToMarkdown.convert(html, isolateClass: 'desc markdown', maxChars: 500);
+      String convert(String html) =>
+          HtmlToMarkdown.convert(html, isolateClass: 'desc markdown', maxChars: 500);
+      final html = await _getRaw(
+        '$_kBaseUrl/documentation/$name/latest/',
+        htmlPreview: convert,
+      );
+      readmeExcerpt = convert(html);
     } on HttpStatusException {
       // README is optional — unavailable docs are not a fatal error.
     }
@@ -403,31 +459,17 @@ final class PubDevClient {
   /// Fetches `GET /packages/{name}/changelog` and converts the rendered HTML to
   /// plain text with `## version` headings preserved so the caller can apply
   /// the standard Keep-a-Changelog parsing algorithm.
-  Future<PubDevResult<String>> getChangelog(String name) async {
-    final result = await _retry.execute(
-      () => _getRaw('$_kBaseUrl/packages/$name/changelog'),
-    );
-    return switch (result) {
-      PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) => PubDevSuccess(HtmlToMarkdown.convert(value)),
-    };
-  }
+  Future<PubDevResult<String>> getChangelog(String name) =>
+      _fetchMarkdown('$_kBaseUrl/packages/$name/changelog', HtmlToMarkdown.convert);
 
   /// Returns a README excerpt for [name] from the rendered documentation page.
   ///
   /// Fetches `GET /documentation/{name}/latest/` and extracts plain text from
   /// the markdown section of the rendered HTML.
-  Future<PubDevResult<String>> getReadme(String name) async {
-    final result = await _retry.execute(
-      () => _getRaw('$_kBaseUrl/documentation/$name/latest/'),
-    );
-    return switch (result) {
-      PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) => PubDevSuccess(
-        HtmlToMarkdown.convert(value, isolateClass: 'desc markdown', maxChars: 500),
-      ),
-    };
-  }
+  Future<PubDevResult<String>> getReadme(String name) => _fetchMarkdown(
+    '$_kBaseUrl/documentation/$name/latest/',
+    (html) => HtmlToMarkdown.convert(html, isolateClass: 'desc markdown', maxChars: 500),
+  );
 
   /// Returns the plain-text content of a dartdoc symbol page for [package].
   ///
@@ -441,7 +483,10 @@ final class PubDevClient {
     String version = 'latest',
   }) async {
     final url = '$_kBaseUrl/documentation/$package/$version/$href';
-    final result = await _retry.execute(() => _getRaw(url));
+    String convert(String html) => HtmlToMarkdown.convert(html, isolateTag: 'main');
+    final result = await _execute(
+      (attempt) => _getRaw(url, htmlPreview: convert, attempt: attempt),
+    );
     return switch (result) {
       PubDevFailure<String>(:final error) when error.code == DomainErrors.packageNotFound =>
         const PubDevFailure(
@@ -452,9 +497,7 @@ final class PubDevClient {
           ),
         ),
       PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) => PubDevSuccess(
-        HtmlToMarkdown.convert(value, isolateTag: 'main'),
-      ),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(convert(value)),
     };
   }
 
@@ -463,17 +506,10 @@ final class PubDevClient {
   /// Fetches `GET /documentation/{name}/latest/` and extracts plain text from
   /// the markdown section of the rendered HTML without truncation. Returns an
   /// empty string when the documentation page contains no markdown section.
-  Future<PubDevResult<String>> getFullReadme(String name) async {
-    final result = await _retry.execute(
-      () => _getRaw('$_kBaseUrl/documentation/$name/latest/'),
-    );
-    return switch (result) {
-      PubDevFailure<String>(:final error) => PubDevFailure(error),
-      PubDevSuccess<String>(:final value) => PubDevSuccess(
-        HtmlToMarkdown.convert(value, isolateClass: 'desc markdown'),
-      ),
-    };
-  }
+  Future<PubDevResult<String>> getFullReadme(String name) => _fetchMarkdown(
+    '$_kBaseUrl/documentation/$name/latest/',
+    (html) => HtmlToMarkdown.convert(html, isolateClass: 'desc markdown'),
+  );
 
   /// Returns the package example text for [name] from the rendered example page.
   ///
@@ -481,10 +517,80 @@ final class PubDevClient {
   /// example section of the rendered HTML without truncation. Returns
   /// [DomainErrors.exampleNotFound] when the page contains no example section.
   Future<PubDevResult<String>> getExample(String name) async {
-    final result = await _retry.execute(() => _getRaw('$_kBaseUrl/packages/$name/example'));
+    final result = await _execute(
+      (attempt) => _getRaw(
+        '$_kBaseUrl/packages/$name/example',
+        htmlPreview: _exampleMarkdown,
+        attempt: attempt,
+      ),
+    );
     return switch (result) {
       PubDevFailure<String>(:final error) => PubDevFailure(error),
       PubDevSuccess<String>(:final value) => _exampleResult(value),
+    };
+  }
+
+  /// Returns the latest stable (non-pre-release) version string for [packageName].
+  ///
+  /// Fetches `GET /api/packages/{name}` and scans the versions list from newest
+  /// to oldest, returning the first version that does not contain a pre-release
+  /// separator (`-`). Falls back to the `latest` field as a safety net when the
+  /// versions list is absent or contains only pre-release entries. In that
+  /// fallback case the returned version may itself be a pre-release: a package
+  /// that has only ever published pre-releases sets `latest` to one.
+  ///
+  /// Returns [DomainErrors.packageNotFound] when the package does not exist on
+  /// pub.dev, or [DomainErrors.unexpectedResponse] when no stable version can be
+  /// determined from the response.
+  Future<PubDevResult<String>> resolveLatestStable(String packageName) async {
+    final result = await _fetchJson('$_kBaseUrl/api/packages/$packageName');
+    return switch (result) {
+      PubDevFailure<Map<String, Object?>>(:final error) => PubDevFailure(error),
+      PubDevSuccess<Map<String, Object?>>(:final value) => _findLatestStable(value),
+    };
+  }
+
+  static PubDevResult<String> _findLatestStable(Map<String, Object?> packageInfo) {
+    final rawVersions = (packageInfo['versions'] as List<Object?>?) ?? const [];
+    // Versions are listed oldest-to-newest; reverse to find the newest stable first.
+    for (final entry in rawVersions.reversed) {
+      if (entry is! Map<String, Object?>) continue;
+      // Mirror the `is!` guard above: a non-null non-String `version` would
+      // throw under an `as String?` cast, so skip malformed entries instead.
+      final version = entry['version'];
+      if (version is! String || version.isEmpty) continue;
+      // Pre-release versions contain '-' (e.g. "1.0.0-beta.1").
+      if (!version.contains('-')) return PubDevSuccess(version);
+    }
+    // Safety net for packages with no stable release found above. pub.dev's
+    // `latest` is normally the newest stable version, but for a pre-release-only
+    // package it holds a pre-release — so this fallback can legitimately return
+    // a pre-release string.
+    final latest = (packageInfo['latest'] as Map<String, Object?>?)?['version'] as String?;
+    if (latest != null && latest.isNotEmpty) return PubDevSuccess(latest);
+    return const PubDevFailure(_unexpectedResponse);
+  }
+
+  /// Returns every published version of [name] from `GET /api/packages/{name}`.
+  ///
+  /// Parses the `versions` array into [PackageVersion] values, preserving each
+  /// entry's retraction flag and publish date. Entries with an empty version
+  /// string are skipped. Bucketing (stable / prerelease / retracted) and
+  /// newest-first ordering are the caller's responsibility.
+  ///
+  /// Returns [DomainErrors.packageNotFound] when the package does not exist on
+  /// pub.dev, or [DomainErrors.unexpectedResponse] when the body is malformed.
+  Future<PubDevResult<List<PackageVersion>>> listVersions(String name) async {
+    final result = await _fetchJson('$_kBaseUrl/api/packages/$name');
+    return switch (result) {
+      PubDevFailure<Map<String, Object?>>(:final error) => PubDevFailure(error),
+      PubDevSuccess<Map<String, Object?>>(:final value) => PubDevSuccess(
+        ((value['versions'] as List<Object?>?) ?? const [])
+            .whereType<Map<String, Object?>>()
+            .map(PackageVersion.fromJson)
+            .where((v) => v.version.isNotEmpty)
+            .toList(),
+      ),
     };
   }
 
@@ -519,9 +625,13 @@ final class PubDevClient {
     }
 
     final url = '$_kBaseUrl/api/packages/$name/versions/$version/archive.tar.gz';
-    final result = await _retry.execute(
-      () => _downloadBytesWithLimit(url, maxBytes: _kMaxTarballBytes),
+    // Time only the download (retries included); the tarball `← pub` line is
+    // logged after extraction because its file count is not known until then.
+    final stopwatch = Stopwatch()..start();
+    final result = await _execute(
+      (attempt) => _downloadBytesWithLimit(url, maxBytes: _kMaxTarballBytes, attempt: attempt),
     );
+    stopwatch.stop();
     if (result case PubDevFailure<List<int>>(:final error)) {
       return PubDevFailure(error);
     }
@@ -532,11 +642,42 @@ final class PubDevClient {
       return PubDevFailure(error);
     }
 
+    _logTarball(
+      uri: Uri.parse(url),
+      sizeBytes: bytes.length,
+      fileCount: (extracted as PubDevSuccess<Map<String, String>>).value.length,
+      latency: stopwatch.elapsed,
+    );
+
     // Persist only validated tarballs so malformed downloads cannot poison
     // the cache for future requests.
     await _tarballCache?.write(name, version, bytes);
 
     return extracted;
+  }
+
+  /// Logs a completed tarball download as metadata only — download size and
+  /// extracted file count, never any archive content. Reads the Correlation Id
+  /// from the ambient [Zone] at call time; a null id or absent trace logs nothing.
+  void _logTarball({
+    required Uri uri,
+    required int sizeBytes,
+    required int fileCount,
+    required Duration latency,
+  }) {
+    final trace = _trace;
+    if (trace == null) return;
+    final id = currentCorrelationId();
+    if (id == null) return;
+    trace.logResponse(
+      id: id,
+      status: 200,
+      path: uri.path,
+      latency: latency,
+      sizeBytes: sizeBytes,
+      contentType: 'tar.gz',
+      fileCount: fileCount,
+    );
   }
 
   static PubDevResult<Map<String, String>> _extractTarballFiles(List<int> bytes) {
@@ -561,11 +702,16 @@ final class PubDevClient {
     }
   }
 
+  /// Converts a package example page's HTML to markdown, isolating the example
+  /// tab. Shared by [getExample] and the Wire Trace preview so both render the
+  /// same content from one conversion rule.
+  static String _exampleMarkdown(String html) => HtmlToMarkdown.convert(
+    html,
+    isolateClass: 'tab-content detail-tab-example-content -active markdown-body',
+  );
+
   static PubDevResult<String> _exampleResult(String html) {
-    final example = HtmlToMarkdown.convert(
-      html,
-      isolateClass: 'tab-content detail-tab-example-content -active markdown-body',
-    );
+    final example = _exampleMarkdown(html);
     if (example.isEmpty) {
       return const PubDevFailure(
         DomainError(
@@ -586,7 +732,9 @@ final class PubDevClient {
   /// Returns [PubDevFailure] with [DomainErrors.unexpectedResponse] when the
   /// body is not a JSON object.
   Future<PubDevResult<Map<String, Object?>>> _fetchJson(String url) async {
-    final result = await _retry.execute(() => _getRaw(url));
+    final result = await _execute(
+      (attempt) => _getRaw(url, attempt: attempt),
+    );
     if (result case PubDevFailure<String>(:final error)) return PubDevFailure(error);
     final body = (result as PubDevSuccess<String>).value;
     try {
@@ -602,7 +750,9 @@ final class PubDevClient {
   /// Returns [PubDevFailure] with [DomainErrors.unexpectedResponse] when the
   /// body is not a JSON array.
   Future<PubDevResult<List<Object?>>> _fetchJsonList(String url) async {
-    final result = await _retry.execute(() => _getRaw(url));
+    final result = await _execute(
+      (attempt) => _getRaw(url, attempt: attempt),
+    );
     if (result case PubDevFailure<String>(:final error)) return PubDevFailure(error);
     final body = (result as PubDevSuccess<String>).value;
     try {
@@ -612,30 +762,256 @@ final class PubDevClient {
     return const PubDevFailure(_unexpectedResponse);
   }
 
-  Future<String> _getRaw(String url) async {
+  /// Fetches an HTML endpoint at [url] and returns its markdown, using [convert]
+  /// for both the returned value and the Wire Trace preview so the two never
+  /// drift. The shared shape behind [getChangelog], [getReadme], and
+  /// [getFullReadme]; endpoints that post-process the result (a 404 remap, an
+  /// emptiness check) keep their own `switch` instead of calling this.
+  Future<PubDevResult<String>> _fetchMarkdown(
+    String url,
+    String Function(String html) convert,
+  ) async {
+    final result = await _execute(
+      (attempt) => _getRaw(url, htmlPreview: convert, attempt: attempt),
+    );
+    return switch (result) {
+      PubDevFailure<String>(:final error) => PubDevFailure(error),
+      PubDevSuccess<String>(:final value) => PubDevSuccess(convert(value)),
+    };
+  }
+
+  /// Fetches [url] and returns the raw response body.
+  ///
+  /// [attempt] is the zero-based retry attempt (from [RetryPolicy.execute]); a
+  /// value `> 0` tags the traced request line as `[retry N]`.
+  ///
+  /// [htmlPreview] marks [url] as an HTML endpoint and converts the raw HTML to
+  /// the markdown the caller will ultimately return. When supplied, the trace
+  /// logs that markdown as the response body preview together with both the raw
+  /// HTML and markdown sizes — the raw HTML is never written to the trace. It is
+  /// only ever invoked while tracing is active, so a disabled trace pays nothing.
+  Future<String> _getRaw(
+    String url, {
+    String Function(String html)? htmlPreview,
+    int attempt = 0,
+  }) async {
     await _semaphore.acquire();
     try {
+      final uri = Uri.parse(url);
+      // Read the Correlation Id from the ambient Zone once per call: it is
+      // stable across this method, and a null id (no traced request on the
+      // stack, or tracing disabled) means nothing is built or logged. Both
+      // guards below re-test `trace`/`id` so Dart promotes them to non-null.
+      final trace = _trace;
+      final id = trace == null ? null : currentCorrelationId();
+      if (trace != null && id != null) {
+        trace.logRequest(
+          id: id,
+          httpMethod: 'GET',
+          path: _requestPath(uri),
+          context: attempt > 0 ? 'retry $attempt' : null,
+        );
+      }
+      final stopwatch = Stopwatch()..start();
       final response = await _http
-          .get(Uri.parse(url), headers: const {'Accept': _kAccept})
+          .get(uri, headers: const {'Accept': _kAccept})
           .timeout(_timeout);
+      stopwatch.stop();
+      if (trace != null && id != null) {
+        _logHttpResponse(trace, id, uri, response, stopwatch.elapsed, htmlPreview);
+      }
       if (response.statusCode == 200) return response.body;
-      throw HttpStatusException(response.statusCode);
+      throw HttpStatusException(
+        response.statusCode,
+        path: uri.path,
+        latency: stopwatch.elapsed,
+      );
     } finally {
       _semaphore.release();
     }
   }
 
-  Future<List<int>> _downloadBytesWithLimit(String url, {required int maxBytes}) async {
+  /// Writes the `← pub` line for [response] to the Wire Trace.
+  ///
+  /// A successful text body is previewed up to the configured cap. For an HTML
+  /// endpoint (identified by [htmlPreview]) the preview is the converted markdown
+  /// annotated with both sizes; the raw HTML is never logged. A non-200 response
+  /// logs status and latency only — no body — matching the authoritative format.
+  void _logHttpResponse(
+    WireTrace trace,
+    String id,
+    Uri uri,
+    http.Response response,
+    Duration latency,
+    String Function(String html)? htmlPreview,
+  ) {
+    final status = response.statusCode;
+    // The query lives on the request line only; the response line names the
+    // bare endpoint (matches the authoritative trace format).
+    final path = uri.path;
+    if (status != 200) {
+      // A retryable status is rendered by the RetryPolicy hooks instead — as a
+      // `⚠ … retry` line while attempts remain, or a `← pub` line on give-up —
+      // so logging it here too would duplicate the authoritative single line.
+      if (!RetryPolicy.isRetryableStatus(status)) {
+        trace.logResponse(id: id, status: status, path: path, latency: latency);
+      }
+      return;
+    }
+    final sizeBytes = response.bodyBytes.length;
+    if (htmlPreview != null) {
+      String markdown;
+      try {
+        markdown = htmlPreview(response.body);
+      } on Object {
+        // A preview failure must never disturb the request: fall back to
+        // metadata only rather than risk writing raw HTML or throwing.
+        trace.logResponse(
+          id: id,
+          status: status,
+          path: path,
+          latency: latency,
+          sizeBytes: sizeBytes,
+          contentType: 'HTML',
+        );
+        return;
+      }
+      trace.logResponse(
+        id: id,
+        status: status,
+        path: path,
+        latency: latency,
+        sizeBytes: sizeBytes,
+        markdownSizeBytes: utf8.encode(markdown).length,
+        preview: trace.bodyPreview(markdown),
+      );
+      return;
+    }
+    trace.logResponse(
+      id: id,
+      status: status,
+      path: path,
+      latency: latency,
+      sizeBytes: sizeBytes,
+      contentType: _shortContentType(response.headers['content-type']),
+      preview: trace.bodyPreview(response.body),
+    );
+  }
+
+  /// Runs [operation] under the [RetryPolicy] with the Wire Trace hooks wired in.
+  ///
+  /// Every endpoint fetch goes through here so retry/give-up logging is attached
+  /// in one place rather than repeated at each call site. The hooks are no-ops
+  /// when tracing is disabled or no request is on the stack.
+  Future<PubDevResult<T>> _execute<T>(Future<T> Function(int attempt) operation) =>
+      _retry.execute(operation, onRetry: _logRetry, onGiveUp: _logGiveUp);
+
+  /// Logs a retryable pub.dev failure and its backoff to the Wire Trace.
+  ///
+  /// Passed as `onRetry` to [RetryPolicy.execute]; reads the Correlation Id from
+  /// the ambient [Zone] at call time. A [failure] missing its path or latency
+  /// (no live response to measure) is skipped rather than logged incompletely.
+  void _logRetry(HttpStatusException failure, int retryNumber, Duration backoff) {
+    final trace = _trace;
+    if (trace == null) return;
+    final id = currentCorrelationId();
+    final path = failure.path;
+    final latency = failure.latency;
+    if (id == null || path == null || latency == null) return;
+    trace.logRetry(
+      id: id,
+      status: failure.statusCode,
+      path: path,
+      latency: latency,
+      attempt: retryNumber,
+      maxAttempts: _retry.maxAttempts,
+      backoff: backoff,
+    );
+  }
+
+  /// Logs the final retryable failure once retries are exhausted, as the plain
+  /// `← pub {status}` response line the fetch helpers suppressed for retryable
+  /// statuses (`_logHttpResponse` defers them here to avoid double-logging).
+  ///
+  /// Passed as `onGiveUp` to [RetryPolicy.execute]; like [_logRetry] it reads the
+  /// ambient Correlation Id and skips a failure with no path or latency to render.
+  void _logGiveUp(HttpStatusException failure) {
+    final trace = _trace;
+    if (trace == null) return;
+    final id = currentCorrelationId();
+    final path = failure.path;
+    final latency = failure.latency;
+    if (id == null || path == null || latency == null) return;
+    trace.logResponse(
+      id: id,
+      status: failure.statusCode,
+      path: path,
+      latency: latency,
+    );
+  }
+
+  /// The request-line path for [uri]: the path with its query string appended
+  /// (the full URL minus scheme and host), so the exact upstream endpoint —
+  /// including search parameters — is legible in the trace.
+  static String _requestPath(Uri uri) =>
+      uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
+
+  /// A compact content-type label (`JSON`, `HTML`, `text`) derived from a raw
+  /// `content-type` header, or `null` when the header is absent or unrecognised.
+  static String? _shortContentType(String? header) {
+    if (header == null) return null;
+    final lower = header.toLowerCase();
+    if (lower.contains('json')) return 'JSON';
+    if (lower.contains('html')) return 'HTML';
+    if (lower.contains('text/plain')) return 'text';
+    return null;
+  }
+
+  Future<List<int>> _downloadBytesWithLimit(
+    String url, {
+    required int maxBytes,
+    int attempt = 0,
+  }) async {
     await _semaphore.acquire();
     try {
       final uri = Uri.parse(url);
+      // The successful `← pub` line (size + file count) is logged by the caller
+      // after extraction; here we log only the request and any error response.
+      final trace = _trace;
+      final id = trace == null ? null : currentCorrelationId();
+      if (trace != null && id != null) {
+        trace.logRequest(
+          id: id,
+          httpMethod: 'GET',
+          path: _requestPath(uri),
+          context: attempt > 0 ? 'retry $attempt' : null,
+        );
+      }
+      final stopwatch = Stopwatch()..start();
       final request = http.Request('GET', uri);
       request.headers['Accept'] = _kAccept;
 
       final response = await _http.send(request).timeout(_timeout);
 
       if (response.statusCode != 200) {
-        throw HttpStatusException(response.statusCode);
+        stopwatch.stop();
+        // As in `_getRaw`, a retryable status is left to the RetryPolicy hooks so
+        // it is logged exactly once (retry line or give-up response line).
+        if (trace != null &&
+            id != null &&
+            !RetryPolicy.isRetryableStatus(response.statusCode)) {
+          trace.logResponse(
+            id: id,
+            status: response.statusCode,
+            path: uri.path,
+            latency: stopwatch.elapsed,
+          );
+        }
+        throw HttpStatusException(
+          response.statusCode,
+          path: uri.path,
+          latency: stopwatch.elapsed,
+        );
       }
 
       final bytes = BytesBuilder(copy: false);

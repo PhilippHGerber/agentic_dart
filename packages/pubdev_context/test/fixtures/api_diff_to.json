@@ -1,0 +1,9 @@
+[
+  { "name": "http", "qualifiedName": "http", "href": "http/http-library.html", "kind": 9 },
+  { "name": "io", "qualifiedName": "http.io", "href": "http.io/http.io-library.html", "kind": 9 },
+  { "name": "Client", "qualifiedName": "http.Client", "href": "http/Client-class.html", "kind": 3 },
+  { "name": "NewClient", "qualifiedName": "http.NewClient", "href": "http/NewClient-class.html", "kind": 3 },
+  { "name": "send", "qualifiedName": "http.Client.send", "href": "http/Client/send.html", "kind": 10 },
+  { "name": "close", "qualifiedName": "http.Client.close", "href": "http/Client/close.html", "kind": 10 },
+  { "name": "maxRedirects", "qualifiedName": "http.Client.maxRedirects", "href": "http/Client/maxRedirects.html", "kind": 16 }
+]

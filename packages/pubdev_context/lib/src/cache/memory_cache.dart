@@ -13,6 +13,8 @@ library;
 
 import 'dart:async';
 
+import '../trace/wire_trace.dart';
+
 /// A function returning the current point in time.
 ///
 /// Inject a custom implementation in tests to control time without sleeping.
@@ -24,10 +26,16 @@ const Duration kSearchResultsTtl = Duration(minutes: 5);
 /// TTL applied to package-metadata entries.
 const Duration kPackageMetadataTtl = Duration(minutes: 15);
 
+/// TTL applied to package version-list entries (parsed `PackageVersion` lists).
+///
+/// Matches [kPackageMetadataTtl]: both derive from `GET /api/packages/{name}`,
+/// so a newly published version becomes visible within the same short window.
+const Duration kPackageVersionsTtl = Duration(minutes: 15);
+
 /// TTL applied to changelog entries (parsed `ChangelogEntry` lists).
 const Duration kChangelogTtl = Duration(minutes: 15);
 
-/// TTL applied to raw changelog text entries (the `pub://package/{name}/changelog` resource).
+/// TTL applied to raw changelog text entries (the `pub://package/{name}@{version}/changelog` resource).
 const Duration kChangelogRawTtl = Duration(hours: 1);
 
 /// TTL applied to API-documentation index (`index.json`) entries.
@@ -48,11 +56,16 @@ const Duration kAstSnapshotTtl = Duration(hours: 1);
 /// TTL applied to meta-resource entries (scoring, SDK versions).
 const Duration kMetaResourcesTtl = Duration(hours: 24);
 
-/// A single cached entry pairing a [Future] value with its absolute [expiry].
+/// A single cached entry pairing a [Future] value with its [createdAt] time and
+/// absolute [expiry].
 final class _CacheEntry<T> {
-  _CacheEntry(this.value, this.expiry);
+  _CacheEntry(this.value, this.createdAt, this.expiry);
 
   final Future<T> value;
+
+  /// When the entry was stored — used to report a cache hit's age in the trace.
+  final DateTime createdAt;
+
   final DateTime expiry;
 }
 
@@ -71,9 +84,19 @@ final class ResponseCache<T> {
   ///
   /// Supply [clock] in tests to control time without sleeping;
   /// defaults to [DateTime.now].
-  ResponseCache({Clock? clock}) : _clock = clock ?? DateTime.now;
+  ///
+  /// When an enabled [trace] is supplied, each [get] that resolves to a hit
+  /// *while a traced request is on the stack* emits a `⚡ cache hit` line to the
+  /// Wire Trace, correlated to that request via the ambient [Zone] id. Hits
+  /// outside a traced request (for example autocomplete lookups, which run
+  /// without a Correlation Id) emit nothing. When [trace] is null the cache is
+  /// untraced and pays nothing.
+  ResponseCache({Clock? clock, WireTrace? trace})
+    : _clock = clock ?? DateTime.now,
+      _trace = trace;
 
   final Clock _clock;
+  final WireTrace? _trace;
   final _entries = <String, _CacheEntry<T>>{};
   final _timers = <String, Timer>{};
 
@@ -96,12 +119,28 @@ final class ResponseCache<T> {
   Future<T>? get(String key) {
     final entry = _entries[key];
     if (entry == null) return null;
-    if (_clock().isAfter(entry.expiry)) {
+    final now = _clock();
+    if (now.isAfter(entry.expiry)) {
       _entries.remove(key);
       _timers.remove(key)?.cancel();
       return null;
     }
+    _traceHit(key, now.difference(entry.createdAt));
     return entry.value;
+  }
+
+  /// Emits a `⚡ cache hit` line for [key] when tracing is enabled and a traced
+  /// request (carrying a Correlation Id on the current [Zone]) is on the stack.
+  ///
+  /// Reading the id from the ambient Zone at call time is what keeps a cache hit
+  /// attributed to the request that provoked it, and what excludes cache lookups
+  /// made outside any traced request (such as autocomplete) from the trace.
+  void _traceHit(String key, Duration age) {
+    final trace = _trace;
+    if (trace == null) return;
+    final id = currentCorrelationId();
+    if (id == null) return;
+    trace.logCacheHit(id: id, key: key, age: age);
   }
 
   /// Stores [value] under [key] with an absolute expiry of `now + ttl`.
@@ -112,7 +151,8 @@ final class ResponseCache<T> {
   /// never called again.
   void set(String key, Future<T> value, Duration ttl) {
     _timers.remove(key)?.cancel();
-    _entries[key] = _CacheEntry(value, _clock().add(ttl));
+    final now = _clock();
+    _entries[key] = _CacheEntry(value, now, now.add(ttl));
     _timers[key] = Timer(ttl, () {
       _entries.remove(key);
       _timers.remove(key);

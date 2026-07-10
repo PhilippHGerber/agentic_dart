@@ -8,6 +8,7 @@ import 'package:pubdev_context/src/cache/memory_cache.dart';
 import 'package:pubdev_context/src/config/config.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
+import 'package:pubdev_context/src/resources/package_resources.dart';
 import 'package:pubdev_context/src/server.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:test/test.dart';
@@ -46,6 +47,7 @@ PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) 
   client: PubDevClient(),
   searchCache: ResponseCache<List<PackageSummary>>(),
   packageCache: ResponseCache<PackageDetail>(),
+  packageVersionsCache: ResponseCache<List<PackageVersion>>(),
   changelogCache: ResponseCache<List<ChangelogEntry>>(),
   changelogRawCache: ResponseCache<String>(),
   apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
@@ -181,11 +183,6 @@ void main() {
         expect(result.capabilities.completions, isNotNull);
       });
 
-      test('advertises the prompts capability', () async {
-        final result = await doInitialize();
-        expect(result.capabilities.prompts, isNotNull);
-      });
-
       test('advertises the resources capability', () async {
         final result = await doInitialize();
         expect(result.capabilities.resources, isNotNull);
@@ -262,6 +259,34 @@ void main() {
         final tool = tools.tools.firstWhere((t) => t.name == 'get_symbol_documentation');
         expect(tool.inputSchema.required, containsAll(['package', 'symbol']));
       });
+
+      test('lists list_package_versions after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('list_package_versions'));
+      });
+
+      test('list_package_versions input schema marks name as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'list_package_versions');
+        expect(tool.inputSchema.required, contains('name'));
+      });
+
+      test('lists get_source_slice after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('get_source_slice'));
+      });
+
+      test('get_source_slice input schema marks package and file as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'get_source_slice');
+        expect(tool.inputSchema.required, containsAll(['package', 'file']));
+      });
     });
 
     // ─── Resource registration ───────────────────────────────────────────────────
@@ -288,18 +313,32 @@ void main() {
         expect(uris, contains('pub://meta/resources'));
       });
 
-      test('lists pub://package/{name}/example after initialization', () async {
+      test('lists pub://meta/instructions after initialization', () async {
         await doInitialize();
-        final templates = await serverConnection.listResourceTemplates();
-        final uris = templates.resourceTemplates.map((r) => r.uriTemplate).toList();
-        expect(uris, contains('pub://package/{name}/example'));
+        final resources = await serverConnection.listResources(ListResourcesRequest());
+        final uris = resources.resources.map((r) => r.uri).toList();
+        expect(uris, contains('pub://meta/instructions'));
       });
 
-      test('lists pub://package/{name}/changelog after initialization', () async {
+      test('lists pub://package/{name}@{version}/example after initialization', () async {
         await doInitialize();
         final templates = await serverConnection.listResourceTemplates();
         final uris = templates.resourceTemplates.map((r) => r.uriTemplate).toList();
-        expect(uris, contains('pub://package/{name}/changelog'));
+        expect(uris, contains('pub://package/{name}@{version}/example'));
+      });
+
+      test('lists pub://package/{name}@{version}/pubspec after initialization', () async {
+        await doInitialize();
+        final templates = await serverConnection.listResourceTemplates();
+        final uris = templates.resourceTemplates.map((r) => r.uriTemplate).toList();
+        expect(uris, contains('pub://package/{name}@{version}/pubspec'));
+      });
+
+      test('lists pub://package/{name}@{version}/changelog after initialization', () async {
+        await doInitialize();
+        final templates = await serverConnection.listResourceTemplates();
+        final uris = templates.resourceTemplates.map((r) => r.uriTemplate).toList();
+        expect(uris, contains('pub://package/{name}@{version}/changelog'));
       });
 
       test('pub://meta/scoring resource has a non-empty name', () async {
@@ -325,81 +364,22 @@ void main() {
         expect(resource.name, isNotEmpty);
       });
 
-      test('pub://package/{name}/example resource has a non-empty name', () async {
+      test('pub://package/{name}@{version}/example resource has a non-empty name', () async {
         await doInitialize();
         final templates = await serverConnection.listResourceTemplates();
         final resource = templates.resourceTemplates.firstWhere(
-          (r) => r.uriTemplate == 'pub://package/{name}/example',
+          (r) => r.uriTemplate == 'pub://package/{name}@{version}/example',
         );
         expect(resource.name, isNotEmpty);
       });
 
-      test('pub://package/{name}/changelog resource has a non-empty name', () async {
+      test('pub://package/{name}@{version}/changelog resource has a non-empty name', () async {
         await doInitialize();
         final templates = await serverConnection.listResourceTemplates();
         final resource = templates.resourceTemplates.firstWhere(
-          (r) => r.uriTemplate == 'pub://package/{name}/changelog',
+          (r) => r.uriTemplate == 'pub://package/{name}@{version}/changelog',
         );
         expect(resource.name, isNotEmpty);
-      });
-    });
-
-    // ─── Prompt registration ─────────────────────────────────────────────────────
-
-    group('prompt registration', () {
-      test('lists add-and-setup-package after initialization', () async {
-        await doInitialize();
-        final result = await serverConnection.listPrompts(ListPromptsRequest());
-        final names = result.prompts.map((p) => p.name).toList();
-        expect(names, contains('add-and-setup-package'));
-      });
-
-      test('lists analyze-upgrade-impact after initialization', () async {
-        await doInitialize();
-        final result = await serverConnection.listPrompts(ListPromptsRequest());
-        final names = result.prompts.map((p) => p.name).toList();
-        expect(names, contains('analyze-upgrade-impact'));
-      });
-
-      test('lists evaluate-alternatives after initialization', () async {
-        await doInitialize();
-        final result = await serverConnection.listPrompts(ListPromptsRequest());
-        final names = result.prompts.map((p) => p.name).toList();
-        expect(names, contains('evaluate-alternatives'));
-      });
-
-      test('add-and-setup-package marks package_name as required', () async {
-        await doInitialize();
-        final result = await serverConnection.listPrompts(ListPromptsRequest());
-        final prompt = result.prompts.firstWhere((p) => p.name == 'add-and-setup-package');
-        final arg = prompt.arguments!.firstWhere((a) => a.name == 'package_name');
-        expect(arg.required, isTrue);
-      });
-
-      test('analyze-upgrade-impact marks all three arguments as required', () async {
-        await doInitialize();
-        final result = await serverConnection.listPrompts(ListPromptsRequest());
-        final prompt = result.prompts.firstWhere((p) => p.name == 'analyze-upgrade-impact');
-        final required = prompt.arguments!.where((a) => a.required == true).map((a) => a.name);
-        expect(required, containsAll(['package_name', 'from_version', 'to_version']));
-      });
-
-      test('evaluate-alternatives marks use_case as required', () async {
-        await doInitialize();
-        final result = await serverConnection.listPrompts(ListPromptsRequest());
-        final prompt = result.prompts.firstWhere((p) => p.name == 'evaluate-alternatives');
-        final arg = prompt.arguments!.firstWhere((a) => a.name == 'use_case');
-        expect(arg.required, isTrue);
-      });
-
-      test('evaluate-alternatives marks sdk and platform as optional', () async {
-        await doInitialize();
-        final result = await serverConnection.listPrompts(ListPromptsRequest());
-        final prompt = result.prompts.firstWhere((p) => p.name == 'evaluate-alternatives');
-        final sdkArg = prompt.arguments!.firstWhere((a) => a.name == 'sdk');
-        final platformArg = prompt.arguments!.firstWhere((a) => a.name == 'platform');
-        expect(sdkArg.required, isFalse);
-        expect(platformArg.required, isFalse);
       });
     });
 
@@ -411,6 +391,56 @@ void main() {
         final request = CompleteRequest(
           ref: PromptReference(name: 'any'),
           argument: CompletionArgument(name: 'query', value: 'http'),
+        );
+        final result = await serverConnection.requestCompletions(request);
+        expect(result.completion.values, isEmpty);
+      });
+
+      test('offers latest for the {version} argument of a package template', () async {
+        await doInitialize();
+        final request = CompleteRequest(
+          ref: ResourceTemplateReference(uri: kReadmeUriTemplate),
+          argument: CompletionArgument(name: 'version', value: ''),
+        );
+        final result = await serverConnection.requestCompletions(request);
+        expect(result.completion.values, contains('latest'));
+      });
+
+      test('filters the {version} completion by the typed prefix', () async {
+        await doInitialize();
+        final request = CompleteRequest(
+          ref: ResourceTemplateReference(uri: kApiUriTemplate),
+          argument: CompletionArgument(name: 'version', value: 'la'),
+        );
+        final result = await serverConnection.requestCompletions(request);
+        expect(result.completion.values, equals(['latest']));
+      });
+
+      test('returns no {version} values when the prefix matches nothing', () async {
+        await doInitialize();
+        final request = CompleteRequest(
+          ref: ResourceTemplateReference(uri: kChangelogUriTemplate),
+          argument: CompletionArgument(name: 'version', value: 'zzz'),
+        );
+        final result = await serverConnection.requestCompletions(request);
+        expect(result.completion.values, isEmpty);
+      });
+
+      test('returns empty completion for an unknown argument name', () async {
+        await doInitialize();
+        final request = CompleteRequest(
+          ref: ResourceTemplateReference(uri: kReadmeUriTemplate),
+          argument: CompletionArgument(name: 'nonsense', value: ''),
+        );
+        final result = await serverConnection.requestCompletions(request);
+        expect(result.completion.values, isEmpty);
+      });
+
+      test('returns empty {name} completion when the search cache is cold', () async {
+        await doInitialize();
+        final request = CompleteRequest(
+          ref: ResourceTemplateReference(uri: kReadmeUriTemplate),
+          argument: CompletionArgument(name: 'name', value: 'ht'),
         );
         final result = await serverConnection.requestCompletions(request);
         expect(result.completion.values, isEmpty);

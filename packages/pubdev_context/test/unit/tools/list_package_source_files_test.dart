@@ -122,7 +122,7 @@ Map<String, Object?> _payload(CallToolResult result) =>
     jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
 
 List<String> _files(CallToolResult result) =>
-    (_payload(result)['files'] as List<Object?>?)!.cast<String>();
+    ((_payload(result)['files'] as List<Object?>?) ?? const []).cast<String>();
 
 Map<String, Object?> _errorPayload(CallToolResult result) {
   final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
@@ -170,7 +170,7 @@ void main() {
       expect(_files(result), hasLength(5));
     });
 
-    test('response includes name and version fields', () async {
+    test('response includes name and resolvedVersion fields', () async {
       _stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
@@ -179,7 +179,7 @@ void main() {
 
       final payload = _payload(result);
       expect(payload['name'], equals('foo'));
-      expect(payload['version'], equals('1.0.0'));
+      expect(payload['resolvedVersion'], equals('1.0.0'));
     });
 
     test('file paths are sorted alphabetically', () async {
@@ -291,7 +291,50 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      expect(_payload(result)['version'], equals('2.0.0'));
+      expect(_payload(result)['resolvedVersion'], equals('2.0.0'));
+    });
+  });
+
+  // ─── Resolve failure (P1.18) ─────────────────────────────────────────────────
+  //
+  // When `version` is omitted the handler resolves the latest stable version
+  // first. A failed resolution (404) must propagate as package_not_found and
+  // short-circuit before any tarball download.
+
+  group('resolve failure (version omitted)', () {
+    /// Stubs `GET /api/packages/missing` (the resolve endpoint) to return 404.
+    void stubResolve404() {
+      when(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) =>
+                  u.toString().contains('/api/packages/missing') &&
+                  !u.toString().contains('score') &&
+                  !u.toString().contains('versions') &&
+                  !u.toString().contains('archive'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async => _notFound());
+    }
+
+    test('propagates package_not_found when resolution returns 404', () async {
+      stubResolve404();
+
+      final result = await buildHandler().call(_request({'name': 'missing'}));
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+    });
+
+    test('does not download the tarball when resolution fails', () async {
+      stubResolve404();
+
+      await buildHandler().call(_request({'name': 'missing'}));
+
+      verifyNever(() => mockHttp.send(any()));
     });
   });
 

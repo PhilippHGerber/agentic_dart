@@ -235,6 +235,10 @@ void main() {
       expect(toolNames, contains('compare_packages'));
     });
 
+    test('includes list_package_versions', () {
+      expect(toolNames, contains('list_package_versions'));
+    });
+
     test('includes get_symbol_documentation', () {
       expect(toolNames, contains('get_symbol_documentation'));
     });
@@ -314,7 +318,8 @@ void main() {
 
     setUpAll(() async {
       final result = await mcp.callTool('get_changelog', {'name': 'path'});
-      entries = _content(result)! as List<Object?>;
+      final payload = _content(result)! as Map<String, Object?>;
+      entries = payload['entries']! as List<Object?>;
     });
 
     test('returns a non-empty list of entries', () {
@@ -342,11 +347,14 @@ void main() {
         'package': 'http',
         'query': 'Client',
       });
-      symbols = _content(result)! as List<Object?>;
+      final payload = _content(result)! as Map<String, Object?>;
+      symbols = payload['symbols']! as List<Object?>;
     });
 
     test('result is not an error', () {
-      // A domain error would be a Map with an "error" key, not a List.
+      // On success the payload is a {resolvedVersion, symbols} envelope from
+      // which `symbols` was extracted; a domain error would instead be a Map
+      // carrying a "code" key and no "symbols" list (extraction would throw).
       expect(symbols, isA<List<Object?>>());
     });
 
@@ -406,14 +414,11 @@ void main() {
 
   group('compare_packages', () {
     late Map<String, Object?> payload;
-    late Duration elapsed;
 
     setUpAll(() async {
-      final start = DateTime.now();
       final result = await mcp.callTool('compare_packages', {
         'names': ['http', 'path', 'dart_mcp'],
       });
-      elapsed = DateTime.now().difference(start);
       payload = _content(result)! as Map<String, Object?>;
     });
 
@@ -437,10 +442,6 @@ void main() {
     test('matrix contains the sdkConstraints.dart field', () {
       final matrix = payload['matrix']! as Map<String, Object?>;
       expect(matrix, contains('sdkConstraints.dart'));
-    });
-
-    test('total wall-clock time is at least 200 ms for 3-package comparison', () {
-      expect(elapsed.inMilliseconds, greaterThanOrEqualTo(200));
     });
   }, timeout: const Timeout(Duration(seconds: 60)));
 

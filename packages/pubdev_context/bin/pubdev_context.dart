@@ -15,6 +15,7 @@ import 'package:pubdev_context/src/config/config.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/server.dart';
+import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:pubdev_context/src/version.dart';
 
 Future<void> main(List<String> args) async {
@@ -27,7 +28,9 @@ Future<void> main(List<String> args) async {
     stdout
       ..writeln(
         'Usage: pubdev_context [--log-level <level>] [--cache-dir <path>] '
-        '[--max-cache-size <bytes|size>]',
+        '[--max-cache-size <bytes|size>] [--max-concurrent-requests <count>] '
+        '[--wire-trace] [--wire-trace-dir <path>] '
+        '[--wire-trace-max-preview <bytes>]',
       )
       ..writeln('       pubdev_context --version')
       ..writeln()
@@ -45,6 +48,37 @@ Future<void> main(List<String> args) async {
       ..writeln(
         '                       Env: pubdev_context_MAX_CACHE_SIZE '
         '[default: 500 MiB]',
+      )
+      ..writeln(
+        '  --max-concurrent-requests <count>',
+      )
+      ..writeln(
+        '                       Cap on simultaneous in-flight pub.dev requests '
+        '(1-64).',
+      )
+      ..writeln(
+        '                       Env: pubdev_context_MAX_CONCURRENT_REQUESTS '
+        '[default: 5]',
+      )
+      ..writeln(
+        '  --wire-trace         Enable the human-readable Wire Trace diagnostic log.',
+      )
+      ..writeln(
+        '                       Env: pubdev_context_WIRE_TRACE  [default: off]',
+      )
+      ..writeln('  --wire-trace-dir <path>')
+      ..writeln('                       Directory for per-session Wire Trace files.')
+      ..writeln(
+        '                       Env: pubdev_context_WIRE_TRACE_DIR '
+        '[default: <cache-dir>/wire-trace]',
+      )
+      ..writeln('  --wire-trace-max-preview <bytes>')
+      ..writeln(
+        '                       Cap on each logged body preview (0 = metadata-only).',
+      )
+      ..writeln(
+        '                       Env: pubdev_context_WIRE_TRACE_MAX_PREVIEW '
+        '[default: 2048]',
       )
       ..writeln('  --version            Print version and exit.')
       ..writeln('  --help               Print this help and exit.');
@@ -64,16 +98,37 @@ Future<void> main(List<String> args) async {
     directoryPath: config.cacheDir,
     maxSizeBytes: config.maxCacheSizeBytes,
   );
-  final client = PubDevClient(tarballCache: tarballCache);
-  final searchCache = ResponseCache<List<PackageSummary>>();
-  final packageCache = ResponseCache<PackageDetail>();
-  final changelogCache = ResponseCache<List<ChangelogEntry>>();
-  final changelogRawCache = ResponseCache<String>();
-  final apiIndexCache = ResponseCache<List<DartdocSymbol>>();
-  final readmeCache = ResponseCache<String>();
-  final symbolDocCache = ResponseCache<String>();
-  final sourceFilesCache = ResponseCache<Map<String, String>>();
-  final metaCache = ResponseCache<String>();
+
+  // Construct the Wire Trace only when the operator opted in; when disabled we
+  // install nothing and the server/client/caches pay nothing for the feature.
+  // It is built before the client and caches so its logger can be injected into
+  // both pub.dev boundaries.
+  final trace = config.wireTrace
+      ? WireTrace.open(
+          directoryPath: config.wireTraceDir,
+          serverVersion: packageVersion,
+          maxPreviewBytes: config.wireTraceMaxPreview,
+          concurrency: config.maxConcurrentRequests,
+          cacheDir: config.cacheDir,
+        )
+      : null;
+
+  final client = PubDevClient(
+    tarballCache: tarballCache,
+    maxConcurrency: config.maxConcurrentRequests,
+    trace: trace,
+  );
+
+  final searchCache = ResponseCache<List<PackageSummary>>(trace: trace);
+  final packageCache = ResponseCache<PackageDetail>(trace: trace);
+  final packageVersionsCache = ResponseCache<List<PackageVersion>>(trace: trace);
+  final changelogCache = ResponseCache<List<ChangelogEntry>>(trace: trace);
+  final changelogRawCache = ResponseCache<String>(trace: trace);
+  final apiIndexCache = ResponseCache<List<DartdocSymbol>>(trace: trace);
+  final readmeCache = ResponseCache<String>(trace: trace);
+  final symbolDocCache = ResponseCache<String>(trace: trace);
+  final sourceFilesCache = ResponseCache<Map<String, String>>(trace: trace);
+  final metaCache = ResponseCache<String>(trace: trace);
 
   final server = PubMcpServer(
     stdioChannel(input: stdin, output: stdout),
@@ -81,6 +136,7 @@ Future<void> main(List<String> args) async {
     client: client,
     searchCache: searchCache,
     packageCache: packageCache,
+    packageVersionsCache: packageVersionsCache,
     changelogCache: changelogCache,
     changelogRawCache: changelogRawCache,
     apiIndexCache: apiIndexCache,
@@ -88,8 +144,10 @@ Future<void> main(List<String> args) async {
     symbolDocCache: symbolDocCache,
     sourceFilesCache: sourceFilesCache,
     metaCache: metaCache,
+    trace: trace,
   );
 
   await server.done;
   client.close();
+  trace?.close();
 }

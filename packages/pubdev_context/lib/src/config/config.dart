@@ -8,6 +8,26 @@ import 'package:cli_config/cli_config.dart';
 /// Default total size cap for the tarball disk cache: 500 MiB.
 const int kDefaultMaxCacheSizeBytes = 500 * 1024 * 1024;
 
+/// Default cap on the number of in-flight pub.dev HTTP requests.
+const int kDefaultMaxConcurrentRequests = 5;
+
+/// Upper bound accepted for `--max-concurrent-requests`.
+///
+/// A concurrency cap is a protection mechanism, not a throughput dial: values
+/// far above this exhaust file descriptors locally and burst against pub.dev in
+/// a way that invites rate-limiting or a temporary ban. Anything above this is
+/// almost certainly a misconfiguration, so it is rejected rather than honoured.
+const int kMaxConcurrentRequestsLimit = 64;
+
+/// Default cap, in bytes, on the body preview written to the Wire Trace.
+const int kDefaultWireTraceMaxPreview = 2048;
+
+/// The relative cache directory used when no cache dir is configured.
+///
+/// A single source for the default so the [PubMcpConfig] const constructor and
+/// the derived [PubMcpConfig.wireTraceDir] default cannot drift apart.
+const String _kDefaultRelativeCacheDir = '.cache/pubdev_context';
+
 /// The minimum severity level for log output.
 enum LogLevel {
   /// Fine-grained diagnostic output intended for development.
@@ -39,7 +59,9 @@ enum LogLevel {
 /// Reads [logLevel] from the `--log-level` flag or the `pubdev_context_LOG_LEVEL`
 /// environment variable, and [cacheDir] from `--cache-dir` or
 /// `pubdev_context_CACHE_DIR`. [maxCacheSizeBytes] is read from
-/// `--max-cache-size` or `pubdev_context_MAX_CACHE_SIZE`. CLI flags take strict
+/// `--max-cache-size` or `pubdev_context_MAX_CACHE_SIZE`.
+/// [maxConcurrentRequests] is read from `--max-concurrent-requests` or
+/// `pubdev_context_MAX_CONCURRENT_REQUESTS`. CLI flags take strict
 /// precedence over environment variables; environment variables take precedence
 /// over built-in defaults.
 /// No config file support in v0.x.
@@ -54,8 +76,12 @@ final class PubMcpConfig {
   /// via `XDG_CACHE_HOME`, `HOME`, or the system temp directory.
   const PubMcpConfig({
     this.logLevel = LogLevel.warning,
-    this.cacheDir = '.cache/pubdev_context',
+    this.cacheDir = _kDefaultRelativeCacheDir,
     this.maxCacheSizeBytes = kDefaultMaxCacheSizeBytes,
+    this.maxConcurrentRequests = kDefaultMaxConcurrentRequests,
+    this.wireTrace = false,
+    this.wireTraceDir = '$_kDefaultRelativeCacheDir/wire-trace',
+    this.wireTraceMaxPreview = kDefaultWireTraceMaxPreview,
   });
 
   /// Constructs a [PubMcpConfig] from [args] and an optional [environment] map.
@@ -71,6 +97,10 @@ final class PubMcpConfig {
     String? logLevelArg;
     String? cacheDirArg;
     String? maxCacheSizeArg;
+    String? maxConcurrentRequestsArg;
+    String? wireTraceArg;
+    String? wireTraceDirArg;
+    String? wireTraceMaxPreviewArg;
 
     for (var i = 0; i < args.length; i++) {
       if (args[i] == '--log-level') {
@@ -98,6 +128,41 @@ final class PubMcpConfig {
         maxCacheSizeArg = args[i + 1];
       } else if (args[i].startsWith('--max-cache-size=')) {
         maxCacheSizeArg = args[i].substring('--max-cache-size='.length);
+      } else if (args[i] == '--max-concurrent-requests') {
+        if (i + 1 >= args.length) {
+          throw const FormatException(
+            '--max-concurrent-requests requires a positive integer value '
+            '(1–$kMaxConcurrentRequestsLimit).',
+          );
+        }
+        maxConcurrentRequestsArg = args[i + 1];
+      } else if (args[i].startsWith('--max-concurrent-requests=')) {
+        maxConcurrentRequestsArg = args[i].substring(
+          '--max-concurrent-requests='.length,
+        );
+      } else if (args[i] == '--wire-trace') {
+        // A bare presence flag: `--wire-trace` enables tracing.
+        wireTraceArg = 'true';
+      } else if (args[i].startsWith('--wire-trace=')) {
+        wireTraceArg = args[i].substring('--wire-trace='.length);
+      } else if (args[i] == '--wire-trace-dir') {
+        if (i + 1 >= args.length) {
+          throw const FormatException('--wire-trace-dir requires a path value.');
+        }
+        wireTraceDirArg = args[i + 1];
+      } else if (args[i].startsWith('--wire-trace-dir=')) {
+        wireTraceDirArg = args[i].substring('--wire-trace-dir='.length);
+      } else if (args[i] == '--wire-trace-max-preview') {
+        if (i + 1 >= args.length) {
+          throw const FormatException(
+            '--wire-trace-max-preview requires a non-negative integer value.',
+          );
+        }
+        wireTraceMaxPreviewArg = args[i + 1];
+      } else if (args[i].startsWith('--wire-trace-max-preview=')) {
+        wireTraceMaxPreviewArg = args[i].substring(
+          '--wire-trace-max-preview='.length,
+        );
       }
     }
 
@@ -107,6 +172,12 @@ final class PubMcpConfig {
         if (logLevelArg != null) 'log_level=$logLevelArg',
         if (cacheDirArg != null) 'cache_dir=$cacheDirArg',
         if (maxCacheSizeArg != null) 'max_cache_size=$maxCacheSizeArg',
+        if (maxConcurrentRequestsArg != null)
+          'max_concurrent_requests=$maxConcurrentRequestsArg',
+        if (wireTraceArg != null) 'wire_trace=$wireTraceArg',
+        if (wireTraceDirArg != null) 'wire_trace_dir=$wireTraceDirArg',
+        if (wireTraceMaxPreviewArg != null)
+          'wire_trace_max_preview=$wireTraceMaxPreviewArg',
       ],
       environment: _remapEnvironment(env),
     );
@@ -115,11 +186,24 @@ final class PubMcpConfig {
     final cacheDir = config.optionalString('cache_dir') ?? _defaultCacheDir(env);
     final maxCacheSizeRaw = config.optionalString('max_cache_size') ?? '$kDefaultMaxCacheSizeBytes';
     final maxCacheSizeBytes = _parseByteSize(maxCacheSizeRaw);
+    final maxConcurrentRaw =
+        config.optionalString('max_concurrent_requests') ?? '$kDefaultMaxConcurrentRequests';
+    final maxConcurrentRequests = _parseMaxConcurrentRequests(maxConcurrentRaw);
+    final wireTrace = config.optionalBool('wire_trace') ?? false;
+    final wireTraceDir =
+        config.optionalString('wire_trace_dir') ?? _joinPath(cacheDir, 'wire-trace');
+    final wireTraceMaxPreviewRaw =
+        config.optionalString('wire_trace_max_preview') ?? '$kDefaultWireTraceMaxPreview';
+    final wireTraceMaxPreview = _parseWireTraceMaxPreview(wireTraceMaxPreviewRaw);
 
     return PubMcpConfig(
       logLevel: LogLevel.parse(logLevelStr),
       cacheDir: cacheDir,
       maxCacheSizeBytes: maxCacheSizeBytes,
+      maxConcurrentRequests: maxConcurrentRequests,
+      wireTrace: wireTrace,
+      wireTraceDir: wireTraceDir,
+      wireTraceMaxPreview: wireTraceMaxPreview,
     );
   }
 
@@ -132,11 +216,58 @@ final class PubMcpConfig {
   /// Maximum allowed combined size for tarballs in [cacheDir], in bytes.
   final int maxCacheSizeBytes;
 
+  /// Maximum number of pub.dev HTTP requests allowed in flight simultaneously.
+  final int maxConcurrentRequests;
+
+  /// Whether the Wire Trace diagnostic log is enabled. Off by default.
+  final bool wireTrace;
+
+  /// Directory the Wire Trace writes its per-session files into.
+  ///
+  /// Defaults to a `wire-trace/` subdirectory of [cacheDir].
+  final String wireTraceDir;
+
+  /// Cap, in bytes, on each body preview written to the Wire Trace. A value of
+  /// `0` produces a metadata-only trace with no bodies.
+  final int wireTraceMaxPreview;
+
   static Map<String, String> _remapEnvironment(Map<String, String> env) => {
     'LOG_LEVEL': ?env['pubdev_context_LOG_LEVEL'],
     'CACHE_DIR': ?env['pubdev_context_CACHE_DIR'],
     'MAX_CACHE_SIZE': ?env['pubdev_context_MAX_CACHE_SIZE'],
+    'MAX_CONCURRENT_REQUESTS': ?env['pubdev_context_MAX_CONCURRENT_REQUESTS'],
+    'WIRE_TRACE': ?env['pubdev_context_WIRE_TRACE'],
+    'WIRE_TRACE_DIR': ?env['pubdev_context_WIRE_TRACE_DIR'],
+    'WIRE_TRACE_MAX_PREVIEW': ?env['pubdev_context_WIRE_TRACE_MAX_PREVIEW'],
   };
+
+  static int _parseWireTraceMaxPreview(String raw) {
+    final value = int.tryParse(raw.trim());
+    if (value == null || value < 0) {
+      throw FormatException(
+        'Invalid wire trace max preview: "$raw". '
+        'Use a non-negative integer number of bytes (0 for metadata-only).',
+      );
+    }
+    return value;
+  }
+
+  static int _parseMaxConcurrentRequests(String raw) {
+    final value = int.tryParse(raw.trim());
+    if (value == null || value <= 0) {
+      throw FormatException(
+        'Invalid max concurrent requests: "$raw". '
+        'Use a positive integer between 1 and $kMaxConcurrentRequestsLimit.',
+      );
+    }
+    if (value > kMaxConcurrentRequestsLimit) {
+      throw FormatException(
+        'Max concurrent requests too large: $value. '
+        'Use a value between 1 and $kMaxConcurrentRequestsLimit.',
+      );
+    }
+    return value;
+  }
 
   static String _defaultCacheDir(Map<String, String> env) {
     final xdg = env['XDG_CACHE_HOME'];

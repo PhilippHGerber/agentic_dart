@@ -75,16 +75,16 @@ final class GetChangelogHandler {
 
   /// Handles a [CallToolRequest] for `get_changelog`.
   ///
-  /// Looks up the full [ChangelogEntry] list in cache, or fetches and parses it
-  /// from pub.dev. Applies the `fromVersion` boundary and `versionLimit` cap on
-  /// each call. Returns [CallToolResult.isError] `true` on any domain failure.
+  /// Resolves the latest stable version via [PubDevClient.resolveLatestStable]
+  /// to include `resolvedVersion` in the success response. Looks up the full
+  /// [ChangelogEntry] list in cache, or fetches and parses it from pub.dev.
+  /// Applies the `fromVersion` boundary and `versionLimit` cap on each call.
+  /// Returns [CallToolResult.isError] `true` on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final name = (args['name'] as String?) ?? '';
     final versionLimit = (args['version_limit'] as int?) ?? 5;
     final fromVersion = args['from_version'] as String?;
-
-    final cacheKey = 'changelog:$name';
 
     _log(
       LoggingLevel.info,
@@ -92,29 +92,52 @@ final class GetChangelogHandler {
       '${fromVersion != null ? ' from_version=$fromVersion' : ''}',
     );
 
+    // Trade-off: we resolve latest-stable up front on every call, even on a
+    // changelog cache hit. This costs one lightweight JSON GET but keeps the
+    // `resolvedVersion` field correct and the control flow simple. Deriving the
+    // version from the changelog instead would be unsound — the newest heading
+    // may be a pre-release, not the latest stable (see plan W4).
+    // Resolve the latest stable version for the `resolvedVersion` field.
+    _log(LoggingLevel.info, 'get_changelog: resolving latest stable version for $name');
+    final String resolvedVersion;
+    switch (await _client.resolveLatestStable(name)) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        resolvedVersion = value;
+    }
+    _log(LoggingLevel.debug, 'get_changelog: resolved version=$resolvedVersion');
+
+    // The changelog cache key is intentionally package-scoped (no version
+    // segment): the full changelog text covers every released version, so one
+    // cached parse serves all `fromVersion`/`versionLimit` queries.
+    // `resolvedVersion` only labels the response and must not narrow this key.
+    final cacheKey = 'changelog:$name';
+
     final cached = _cache.get(cacheKey);
     if (cached != null) {
       _log(LoggingLevel.debug, 'get_changelog: cache hit key=$cacheKey');
       final entries = await cached;
       if (entries.isEmpty) return _domainError(_noDocumentation);
-      return _applyFilters(entries, versionLimit, fromVersion);
+      return _applyFilters(entries, versionLimit, fromVersion, resolvedVersion);
     }
 
     _log(LoggingLevel.debug, 'get_changelog: cache miss key=$cacheKey');
     _log(LoggingLevel.info, 'get_changelog: HTTP request name=$name');
 
-    final result = await _client.getChangelog(name);
-    if (result case PubDevFailure<String>(:final error)) {
-      return _domainError(error);
+    final String rawText;
+    switch (await _client.getChangelog(name)) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        rawText = value;
     }
-
-    final rawText = (result as PubDevSuccess<String>).value;
     final entries = _parseChangelog(rawText);
 
     _cache.set(cacheKey, Future.value(entries), kChangelogTtl);
 
     if (entries.isEmpty) return _domainError(_noDocumentation);
-    return _applyFilters(entries, versionLimit, fromVersion);
+    return _applyFilters(entries, versionLimit, fromVersion, resolvedVersion);
   }
 
   // ── Filtering ──────────────────────────────────────────────────────────────
@@ -123,11 +146,12 @@ final class GetChangelogHandler {
     List<ChangelogEntry> entries,
     int versionLimit,
     String? fromVersion,
+    String resolvedVersion,
   ) {
     if (fromVersion == null) {
-      return _success(entries.take(versionLimit).toList());
+      return _success(entries.take(versionLimit).toList(), resolvedVersion);
     }
-    return _applyFromVersion(entries, versionLimit, fromVersion);
+    return _applyFromVersion(entries, versionLimit, fromVersion, resolvedVersion);
   }
 
   /// Applies the [fromVersion] exclusive lower bound to [entries].
@@ -139,6 +163,7 @@ final class GetChangelogHandler {
     List<ChangelogEntry> entries,
     int versionLimit,
     String fromVersion,
+    String resolvedVersion,
   ) {
     var boundaryIdx = entries.indexWhere((e) => e.version == fromVersion);
 
@@ -147,7 +172,10 @@ final class GetChangelogHandler {
       if (boundaryIdx < 0) return _domainError(_invalidInput);
     }
 
-    return _success(entries.sublist(0, boundaryIdx).take(versionLimit).toList());
+    return _success(
+      entries.sublist(0, boundaryIdx).take(versionLimit).toList(),
+      resolvedVersion,
+    );
   }
 
   // ── Parsing ────────────────────────────────────────────────────────────────
@@ -165,12 +193,13 @@ final class GetChangelogHandler {
 
     for (final line in lines) {
       final match = _kHeadingPattern.firstMatch(line);
-      if (match != null) {
+      final version = match?.group(1)?.trim();
+      if (version != null && version.isNotEmpty) {
         if (currentVersion != null) {
           _flushEntry(entries, currentVersion, currentChanges);
           currentChanges.clear();
         }
-        currentVersion = match.group(1)!.trim();
+        currentVersion = version;
       } else if (currentVersion != null) {
         currentChanges.writeln(line);
       }
@@ -232,9 +261,17 @@ final class GetChangelogHandler {
 
   // ── Serialisation ──────────────────────────────────────────────────────────
 
-  static CallToolResult _success(List<ChangelogEntry> entries) => CallToolResult(
-    content: [TextContent(text: jsonEncode(entries.map(_entryToJson).toList()))],
-  );
+  static CallToolResult _success(List<ChangelogEntry> entries, String resolvedVersion) =>
+      CallToolResult(
+        content: [
+          TextContent(
+            text: jsonEncode({
+              'resolvedVersion': resolvedVersion,
+              'entries': entries.map(_entryToJson).toList(),
+            }),
+          ),
+        ],
+      );
 
   static CallToolResult _domainError(DomainError error) => CallToolResult(
     content: [TextContent(text: error.toJsonString())],
@@ -243,7 +280,7 @@ final class GetChangelogHandler {
 
   static Map<String, Object?> _entryToJson(ChangelogEntry e) => {
     'version': e.version,
-    if (e.date != null) 'date': e.date!.toIso8601String(),
+    if (e.date case final d?) 'date': d.toIso8601String(),
     'changes': e.changes,
     'breaking': e.breaking,
   };

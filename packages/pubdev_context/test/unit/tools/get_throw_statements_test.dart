@@ -205,6 +205,34 @@ const _repoBSource = 'class Repo { void disconnect() { throw StateError("not con
 
 RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
 
+/// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
+/// returns [resolvedVersion] when the tool request omits `version`.
+void _stubPackageInfo(
+  _MockHttpClient mock, {
+  String packageName = 'foo',
+  String resolvedVersion = '2.5.0',
+}) {
+  when(
+    () => mock.get(
+      any(
+        that: predicate<Uri>(
+          (u) =>
+              u.toString().contains('/api/packages/$packageName') &&
+              !u.toString().contains('/score') &&
+              !u.toString().contains('/versions/'),
+        ),
+      ),
+      headers: any(named: 'headers'),
+    ),
+  ).thenAnswer(
+    (_) async => http.Response(
+      '{"versions":[{"version":"$resolvedVersion"}],'
+      '"latest":{"version":"$resolvedVersion"}}',
+      200,
+    ),
+  );
+}
+
 DartdocSymbol _sym({
   required String name,
   required String qualifiedName,
@@ -231,9 +259,16 @@ List<String> _candidates(Map<String, Object?> errorPayload) {
   return candidates.cast<String>();
 }
 
-List<Map<String, Object?>> _records(CallToolResult result) =>
-    (jsonDecode((result.content.first as TextContent).text) as List<Object?>)
-        .cast<Map<String, Object?>>();
+List<Map<String, Object?>> _records(CallToolResult result) {
+  final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  return ((json['throws'] as List<Object?>?) ?? const []).cast<Map<String, Object?>>();
+}
+
+/// Returns the `resolvedVersion` field of the success [result].
+String? _resolvedVersion(CallToolResult result) {
+  final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  return json['resolvedVersion'] as String?;
+}
 
 int _lineCount(String text) => '\n'.allMatches(text).length + 1;
 
@@ -979,6 +1014,116 @@ void main() {
 
       for (final record in _records(result)) {
         expect(record['context']! as String, contains('throw'));
+      }
+    });
+  });
+
+  // ─── resolvedVersion (P1.14) ──────────────────────────────────────────────
+
+  group('resolvedVersion — all three scan shapes', () {
+    test('class-only (entire class) scan echoes the supplied version', () async {
+      sourceFilesCache.set(
+        'source:foo:1.0.0',
+        Future.value({'lib/service.dart': _serviceSource}),
+        kSourceFileTtl,
+      );
+
+      final result = await buildHandler().call(
+        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_resolvedVersion(result), equals('1.0.0'));
+    });
+
+    test('class + method scan echoes the supplied version', () async {
+      sourceFilesCache.set(
+        'source:foo:1.0.0',
+        Future.value({'lib/service.dart': _serviceSource}),
+        kSourceFileTtl,
+      );
+
+      final result = await buildHandler().call(
+        _request({
+          'package': 'foo',
+          'class': 'UserService',
+          'method': 'getUser',
+          'version': '1.0.0',
+        }),
+      );
+
+      expect(result.isError, isNull);
+      expect(_resolvedVersion(result), equals('1.0.0'));
+    });
+
+    test('top-level function scan echoes the supplied version', () async {
+      apiIndexCache.set(
+        '$kApiIndexCachePrefix:foo:1.0.0',
+        Future.value([
+          _sym(name: 'processData', qualifiedName: 'foo.processData', href: 'foo/processData.html'),
+        ]),
+        kApiDocsTtl,
+      );
+      sourceFilesCache.set(
+        'source:foo:1.0.0',
+        Future.value({'lib/foo.dart': _utilsSource}),
+        kSourceFileTtl,
+      );
+
+      final result = await buildHandler().call(
+        _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_resolvedVersion(result), equals('1.0.0'));
+    });
+  });
+
+  // ─── version-resolution success path (P1.19) ─────────────────────────────
+
+  // Shapes 1 (class-only) and 2 (class+method) with `version` omitted: the
+  // handler must resolve the latest stable version via HTTP, then key all
+  // downstream caches by that concrete version. The explicit-version tests
+  // above never exercise the resolveLatestStable success branch for these
+  // shapes (Shape 3 already does via the package-info stub elsewhere).
+  group('version omitted — resolves latest stable before scanning', () {
+    test('class-only scan resolves version and echoes it in resolvedVersion', () async {
+      _stubPackageInfo(mockHttp);
+      // Source cache is keyed by the RESOLVED version, proving the handler
+      // threads the resolved version through to source loading.
+      sourceFilesCache.set(
+        'source:foo:2.5.0',
+        Future.value({'lib/service.dart': _serviceSource}),
+        kSourceFileTtl,
+      );
+
+      final result = await buildHandler().call(
+        _request({'package': 'foo', 'class': 'UserService'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_resolvedVersion(result), equals('2.5.0'));
+      expect(_records(result), isNotEmpty);
+    });
+
+    test('class + method scan resolves version and echoes it in resolvedVersion', () async {
+      _stubPackageInfo(mockHttp);
+      sourceFilesCache.set(
+        'source:foo:2.5.0',
+        Future.value({'lib/service.dart': _serviceSource}),
+        kSourceFileTtl,
+      );
+
+      final result = await buildHandler().call(
+        _request({'package': 'foo', 'class': 'UserService', 'method': 'getUser'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_resolvedVersion(result), equals('2.5.0'));
+      final records = _records(result);
+      expect(records, hasLength(2));
+      for (final record in records) {
+        expect(record['method'], equals('getUser'));
       }
     });
   });

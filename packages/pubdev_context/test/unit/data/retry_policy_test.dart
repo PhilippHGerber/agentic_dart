@@ -19,12 +19,12 @@ void main() {
 
   group('RetryPolicy — success', () {
     test('returns PubDevSuccess on the first attempt', () async {
-      final result = await _fastRetry().execute(() async => 42);
+      final result = await _fastRetry().execute((_) async => 42);
       expect(result, isA<PubDevSuccess<int>>());
     });
 
     test('value equals the result returned by the operation', () async {
-      final result = await _fastRetry().execute(() async => 'hello');
+      final result = await _fastRetry().execute((_) async => 'hello');
       expect((result as PubDevSuccess<String>).value, equals('hello'));
     });
   });
@@ -34,7 +34,7 @@ void main() {
   group('RetryPolicy — non-retryable 4xx', () {
     test('does not retry on 404', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(404);
       });
@@ -42,7 +42,7 @@ void main() {
     });
 
     test('error code is package_not_found on 404', () async {
-      final result = await _fastRetry().execute<int>(() async => _throwStatus(404));
+      final result = await _fastRetry().execute<int>((_) async => _throwStatus(404));
       expect(
         (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.packageNotFound),
@@ -51,7 +51,7 @@ void main() {
 
     test('does not retry on 400', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(400);
       });
@@ -60,7 +60,7 @@ void main() {
 
     test('does not retry on 403', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(403);
       });
@@ -68,7 +68,7 @@ void main() {
     });
 
     test('returns PubDevFailure on 404', () async {
-      final result = await _fastRetry().execute<int>(() async => _throwStatus(404));
+      final result = await _fastRetry().execute<int>((_) async => _throwStatus(404));
       expect(result, isA<PubDevFailure<int>>());
     });
   });
@@ -78,7 +78,7 @@ void main() {
   group('RetryPolicy — retry on 5xx', () {
     test('retries up to maxAttempts on 500', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(500);
       });
@@ -87,7 +87,7 @@ void main() {
 
     test('retries on 502', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(502);
       });
@@ -96,7 +96,7 @@ void main() {
 
     test('retries on 503', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(503);
       });
@@ -105,7 +105,7 @@ void main() {
 
     test('retries on 504', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(504);
       });
@@ -113,7 +113,7 @@ void main() {
     });
 
     test('returns service_unavailable after exhausting 5xx retries', () async {
-      final result = await _fastRetry().execute<int>(() async => _throwStatus(500));
+      final result = await _fastRetry().execute<int>((_) async => _throwStatus(500));
       expect(
         (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.serviceUnavailable),
@@ -122,7 +122,7 @@ void main() {
 
     test('succeeds on second attempt after an initial 500', () async {
       var attempts = 0;
-      final result = await _fastRetry().execute<int>(() async {
+      final result = await _fastRetry().execute<int>((_) async {
         attempts++;
         if (attempts == 1) _throwStatus(500);
         return 99;
@@ -135,7 +135,7 @@ void main() {
   group('RetryPolicy — retry on 429', () {
     test('retries on 429', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         _throwStatus(429);
       });
@@ -143,7 +143,7 @@ void main() {
     });
 
     test('returns rate_limited when all failures are 429', () async {
-      final result = await _fastRetry().execute<int>(() async => _throwStatus(429));
+      final result = await _fastRetry().execute<int>((_) async => _throwStatus(429));
       expect(
         (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.rateLimited),
@@ -156,7 +156,7 @@ void main() {
   group('RetryPolicy — exhaustion error mapping', () {
     test('mixed 429 then 500 failures map to service_unavailable', () async {
       var count = 0;
-      final result = await _fastRetry().execute<int>(() async {
+      final result = await _fastRetry().execute<int>((_) async {
         count++;
         _throwStatus(count == 1 ? 429 : 500);
       });
@@ -167,7 +167,7 @@ void main() {
     });
 
     test('all 429 failures produce rate_limited', () async {
-      final result = await _fastRetry().execute<int>(() async => _throwStatus(429));
+      final result = await _fastRetry().execute<int>((_) async => _throwStatus(429));
       expect(
         (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.rateLimited),
@@ -175,7 +175,7 @@ void main() {
     });
 
     test('all 500 failures produce service_unavailable', () async {
-      final result = await _fastRetry().execute<int>(() async => _throwStatus(500));
+      final result = await _fastRetry().execute<int>((_) async => _throwStatus(500));
       expect(
         (result as PubDevFailure<int>).error.code,
         equals(DomainErrors.serviceUnavailable),
@@ -188,7 +188,7 @@ void main() {
   group('RetryPolicy — timeout', () {
     test('retries on TimeoutException', () async {
       var attempts = 0;
-      await _fastRetry().execute<int>(() async {
+      await _fastRetry().execute<int>((_) async {
         attempts++;
         throw TimeoutException('timed out');
       });
@@ -197,7 +197,7 @@ void main() {
 
     test('returns request_timeout when all failures are timeouts', () async {
       final result = await _fastRetry().execute<int>(
-        () async => throw TimeoutException('timed out'),
+        (_) async => throw TimeoutException('timed out'),
       );
       expect(
         (result as PubDevFailure<int>).error.code,
@@ -207,7 +207,7 @@ void main() {
 
     test('succeeds on second attempt after an initial timeout', () async {
       var attempts = 0;
-      final result = await _fastRetry().execute<int>(() async {
+      final result = await _fastRetry().execute<int>((_) async {
         attempts++;
         if (attempts == 1) throw TimeoutException('timed out');
         return 42;
@@ -225,7 +225,7 @@ void main() {
       final policy = RetryPolicy(
         delay: (d) async => delays.add(d),
       );
-      await policy.execute<int>(() async => _throwStatus(500));
+      await policy.execute<int>((_) async => _throwStatus(500));
       expect(
         delays,
         equals(const [
@@ -238,7 +238,7 @@ void main() {
     test('no delay is introduced before the first attempt', () async {
       final delays = <Duration>[];
       final policy = RetryPolicy(delay: (d) async => delays.add(d));
-      await policy.execute(() async => 1);
+      await policy.execute((_) async => 1);
       expect(delays, isEmpty);
     });
   });
@@ -249,7 +249,7 @@ void main() {
     test('respects maxAttempts of 1', () async {
       var attempts = 0;
       await RetryPolicy(maxAttempts: 1, delay: (_) async {}).execute<int>(
-        () async {
+        (_) async {
           attempts++;
           _throwStatus(500);
         },
@@ -260,7 +260,7 @@ void main() {
     test('respects maxAttempts of 2', () async {
       var attempts = 0;
       await RetryPolicy(maxAttempts: 2, delay: (_) async {}).execute<int>(
-        () async {
+        (_) async {
           attempts++;
           _throwStatus(500);
         },

@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
 import 'package:pubdev_context/src/resources/meta_resources.dart';
+import 'package:pubdev_context/src/tools/tool_definitions.dart';
 import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -367,6 +368,47 @@ void main() {
       await buildHandler().handleResources(_request('pub://meta/resources'));
 
       verifyNever(() => mockHttp.get(any()));
+    });
+  });
+
+  // ─── Instructions resource ───────────────────────────────────────────────────
+
+  group('instructions resource', () {
+    test('returns kServerInstructions verbatim', () async {
+      final result = await buildHandler().handleInstructions(_request('pub://meta/instructions'));
+
+      final content = (result.contents.single as TextResourceContents).text;
+      expect(content, equals(kServerInstructions));
+    });
+
+    test('uses text/plain MIME type', () async {
+      final result = await buildHandler().handleInstructions(_request('pub://meta/instructions'));
+
+      final content = result.contents.single as TextResourceContents;
+      expect(content.mimeType, equals('text/plain'));
+    });
+
+    test('response URI matches the request URI', () async {
+      final result = await buildHandler().handleInstructions(_request('pub://meta/instructions'));
+
+      final content = result.contents.single as TextResourceContents;
+      expect(content.uri, equals('pub://meta/instructions'));
+    });
+
+    test('does not call the HTTP client', () async {
+      await buildHandler().handleInstructions(_request('pub://meta/instructions'));
+
+      verifyNever(() => mockHttp.get(any()));
+    });
+
+    test('matches the instructions passed in the MCP handshake', () async {
+      // One constant, two delivery paths: the resource body must equal the
+      // handshake `instructions` field so a re-read never drifts from the manual.
+      final result = await buildHandler().handleInstructions(_request('pub://meta/instructions'));
+
+      final content = (result.contents.single as TextResourceContents).text;
+      expect(content, equals(kServerInstructions));
+      expect(content, isNotEmpty);
     });
   });
 

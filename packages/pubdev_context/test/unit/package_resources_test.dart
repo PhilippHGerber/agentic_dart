@@ -5,7 +5,9 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
@@ -122,12 +124,13 @@ void _stubIndexJson(
   _MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
+  String version = '1.6.0',
 }) {
   when(
     () => mock.get(
       any(
         that: predicate<Uri>(
-          (u) => u.toString().contains('/documentation/$packageName/latest/index.json'),
+          (u) => u.toString().contains('/documentation/$packageName/$version/index.json'),
         ),
       ),
       headers: any(named: 'headers'),
@@ -136,6 +139,99 @@ void _stubIndexJson(
     (_) async => statusCode == 200 ? _ok(_readFixture('index_json.json')) : _status(statusCode),
   );
 }
+
+/// Stubs the package-info endpoint used by [PubDevClient.resolveLatestStable].
+///
+/// When [statusCode] is not 200 the endpoint returns that status so version
+/// resolution fails with `package_not_found`. Otherwise it returns a minimal
+/// JSON body that makes [PubDevClient.resolveLatestStable] return [version].
+void _stubPackageInfo(
+  _MockHttpClient mock, {
+  String packageName = 'http',
+  String version = '1.6.0',
+  int statusCode = 200,
+}) {
+  if (statusCode != 200) {
+    when(
+      () => mock.get(
+        any(
+          that: predicate<Uri>(
+            (u) =>
+                u.toString().contains('/api/packages/$packageName') &&
+                !u.toString().contains('/score') &&
+                !u.toString().contains('/versions/') &&
+                !u.toString().contains('/archive'),
+          ),
+        ),
+        headers: any(named: 'headers'),
+      ),
+    ).thenAnswer((_) async => _status(statusCode));
+    return;
+  }
+  final body = jsonEncode({
+    'versions': [
+      {'version': version},
+    ],
+    'latest': {'version': version},
+  });
+  when(
+    () => mock.get(
+      any(
+        that: predicate<Uri>(
+          (u) =>
+              u.toString().contains('/api/packages/$packageName') &&
+              !u.toString().contains('/score') &&
+              !u.toString().contains('/versions/') &&
+              !u.toString().contains('/archive'),
+        ),
+      ),
+      headers: any(named: 'headers'),
+    ),
+  ).thenAnswer((_) async => _ok(body));
+}
+
+Uint8List _buildTarGz(Map<String, String> files) {
+  final archive = Archive();
+  for (final entry in files.entries) {
+    archive.addFile(ArchiveFile.string(entry.key, entry.value));
+  }
+  final tar = TarEncoder().encodeBytes(archive);
+  return const GZipEncoder().encodeBytes(tar);
+}
+
+/// Stubs the version-tarball endpoint (`send`, not `get`) with a gzip archive
+/// built from [files]. A non-200 [statusCode] returns an empty body.
+void _stubTarball(
+  _MockHttpClient mock,
+  Map<String, String> files, {
+  String packageName = 'http',
+  String version = '1.6.0',
+  int statusCode = 200,
+}) {
+  when(
+    () => mock.send(
+      any(
+        that: predicate<http.BaseRequest>(
+          (r) => r.url.toString().contains(
+            '/api/packages/$packageName/versions/$version/archive.tar.gz',
+          ),
+        ),
+      ),
+    ),
+  ).thenAnswer(
+    (_) async => statusCode == 200
+        ? http.StreamedResponse(Stream.value(_buildTarGz(files)), 200)
+        : http.StreamedResponse(const Stream.empty(), statusCode),
+  );
+}
+
+/// A minimal pubspec.yaml fixture used by the pubspec-resource tests.
+const _kPubspecYaml =
+    'name: http\n'
+    'version: 1.6.0\n'
+    'description: A composable, multi-platform HTTP library.\n'
+    'environment:\n'
+    "  sdk: '>=3.0.0 <4.0.0'\n";
 
 /// Parses the dartdoc fixture symbols from disk — mirrors what [BrowseApiSymbolsHandler]
 /// stores in cache after a successful HTTP response.
@@ -146,17 +242,20 @@ List<DartdocSymbol> _fixtureSymbols() {
 
 // ─── Request helpers ──────────────────────────────────────────────────────────
 
-ReadResourceRequest _readmeRequest(String packageName) =>
-    ReadResourceRequest(uri: 'pub://package/$packageName/readme');
+ReadResourceRequest _readmeRequest(String packageName, {String version = '1.6.0'}) =>
+    ReadResourceRequest(uri: 'pub://package/$packageName@$version/readme');
 
-ReadResourceRequest _exampleRequest(String packageName) =>
-    ReadResourceRequest(uri: 'pub://package/$packageName/example');
+ReadResourceRequest _exampleRequest(String packageName, {String version = '1.6.0'}) =>
+    ReadResourceRequest(uri: 'pub://package/$packageName@$version/example');
 
-ReadResourceRequest _apiRequest(String packageName) =>
-    ReadResourceRequest(uri: 'pub://package/$packageName/api');
+ReadResourceRequest _apiRequest(String packageName, {String version = 'latest'}) =>
+    ReadResourceRequest(uri: 'pub://package/$packageName@$version/api');
 
-ReadResourceRequest _changelogRequest(String packageName) =>
-    ReadResourceRequest(uri: 'pub://package/$packageName/changelog');
+ReadResourceRequest _changelogRequest(String packageName, {String version = '1.6.0'}) =>
+    ReadResourceRequest(uri: 'pub://package/$packageName@$version/changelog');
+
+ReadResourceRequest _pubspecRequest(String packageName, {String version = '1.6.0'}) =>
+    ReadResourceRequest(uri: 'pub://package/$packageName@$version/pubspec');
 
 /// Decodes the first content item of [result] as a JSON error payload.
 Map<String, Object?> _errorPayload(ReadResourceResult result) {
@@ -168,6 +267,16 @@ Map<String, Object?> _errorPayload(ReadResourceResult result) {
 
 /// Returns the text from the first content item of [result].
 String _text(ReadResourceResult result) => (result.contents.first as TextResourceContents).text;
+
+/// The `[Resolved Version: x.y.z]` header line prefixed to every success body.
+String _header(ReadResourceResult result) => _text(result).split('\n').first;
+
+/// The response body with the leading resolved-version header line removed.
+String _body(ReadResourceResult result) {
+  final text = _text(result);
+  final nl = text.indexOf('\n');
+  return nl < 0 ? '' : text.substring(nl + 1);
+}
 
 /// Returns the MIME type of the first content item of [result].
 String? _mimeType(ReadResourceResult result) => result.contents.first.mimeType;
@@ -181,6 +290,7 @@ void main() {
   late ResponseCache<String> readmeCache;
   late ResponseCache<String> changelogCache;
   late ResponseCache<List<DartdocSymbol>> apiCache;
+  late ResponseCache<Map<String, String>> sourceFilesCache;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   PackageResourcesHandler buildHandler() => PackageResourcesHandler(
@@ -188,17 +298,20 @@ void main() {
     readmeCache: readmeCache,
     changelogCache: changelogCache,
     apiIndexCache: apiCache,
+    sourceFilesCache: sourceFilesCache,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
     mockHttp = _MockHttpClient();
     registerFallbackValue(Uri.parse('https://pub.dev'));
+    registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
     readmeCache = ResponseCache(clock: () => fakeNow);
     changelogCache = ResponseCache(clock: () => fakeNow);
     apiCache = ResponseCache(clock: () => fakeNow);
+    sourceFilesCache = ResponseCache(clock: () => fakeNow);
     loggedMessages.clear();
   });
 
@@ -207,7 +320,11 @@ void main() {
   // ─── Static template descriptors ─────────────────────────────────────────────
 
   group('static template descriptors', () {
-    test('kReadmeTemplate has uri template pub://package/{name}/readme', () {
+    test('kReadmeTemplate uri template carries the {name}@{version} segment', () {
+      expect(
+        PackageResourcesHandler.kReadmeTemplate.uriTemplate,
+        equals('pub://package/{name}@{version}/readme'),
+      );
       expect(PackageResourcesHandler.kReadmeTemplate.uriTemplate, equals(kReadmeUriTemplate));
     });
 
@@ -215,7 +332,11 @@ void main() {
       expect(PackageResourcesHandler.kReadmeTemplate.mimeType, equals('text/markdown'));
     });
 
-    test('kExampleTemplate has uri template pub://package/{name}/example', () {
+    test('kExampleTemplate uri template carries the {name}@{version} segment', () {
+      expect(
+        PackageResourcesHandler.kExampleTemplate.uriTemplate,
+        equals('pub://package/{name}@{version}/example'),
+      );
       expect(PackageResourcesHandler.kExampleTemplate.uriTemplate, equals(kExampleUriTemplate));
     });
 
@@ -223,7 +344,11 @@ void main() {
       expect(PackageResourcesHandler.kExampleTemplate.mimeType, equals('text/markdown'));
     });
 
-    test('kApiTemplate has uri template pub://package/{name}/api', () {
+    test('kApiTemplate uri template carries the {name}@{version} segment', () {
+      expect(
+        PackageResourcesHandler.kApiTemplate.uriTemplate,
+        equals('pub://package/{name}@{version}/api'),
+      );
       expect(PackageResourcesHandler.kApiTemplate.uriTemplate, equals(kApiUriTemplate));
     });
 
@@ -231,7 +356,11 @@ void main() {
       expect(PackageResourcesHandler.kApiTemplate.mimeType, equals('application/json'));
     });
 
-    test('kChangelogTemplate has uri template pub://package/{name}/changelog', () {
+    test('kChangelogTemplate uri template carries the {name}@{version} segment', () {
+      expect(
+        PackageResourcesHandler.kChangelogTemplate.uriTemplate,
+        equals('pub://package/{name}@{version}/changelog'),
+      );
       expect(
         PackageResourcesHandler.kChangelogTemplate.uriTemplate,
         equals(kChangelogUriTemplate),
@@ -240,6 +369,18 @@ void main() {
 
     test('kChangelogTemplate has MIME type text/markdown', () {
       expect(PackageResourcesHandler.kChangelogTemplate.mimeType, equals('text/markdown'));
+    });
+
+    test('kPubspecTemplate uri template carries the {name}@{version} segment', () {
+      expect(
+        PackageResourcesHandler.kPubspecTemplate.uriTemplate,
+        equals('pub://package/{name}@{version}/pubspec'),
+      );
+      expect(PackageResourcesHandler.kPubspecTemplate.uriTemplate, equals(kPubspecUriTemplate));
+    });
+
+    test('kPubspecTemplate has MIME type text/plain', () {
+      expect(PackageResourcesHandler.kPubspecTemplate.mimeType, equals('text/plain'));
     });
   });
 
@@ -287,6 +428,153 @@ void main() {
       );
       expect(result, isNull);
     });
+
+    test('returns null when the package name segment is empty for pubspec', () async {
+      final result = await buildHandler().handleReadResource(
+        ReadResourceRequest(uri: 'pub://package//pubspec'),
+      );
+      expect(result, isNull);
+    });
+
+    test('returns null for a versionless pubspec URI', () async {
+      final result = await buildHandler().handleReadResource(
+        ReadResourceRequest(uri: 'pub://package/http/pubspec'),
+      );
+      expect(result, isNull);
+    });
+
+    test('returns null for a versionless URI', () async {
+      final result = await buildHandler().handleReadResource(
+        ReadResourceRequest(uri: 'pub://package/http/readme'),
+      );
+      expect(result, isNull);
+    });
+
+    test('returns null when the version segment is empty', () async {
+      final result = await buildHandler().handleReadResource(
+        ReadResourceRequest(uri: 'pub://package/http@/readme'),
+      );
+      expect(result, isNull);
+    });
+
+    test('returns null when the name segment is empty but a version is present', () async {
+      final result = await buildHandler().handleReadResource(
+        ReadResourceRequest(uri: 'pub://package/@1.0.0/readme'),
+      );
+      expect(result, isNull);
+    });
+  });
+
+  // ─── Resolved-version header ─────────────────────────────────────────────────
+  //
+  // Every successful package resource body is prefixed with a
+  // `[Resolved Version: x.y.z]` grounding header. An explicit version is echoed
+  // verbatim; `latest` resolves to the Latest Stable Version at request time.
+
+  group('resolved-version header', () {
+    test('readme with an explicit version echoes it in the header', () async {
+      _stubDocsPage(mockHttp);
+      final result = await buildHandler().handleReadResource(
+        _readmeRequest('http', version: '1.2.0'),
+      );
+      expect(_header(result!), equals('[Resolved Version: 1.2.0]'));
+    });
+
+    test('readme with an explicit version does not call resolveLatestStable', () async {
+      _stubDocsPage(mockHttp);
+      await buildHandler().handleReadResource(_readmeRequest('http', version: '1.2.0'));
+      verifyNever(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) =>
+                  u.toString().contains('/api/packages/http') &&
+                  !u.toString().contains('/documentation/'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      );
+    });
+
+    test('readme header keeps the actual README body below it', () async {
+      _stubDocsPage(mockHttp);
+      final result = await buildHandler().handleReadResource(
+        _readmeRequest('http', version: '1.2.0'),
+      );
+      expect(_body(result!), contains('composable'));
+    });
+
+    test('readme with version=latest resolves to the Latest Stable Version', () async {
+      _stubPackageInfo(mockHttp);
+      _stubDocsPage(mockHttp);
+      final result = await buildHandler().handleReadResource(
+        _readmeRequest('http', version: 'latest'),
+      );
+      expect(_header(result!), equals('[Resolved Version: 1.6.0]'));
+    });
+
+    test('readme with version=latest propagates package_not_found on resolve 404', () async {
+      _stubPackageInfo(mockHttp, packageName: 'missing', statusCode: 404);
+      final result = await buildHandler().handleReadResource(
+        _readmeRequest('missing', version: 'latest'),
+      );
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
+    });
+
+    test('changelog with an explicit version echoes it in the header', () async {
+      _stubChangelogPage(mockHttp);
+      final result = await buildHandler().handleReadResource(
+        _changelogRequest('http', version: '2.5.1'),
+      );
+      expect(_header(result!), equals('[Resolved Version: 2.5.1]'));
+    });
+
+    test('example with an explicit version echoes it in the header', () async {
+      _stubExamplePage(mockHttp);
+      final result = await buildHandler().handleReadResource(
+        _exampleRequest('http', version: '0.9.0'),
+      );
+      expect(_header(result!), equals('[Resolved Version: 0.9.0]'));
+    });
+
+    test('api with version=latest resolves and grounds the header', () async {
+      _stubPackageInfo(mockHttp);
+      _stubIndexJson(mockHttp);
+      final result = await buildHandler().handleReadResource(_apiRequest('http'));
+      expect(_header(result!), equals('[Resolved Version: 1.6.0]'));
+      // The JSON payload survives below the header line.
+      expect(jsonDecode(_body(result)), isA<List<Object?>>());
+    });
+
+    test('api with an explicit version fetches that version and echoes it', () async {
+      _stubIndexJson(mockHttp, version: '1.2.0');
+      final result = await buildHandler().handleReadResource(
+        _apiRequest('http', version: '1.2.0'),
+      );
+      expect(_header(result!), equals('[Resolved Version: 1.2.0]'));
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/documentation/http/1.2.0/index.json'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
+    });
+
+    test('api with an explicit version does not call resolveLatestStable', () async {
+      _stubIndexJson(mockHttp, version: '1.2.0');
+      await buildHandler().handleReadResource(_apiRequest('http', version: '1.2.0'));
+      verifyNever(
+        () => mockHttp.get(
+          any(that: predicate<Uri>((u) => u.toString().endsWith('/api/packages/http'))),
+          headers: any(named: 'headers'),
+        ),
+      );
+    });
   });
 
   // ─── README resource: cache miss ─────────────────────────────────────────────
@@ -313,7 +601,7 @@ void main() {
     test('content URI matches the request URI', () async {
       _stubDocsPage(mockHttp);
       final result = await buildHandler().handleReadResource(_readmeRequest('http'));
-      expect(result!.contents.first.uri, equals('pub://package/http/readme'));
+      expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/readme'));
     });
 
     test('logs an info message containing the package name', () async {
@@ -359,7 +647,7 @@ void main() {
     test('content URI matches the request URI', () async {
       _stubExamplePage(mockHttp);
       final result = await buildHandler().handleReadResource(_exampleRequest('http'));
-      expect(result!.contents.first.uri, equals('pub://package/http/example'));
+      expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/example'));
     });
 
     test('logs an info message containing the package name', () async {
@@ -400,7 +688,7 @@ void main() {
     test('returns the pre-populated cache content', () async {
       readmeCache.set('example:http', Future.value('Pre-loaded example text.'), kReadmeTtl);
       final result = await buildHandler().handleReadResource(_exampleRequest('http'));
-      expect(_text(result!), equals('Pre-loaded example text.'));
+      expect(_body(result!), equals('Pre-loaded example text.'));
     });
   });
 
@@ -463,7 +751,7 @@ void main() {
     test('returns the pre-populated cache content', () async {
       readmeCache.set('readme:http', Future.value('Pre-loaded README text.'), kReadmeTtl);
       final result = await buildHandler().handleReadResource(_readmeRequest('http'));
-      expect(_text(result!), equals('Pre-loaded README text.'));
+      expect(_body(result!), equals('Pre-loaded README text.'));
     });
   });
 
@@ -513,7 +801,7 @@ void main() {
     test('content URI matches the request URI', () async {
       _stubChangelogPage(mockHttp);
       final result = await buildHandler().handleReadResource(_changelogRequest('http'));
-      expect(result!.contents.first.uri, equals('pub://package/http/changelog'));
+      expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/changelog'));
     });
 
     test('logs an info message containing the package name', () async {
@@ -584,7 +872,7 @@ void main() {
         kChangelogRawTtl,
       );
       final result = await buildHandler().handleReadResource(_changelogRequest('http'));
-      expect(_text(result!), equals('# Pre-loaded changelog'));
+      expect(_body(result!), equals('# Pre-loaded changelog'));
     });
 
     test('changelog cache uses the changelog:<name> cache key prefix', () async {
@@ -620,44 +908,51 @@ void main() {
 
   group('api resource on cache miss', () {
     test('returns a non-null ReadResourceResult', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
       expect(result, isNotNull);
     });
 
     test('content MIME type is application/json', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
       expect(_mimeType(result!), equals('application/json'));
     });
 
     test('content text is a valid JSON array', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
-      expect(jsonDecode(_text(result!)), isA<List<Object?>>());
+      expect(jsonDecode(_body(result!)), isA<List<Object?>>());
     });
 
     test('each symbol entry in the JSON array contains a name field', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
-      final symbols = (jsonDecode(_text(result!)) as List<Object?>).cast<Map<String, Object?>>();
+      final symbols = (jsonDecode(_body(result!)) as List<Object?>).cast<Map<String, Object?>>();
       expect(symbols.every((s) => s.containsKey('name')), isTrue);
     });
 
     test('each symbol entry contains a type field', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
-      final symbols = (jsonDecode(_text(result!)) as List<Object?>).cast<Map<String, Object?>>();
+      final symbols = (jsonDecode(_body(result!)) as List<Object?>).cast<Map<String, Object?>>();
       expect(symbols.every((s) => s.containsKey('type')), isTrue);
     });
 
     test('content URI matches the request URI', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
-      expect(result!.contents.first.uri, equals('pub://package/http/api'));
+      expect(result!.contents.first.uri, equals('pub://package/http@latest/api'));
     });
 
     test('logs a debug cache-miss message', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       await buildHandler().handleReadResource(_apiRequest('http'));
       final debugLogs = loggedMessages
@@ -671,6 +966,7 @@ void main() {
 
   group('api resource on cache hit', () {
     test('makes only one HTTP call when called twice for the same package', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final handler = buildHandler();
       await handler.handleReadResource(_apiRequest('http'));
@@ -680,7 +976,7 @@ void main() {
         () => mockHttp.get(
           any(
             that: predicate<Uri>(
-              (u) => u.toString().contains('/documentation/http/latest/index.json'),
+              (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
             ),
           ),
           headers: any(named: 'headers'),
@@ -689,6 +985,7 @@ void main() {
     });
 
     test('logs a debug cache-hit message on the second call', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       final handler = buildHandler();
       await handler.handleReadResource(_apiRequest('http'));
@@ -701,10 +998,16 @@ void main() {
       expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
     });
 
-    test('makes zero HTTP calls when the api index cache is pre-populated', () async {
-      apiCache.set('api_index:http', Future.value(_fixtureSymbols()), kApiDocsTtl);
+    test('makes no index HTTP call when the api index cache is pre-populated', () async {
+      _stubPackageInfo(mockHttp);
+      apiCache.set('api_index:http:1.6.0', Future.value(_fixtureSymbols()), kApiDocsTtl);
       await buildHandler().handleReadResource(_apiRequest('http'));
-      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      verifyNever(
+        () => mockHttp.get(
+          any(that: predicate<Uri>((u) => u.toString().contains('/index.json'))),
+          headers: any(named: 'headers'),
+        ),
+      );
     });
   });
 
@@ -712,15 +1015,281 @@ void main() {
 
   group('api resource on 404', () {
     test('returns package_not_found in the error payload', () async {
-      _stubIndexJson(mockHttp, statusCode: 404, packageName: 'missing');
+      _stubPackageInfo(mockHttp, packageName: 'missing', statusCode: 404);
       final result = await buildHandler().handleReadResource(_apiRequest('missing'));
       expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
     });
 
     test('error payload contains a suggestion', () async {
-      _stubIndexJson(mockHttp, statusCode: 404, packageName: 'missing');
+      _stubPackageInfo(mockHttp, packageName: 'missing', statusCode: 404);
       final result = await buildHandler().handleReadResource(_apiRequest('missing'));
       expect(_errorPayload(result!), contains('suggestion'));
+    });
+  });
+
+  // ─── API resource: resolve failure (P1.15) ───────────────────────────────────
+  //
+  // The api resource resolves the latest stable version before touching the
+  // index. A failed resolution (404) must propagate as package_not_found and
+  // must short-circuit — the index endpoint is never fetched.
+
+  group('api resource — resolve failure short-circuits the index fetch (P1.15)', () {
+    test('propagates package_not_found when version resolution returns 404', () async {
+      _stubPackageInfo(mockHttp, packageName: 'missing', statusCode: 404);
+      _stubIndexJson(mockHttp, packageName: 'missing');
+      final result = await buildHandler().handleReadResource(_apiRequest('missing'));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
+    });
+
+    test('does not fetch the index when version resolution fails', () async {
+      _stubPackageInfo(mockHttp, packageName: 'missing', statusCode: 404);
+      _stubIndexJson(mockHttp, packageName: 'missing');
+      await buildHandler().handleReadResource(_apiRequest('missing'));
+      verifyNever(
+        () => mockHttp.get(
+          any(that: predicate<Uri>((u) => u.toString().contains('/index.json'))),
+          headers: any(named: 'headers'),
+        ),
+      );
+    });
+  });
+
+  // ─── API resource: cache poisoning on transient failure (P0.4) ──────────────
+  //
+  // A single transient index failure (429/503/network) must not be stored as an
+  // empty index for the full TTL. A second read must retry and succeed.
+
+  group('api resource — transient failure must not poison the cache (P0.4)', () {
+    test('a transient index 503 is not cached — a second read retries and succeeds', () async {
+      _stubPackageInfo(mockHttp);
+      // The index endpoint fails with 503 during the first read (the client
+      // exhausts its retries), then recovers for the second read.
+      var indexHealthy = false;
+      when(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer(
+        (_) async => indexHealthy ? _ok(_readFixture('index_json.json')) : _status(503),
+      );
+      final handler = buildHandler();
+
+      // First read surfaces the transient failure.
+      final first = await handler.handleReadResource(_apiRequest('http'));
+      expect(_errorPayload(first!)['code'], equals(DomainErrors.serviceUnavailable));
+
+      // The failure must NOT have been cached — the index cache stays cold.
+      expect(apiCache.get('api_index:http:1.6.0'), isNull);
+
+      // The outage clears; the second read retries the fetch and succeeds.
+      indexHealthy = true;
+      final second = await handler.handleReadResource(_apiRequest('http'));
+      expect(_mimeType(second!), equals('application/json'));
+      expect(jsonDecode(_body(second)), isA<List<Object?>>());
+    });
+
+    test('a transient index 429 is not cached — a second read retries and succeeds', () async {
+      _stubPackageInfo(mockHttp);
+      // The index endpoint is rate-limited (429) during the first read, then
+      // recovers for the second read.
+      var indexHealthy = false;
+      when(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer(
+        (_) async => indexHealthy ? _ok(_readFixture('index_json.json')) : _status(429),
+      );
+      final handler = buildHandler();
+
+      // First read surfaces the rate-limit failure.
+      final first = await handler.handleReadResource(_apiRequest('http'));
+      expect(_errorPayload(first!)['code'], equals(DomainErrors.rateLimited));
+
+      // The failure must NOT have been cached — the index cache stays cold.
+      expect(apiCache.get('api_index:http:1.6.0'), isNull);
+
+      // The rate limit clears; the second read retries the fetch and succeeds.
+      indexHealthy = true;
+      final second = await handler.handleReadResource(_apiRequest('http'));
+      expect(_mimeType(second!), equals('application/json'));
+      expect(jsonDecode(_body(second)), isA<List<Object?>>());
+    });
+  });
+
+  // ─── Pubspec resource: cache miss ────────────────────────────────────────────
+
+  group('pubspec resource on cache miss', () {
+    test('returns a non-null ReadResourceResult', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
+      expect(result, isNotNull);
+    });
+
+    test('content MIME type is text/plain', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
+      expect(_mimeType(result!), equals('text/plain'));
+    });
+
+    test('content body is the verbatim pubspec.yaml', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
+      expect(_body(result!), equals(_kPubspecYaml));
+    });
+
+    test('content URI matches the request URI', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
+      expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/pubspec'));
+    });
+
+    test('logs an info tarball message containing the package name', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      await buildHandler().handleReadResource(_pubspecRequest('http'));
+      final infoLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.info)
+          .map((m) => m.$2.toString());
+      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
+    });
+
+    test('logs a debug cache-miss message', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      await buildHandler().handleReadResource(_pubspecRequest('http'));
+      final debugLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.debug)
+          .map((m) => m.$2.toString());
+      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
+    });
+  });
+
+  // ─── Pubspec resource: resolved-version header ───────────────────────────────
+
+  group('pubspec resource resolved-version header', () {
+    test('explicit version echoes it in the header', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml}, version: '1.2.0');
+      final result = await buildHandler().handleReadResource(
+        _pubspecRequest('http', version: '1.2.0'),
+      );
+      expect(_header(result!), equals('[Resolved Version: 1.2.0]'));
+    });
+
+    test('explicit version does not call resolveLatestStable', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml}, version: '1.2.0');
+      await buildHandler().handleReadResource(_pubspecRequest('http', version: '1.2.0'));
+      verifyNever(
+        () => mockHttp.get(
+          any(that: predicate<Uri>((u) => u.toString().endsWith('/api/packages/http'))),
+          headers: any(named: 'headers'),
+        ),
+      );
+    });
+
+    test('version=latest resolves to the Latest Stable Version', () async {
+      _stubPackageInfo(mockHttp);
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      final result = await buildHandler().handleReadResource(
+        _pubspecRequest('http', version: 'latest'),
+      );
+      expect(_header(result!), equals('[Resolved Version: 1.6.0]'));
+    });
+  });
+
+  // ─── Pubspec resource: cache hit / shared source cache ───────────────────────
+
+  group('pubspec resource on cache hit', () {
+    test('makes only one tarball download when called twice for the same version', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      final handler = buildHandler();
+      await handler.handleReadResource(_pubspecRequest('http'));
+      fakeNow = fakeNow.add(const Duration(minutes: 30));
+      await handler.handleReadResource(_pubspecRequest('http'));
+      verify(() => mockHttp.send(any())).called(1);
+    });
+
+    test('logs a debug cache-hit message on the second call', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      final handler = buildHandler();
+      await handler.handleReadResource(_pubspecRequest('http'));
+      loggedMessages.clear();
+      fakeNow = fakeNow.add(const Duration(minutes: 30));
+      await handler.handleReadResource(_pubspecRequest('http'));
+      final debugLogs = loggedMessages
+          .where((m) => m.$1 == LoggingLevel.debug)
+          .map((m) => m.$2.toString());
+      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
+    });
+
+    test('makes zero tarball downloads when the source cache is pre-populated', () async {
+      sourceFilesCache.set(
+        'source:http:1.6.0',
+        Future.value({kPubspecFileName: _kPubspecYaml}),
+        kSourceFileTtl,
+      );
+      await buildHandler().handleReadResource(_pubspecRequest('http'));
+      verifyNever(() => mockHttp.send(any()));
+    });
+
+    test('returns the pre-populated source cache content', () async {
+      sourceFilesCache.set(
+        'source:http:1.6.0',
+        Future.value({kPubspecFileName: 'name: from_cache\n'}),
+        kSourceFileTtl,
+      );
+      final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
+      expect(_body(result!), equals('name: from_cache\n'));
+    });
+
+    test('uses the source:<name>:<version> cache key prefix', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
+      await buildHandler().handleReadResource(_pubspecRequest('http'));
+      expect(sourceFilesCache.get('source:http:1.6.0'), isNotNull);
+    });
+  });
+
+  // ─── Pubspec resource: error paths ───────────────────────────────────────────
+
+  group('pubspec resource error paths', () {
+    test('returns package_not_found when the tarball endpoint returns 404', () async {
+      _stubTarball(mockHttp, const {}, packageName: 'missing', statusCode: 404);
+      final result = await buildHandler().handleReadResource(_pubspecRequest('missing'));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
+    });
+
+    test('error payload contains a suggestion on 404', () async {
+      _stubTarball(mockHttp, const {}, packageName: 'missing', statusCode: 404);
+      final result = await buildHandler().handleReadResource(_pubspecRequest('missing'));
+      expect(_errorPayload(result!), contains('suggestion'));
+    });
+
+    test('propagates package_not_found when version resolution returns 404', () async {
+      _stubPackageInfo(mockHttp, packageName: 'missing', statusCode: 404);
+      final result = await buildHandler().handleReadResource(
+        _pubspecRequest('missing', version: 'latest'),
+      );
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.packageNotFound));
+    });
+
+    test('does not download the tarball when version resolution fails', () async {
+      _stubPackageInfo(mockHttp, packageName: 'missing', statusCode: 404);
+      await buildHandler().handleReadResource(_pubspecRequest('missing', version: 'latest'));
+      verifyNever(() => mockHttp.send(any()));
+    });
+
+    test('returns unexpected_response when pubspec.yaml is absent from the archive', () async {
+      _stubTarball(mockHttp, {'lib/http.dart': 'void main() {}'});
+      final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
+      expect(_errorPayload(result!)['code'], equals(DomainErrors.unexpectedResponse));
     });
   });
 
@@ -730,6 +1299,8 @@ void main() {
     test(
       'api resource makes zero HTTP calls when BrowseApiSymbolsHandler has warmed the cache',
       () async {
+        // Both handlers call resolveLatestStable, so stub the package-info endpoint.
+        _stubPackageInfo(mockHttp);
         // Warm the cache via BrowseApiSymbolsHandler (issue 09).
         _stubIndexJson(mockHttp);
         final symbolsHandler = BrowseApiSymbolsHandler(
@@ -744,15 +1315,15 @@ void main() {
           ),
         );
 
-        // Now read the API resource — should use the warm cache.
+        // Now read the API resource — should use the warm cache (no index fetch).
         await buildHandler().handleReadResource(_apiRequest('http'));
 
-        // Only one HTTP request was made in total (from BrowseApiSymbolsHandler).
+        // Only one index HTTP request was made in total (from BrowseApiSymbolsHandler).
         verify(
           () => mockHttp.get(
             any(
               that: predicate<Uri>(
-                (u) => u.toString().contains('/documentation/http/latest/index.json'),
+                (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
               ),
             ),
             headers: any(named: 'headers'),
@@ -764,11 +1335,13 @@ void main() {
     test(
       'BrowseApiSymbolsHandler makes zero HTTP calls when PackageResourcesHandler has warmed the cache',
       () async {
+        // Both handlers call resolveLatestStable, so stub the package-info endpoint.
+        _stubPackageInfo(mockHttp);
         // Warm the cache via PackageResourcesHandler.
         _stubIndexJson(mockHttp);
         await buildHandler().handleReadResource(_apiRequest('http'));
 
-        // Now call BrowseApiSymbolsHandler — should use the warm cache.
+        // Now call BrowseApiSymbolsHandler — should use the warm cache (no index fetch).
         final symbolsHandler = BrowseApiSymbolsHandler(
           client: client,
           cache: apiCache,
@@ -781,12 +1354,12 @@ void main() {
           ),
         );
 
-        // Only one HTTP request was made in total (from PackageResourcesHandler).
+        // Only one index HTTP request was made in total (from PackageResourcesHandler).
         verify(
           () => mockHttp.get(
             any(
               that: predicate<Uri>(
-                (u) => u.toString().contains('/documentation/http/latest/index.json'),
+                (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
               ),
             ),
             headers: any(named: 'headers'),
@@ -795,10 +1368,11 @@ void main() {
       },
     );
 
-    test('api resource uses the api_index:<name> cache key prefix', () async {
+    test('api resource uses the api_index:<name>:<version> cache key format', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       await buildHandler().handleReadResource(_apiRequest('http'));
-      expect(apiCache.get('api_index:http'), isNotNull);
+      expect(apiCache.get('api_index:http:1.6.0'), isNotNull);
     });
 
     test('readme resource uses the readme:<name> cache key prefix', () async {
@@ -866,12 +1440,14 @@ void main() {
 
   group('client error propagation for api resource', () {
     test('returns a rate_limited error payload when pub.dev returns HTTP 429', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp, statusCode: 429);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
       expect(_errorPayload(result!)['code'], equals(DomainErrors.rateLimited));
     });
 
     test('returns a service_unavailable error payload on HTTP 503', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp, statusCode: 503);
       final result = await buildHandler().handleReadResource(_apiRequest('http'));
       expect(_errorPayload(result!)['code'], equals(DomainErrors.serviceUnavailable));

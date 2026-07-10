@@ -51,6 +51,31 @@ void main() {
       final config = PubMcpConfig.fromArguments([], environment: {});
       expect(config.maxCacheSizeBytes, equals(kDefaultMaxCacheSizeBytes));
     });
+
+    test('maxConcurrentRequests defaults to 5', () {
+      final config = PubMcpConfig.fromArguments([], environment: {});
+      expect(config.maxConcurrentRequests, equals(kDefaultMaxConcurrentRequests));
+      expect(config.maxConcurrentRequests, equals(5));
+    });
+
+    test('wireTrace defaults to off', () {
+      final config = PubMcpConfig.fromArguments([], environment: {});
+      expect(config.wireTrace, isFalse);
+    });
+
+    test('wireTraceDir defaults to a wire-trace subdirectory of the cache dir', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--cache-dir', '/tmp/cache'],
+        environment: {},
+      );
+      expect(config.wireTraceDir, equals('/tmp/cache/wire-trace'));
+    });
+
+    test('wireTraceMaxPreview defaults to 2048', () {
+      final config = PubMcpConfig.fromArguments([], environment: {});
+      expect(config.wireTraceMaxPreview, equals(kDefaultWireTraceMaxPreview));
+      expect(config.wireTraceMaxPreview, equals(2048));
+    });
   });
 
   group('PubMcpConfig CLI flags', () {
@@ -101,6 +126,122 @@ void main() {
       );
       expect(config.maxCacheSizeBytes, equals(64 * 1024 * 1024));
     });
+
+    test('--max-concurrent-requests 10 sets maxConcurrentRequests', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--max-concurrent-requests', '10'],
+        environment: {},
+      );
+      expect(config.maxConcurrentRequests, equals(10));
+    });
+
+    test('--max-concurrent-requests=3 sets maxConcurrentRequests', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--max-concurrent-requests=3'],
+        environment: {},
+      );
+      expect(config.maxConcurrentRequests, equals(3));
+    });
+
+    test('--max-concurrent-requests rejects zero', () {
+      expect(
+        () => PubMcpConfig.fromArguments(
+          ['--max-concurrent-requests=0'],
+          environment: {},
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('positive integer'),
+          ),
+        ),
+      );
+    });
+
+    test('--max-concurrent-requests rejects non-numeric values', () {
+      expect(
+        () => PubMcpConfig.fromArguments(
+          ['--max-concurrent-requests=lots'],
+          environment: {},
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('--wire-trace enables tracing as a bare presence flag', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace'],
+        environment: {},
+      );
+      expect(config.wireTrace, isTrue);
+    });
+
+    test('--wire-trace=false disables tracing', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace=false'],
+        environment: {},
+      );
+      expect(config.wireTrace, isFalse);
+    });
+
+    test('--wire-trace-dir /tmp/wt sets wireTraceDir', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace-dir', '/tmp/wt'],
+        environment: {},
+      );
+      expect(config.wireTraceDir, equals('/tmp/wt'));
+    });
+
+    test('--wire-trace-dir=/tmp/wt sets wireTraceDir', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace-dir=/tmp/wt'],
+        environment: {},
+      );
+      expect(config.wireTraceDir, equals('/tmp/wt'));
+    });
+
+    test('--wire-trace-max-preview 0 sets a metadata-only preview cap', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace-max-preview', '0'],
+        environment: {},
+      );
+      expect(config.wireTraceMaxPreview, equals(0));
+    });
+
+    test('--wire-trace-max-preview=4096 sets wireTraceMaxPreview', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace-max-preview=4096'],
+        environment: {},
+      );
+      expect(config.wireTraceMaxPreview, equals(4096));
+    });
+
+    test('--wire-trace-max-preview rejects negative values', () {
+      expect(
+        () => PubMcpConfig.fromArguments(
+          ['--wire-trace-max-preview=-1'],
+          environment: {},
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('non-negative'),
+          ),
+        ),
+      );
+    });
+
+    test('--wire-trace-max-preview rejects non-numeric values', () {
+      expect(
+        () => PubMcpConfig.fromArguments(
+          ['--wire-trace-max-preview=lots'],
+          environment: {},
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 
   group('PubMcpConfig environment variables', () {
@@ -128,6 +269,14 @@ void main() {
       expect(config.maxCacheSizeBytes, equals(42 * 1024 * 1024));
     });
 
+    test('pubdev_context_MAX_CONCURRENT_REQUESTS sets maxConcurrentRequests when no flag is present', () {
+      final config = PubMcpConfig.fromArguments(
+        [],
+        environment: {'pubdev_context_MAX_CONCURRENT_REQUESTS': '8'},
+      );
+      expect(config.maxConcurrentRequests, equals(8));
+    });
+
     test('uses XDG_CACHE_HOME when cache dir is not explicitly set', () {
       final config = PubMcpConfig.fromArguments(
         [],
@@ -142,6 +291,30 @@ void main() {
         environment: {'HOME': '/home/tester'},
       );
       expect(config.cacheDir, equals('/home/tester/.cache/pubdev_context'));
+    });
+
+    test('pubdev_context_WIRE_TRACE=true enables tracing when no flag is present', () {
+      final config = PubMcpConfig.fromArguments(
+        [],
+        environment: {'pubdev_context_WIRE_TRACE': 'true'},
+      );
+      expect(config.wireTrace, isTrue);
+    });
+
+    test('pubdev_context_WIRE_TRACE_DIR sets wireTraceDir when no flag is present', () {
+      final config = PubMcpConfig.fromArguments(
+        [],
+        environment: {'pubdev_context_WIRE_TRACE_DIR': '/env/wt'},
+      );
+      expect(config.wireTraceDir, equals('/env/wt'));
+    });
+
+    test('pubdev_context_WIRE_TRACE_MAX_PREVIEW sets wireTraceMaxPreview when no flag is present', () {
+      final config = PubMcpConfig.fromArguments(
+        [],
+        environment: {'pubdev_context_WIRE_TRACE_MAX_PREVIEW': '512'},
+      );
+      expect(config.wireTraceMaxPreview, equals(512));
     });
   });
 
@@ -169,6 +342,46 @@ void main() {
       );
       expect(config.maxCacheSizeBytes, equals(10 * 1024 * 1024));
     });
+
+    test('--max-concurrent-requests flag overrides pubdev_context_MAX_CONCURRENT_REQUESTS env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--max-concurrent-requests', '12'],
+        environment: {'pubdev_context_MAX_CONCURRENT_REQUESTS': '2'},
+      );
+      expect(config.maxConcurrentRequests, equals(12));
+    });
+
+    test('--wire-trace=false flag overrides pubdev_context_WIRE_TRACE env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace=false'],
+        environment: {'pubdev_context_WIRE_TRACE': 'true'},
+      );
+      expect(config.wireTrace, isFalse);
+    });
+
+    test('--wire-trace flag overrides pubdev_context_WIRE_TRACE=false env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace'],
+        environment: {'pubdev_context_WIRE_TRACE': 'false'},
+      );
+      expect(config.wireTrace, isTrue);
+    });
+
+    test('--wire-trace-dir flag overrides pubdev_context_WIRE_TRACE_DIR env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace-dir', '/flag/wt'],
+        environment: {'pubdev_context_WIRE_TRACE_DIR': '/env/wt'},
+      );
+      expect(config.wireTraceDir, equals('/flag/wt'));
+    });
+
+    test('--wire-trace-max-preview flag overrides pubdev_context_WIRE_TRACE_MAX_PREVIEW env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--wire-trace-max-preview', '99'],
+        environment: {'pubdev_context_WIRE_TRACE_MAX_PREVIEW': '11'},
+      );
+      expect(config.wireTraceMaxPreview, equals(99));
+    });
   });
 
   group('PubMcpConfig const constructor', () {
@@ -187,15 +400,34 @@ void main() {
       expect(config.maxCacheSizeBytes, equals(kDefaultMaxCacheSizeBytes));
     });
 
+    test('const constructor has default maxConcurrentRequests', () {
+      const config = PubMcpConfig();
+      expect(config.maxConcurrentRequests, equals(kDefaultMaxConcurrentRequests));
+    });
+
     test('const constructor accepts explicit values', () {
       const config = PubMcpConfig(
         logLevel: LogLevel.debug,
         cacheDir: '/cache',
         maxCacheSizeBytes: 123,
+        maxConcurrentRequests: 7,
+        wireTrace: true,
+        wireTraceDir: '/wt',
+        wireTraceMaxPreview: 64,
       );
       expect(config.logLevel, equals(LogLevel.debug));
       expect(config.cacheDir, equals('/cache'));
       expect(config.maxCacheSizeBytes, equals(123));
+      expect(config.maxConcurrentRequests, equals(7));
+      expect(config.wireTrace, isTrue);
+      expect(config.wireTraceDir, equals('/wt'));
+      expect(config.wireTraceMaxPreview, equals(64));
+    });
+
+    test('const constructor defaults wire trace off with a 2048-byte preview', () {
+      const config = PubMcpConfig();
+      expect(config.wireTrace, isFalse);
+      expect(config.wireTraceMaxPreview, equals(kDefaultWireTraceMaxPreview));
     });
   });
 
@@ -217,6 +449,10 @@ void main() {
       expect(result.exitCode, equals(0));
       expect(result.stdout.toString(), contains('Usage:'));
       expect(result.stdout.toString(), contains('--max-cache-size'));
+      expect(result.stdout.toString(), contains('--max-concurrent-requests'));
+      expect(result.stdout.toString(), contains('--wire-trace'));
+      expect(result.stdout.toString(), contains('--wire-trace-dir'));
+      expect(result.stdout.toString(), contains('--wire-trace-max-preview'));
     });
   });
 
@@ -282,6 +518,51 @@ void main() {
       );
     });
 
+    test('--max-concurrent-requests without value throws FormatException', () {
+      expect(
+        () => PubMcpConfig.fromArguments(
+          ['--max-concurrent-requests'],
+          environment: {},
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('--max-concurrent-requests'),
+          ),
+        ),
+      );
+    });
+
+    test('--wire-trace-dir without value throws FormatException', () {
+      expect(
+        () => PubMcpConfig.fromArguments(['--wire-trace-dir'], environment: {}),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('--wire-trace-dir'),
+          ),
+        ),
+      );
+    });
+
+    test('--wire-trace-max-preview without value throws FormatException', () {
+      expect(
+        () => PubMcpConfig.fromArguments(
+          ['--wire-trace-max-preview'],
+          environment: {},
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('--wire-trace-max-preview'),
+          ),
+        ),
+      );
+    });
+
     test('--log-level without value at end of multi-flag list throws FormatException', () {
       expect(
         () => PubMcpConfig.fromArguments(
@@ -321,6 +602,16 @@ void main() {
       );
       expect(result.exitCode, equals(64));
       expect(result.stderr.toString(), contains('--max-cache-size'));
+      expect(result.stderr.toString(), contains('--help'));
+    });
+
+    test('--max-concurrent-requests without value prints readable error and exits 64', () async {
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        ['run', 'bin/pubdev_context.dart', '--max-concurrent-requests'],
+      );
+      expect(result.exitCode, equals(64));
+      expect(result.stderr.toString(), contains('--max-concurrent-requests'));
       expect(result.stderr.toString(), contains('--help'));
     });
   });

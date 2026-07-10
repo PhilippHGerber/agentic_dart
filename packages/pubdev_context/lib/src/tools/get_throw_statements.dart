@@ -16,25 +16,29 @@
 ///
 /// ## Top-level function resolution
 ///
-/// Same pattern as `get_method_body`: the API index is consulted for entries
+/// The API index is consulted for entries
 /// where `type == "function"` and the `qualifiedName` suffix matches `method`.
 /// Exactly one match → proceed. Multiple matches → `DomainError(AMBIGUOUS_SYMBOL)`
 /// with `error.details.candidates`.
 ///
 /// ## Response shape
 ///
-/// JSON array, one entry per `throw` expression:
+/// A JSON object carrying the resolved version and a `throws` array, one entry
+/// per `throw` expression:
 ///
 /// ```json
-/// [
-///   {
-///     "file": "lib/src/foo.dart",
-///     "class": "MyClass",
-///     "method": "doSomething",
-///     "thrown_type": "ArgumentError",
-///     "context": "if (id.isEmpty) {\n  throw ArgumentError(...);\n}"
-///   }
-/// ]
+/// {
+///   "resolvedVersion": "1.2.3",
+///   "throws": [
+///     {
+///       "file": "lib/src/foo.dart",
+///       "class": "MyClass",
+///       "method": "doSomething",
+///       "thrown_type": "ArgumentError",
+///       "context": "if (id.isEmpty) {\n  throw ArgumentError(...);\n}"
+///     }
+///   ]
+/// }
 /// ```
 ///
 /// `class` and `method` are omitted for top-level function results; `function`
@@ -43,13 +47,13 @@
 /// ## Caches
 ///
 /// Source files: `source:<name>:<version>` — shared with
-/// `get_package_source_file` and `get_method_body`.
+/// `get_source_slice` and `list_package_source_files`.
 ///
-/// API index: `api_index:<package>` — shared with `browse_api_symbols` and
-/// `get_symbol_documentation`.
+/// API index: `api_index:<package>:<resolvedVersion>` — shared with
+/// `browse_api_symbols` and `get_symbol_documentation`.
 ///
 /// AST snapshots: `ast:<name>:<version>:<filepath>` — shared with
-/// `get_method_body` when the same `astCache` instance is injected into both
+/// `get_source_slice` when the same `astCache` instance is injected into both
 /// handlers.
 ///
 /// ## Domain errors
@@ -73,7 +77,7 @@ import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 import 'browse_api_symbols.dart';
-import 'get_method_body.dart';
+import 'get_source_slice.dart';
 
 // ─── Private types ────────────────────────────────────────────────────────────
 
@@ -92,10 +96,10 @@ typedef _MethodScanResult = ({CallToolResult? result, bool classFound});
 /// Handles calls to the `get_throw_statements` MCP tool.
 ///
 /// Source-file loading is shared via `sourceFilesCache` with
-/// `GetPackageSourceFileHandler` and `GetMethodBodyHandler`. The API index
+/// `GetSourceSliceHandler` and `ListPackageSourceFilesHandler`. The API index
 /// cache `apiIndexCache` is shared with `BrowseApiSymbolsHandler` and
 /// `GetSymbolDocumentationHandler`. The AST snapshot cache `astCache` is
-/// shared with `GetMethodBodyHandler` when the same instance is injected.
+/// shared with `GetSourceSliceHandler` when the same instance is injected.
 ///
 /// Pass a `clock` override in tests to control cache TTL expiry without
 /// sleeping. Pass an explicit `astCache` to share parsed AST results with
@@ -141,54 +145,54 @@ final class GetThrowStatementsHandler {
 
     // Validate: at least one of class or method must be provided.
     if (className == null && method == null) {
-      return _domainError(
-        const DomainError(
-          code: DomainErrors.invalidArgument,
-          message: 'Either `class` or `method` must be provided.',
-          suggestion:
-              'To scan all throws in a class, provide `class`. '
-              'To scan a single class method, provide both `class` and `method`. '
-              'To scan a top-level function, provide only `method`.',
-        ),
-      );
+      return _domainError(_kScopeRequired);
     }
 
     // Resolve effective version.
-    final String effectiveVersion;
+    final String resolvedVersion;
     if (version != null) {
-      effectiveVersion = version;
+      resolvedVersion = version;
     } else {
       _log(
         LoggingLevel.info,
-        'get_throw_statements: resolving latest version for $package',
+        'get_throw_statements: resolving latest stable version for $package',
       );
-      final packageResult = await _client.getPackage(package);
-      if (packageResult case PubDevFailure(:final error)) return _domainError(error);
-      effectiveVersion = (packageResult as PubDevSuccess<PackageDetail>).value.version;
+      switch (await _client.resolveLatestStable(package)) {
+        case PubDevFailure(:final error):
+          return _domainError(error);
+        case PubDevSuccess(:final value):
+          resolvedVersion = value;
+      }
+      _log(LoggingLevel.debug, 'get_throw_statements: resolved version=$resolvedVersion');
     }
 
-    if (className != null && method == null) {
+    return switch ((className, method)) {
       // Shape 1: class only — all throws in the entire class.
-      return _scanEntireClass(package, effectiveVersion, className);
-    }
-    if (className != null) {
+      (final c?, null) => _scanEntireClass(package, resolvedVersion, c),
       // Shape 2: class + method — throws in one class method.
-      return _scanClassMethod(package, effectiveVersion, className, method!);
-    }
-    // Shape 3: method only — throws in one top-level function.
-    return _scanTopLevelFunction(package, version, effectiveVersion, method!);
+      (final c?, final m?) => _scanClassMethod(package, resolvedVersion, c, m),
+      // Shape 3: method only — throws in one top-level function.
+      (null, final m?) => _scanTopLevelFunction(package, resolvedVersion, m),
+      // Already rejected by the validation guard above; present so the switch
+      // is exhaustive without a null-assertion.
+      (null, null) => _domainError(_kScopeRequired),
+    };
   }
 
   // ─── Shape 1: entire class ─────────────────────────────────────────────────
 
   Future<CallToolResult> _scanEntireClass(
     String package,
-    String version,
+    String resolvedVersion,
     String className,
   ) async {
-    final filesResult = await _loadSourceFiles(package, version);
-    if (filesResult case PubDevFailure(:final error)) return _domainError(error);
-    final files = (filesResult as PubDevSuccess<Map<String, String>>).value;
+    final Map<String, String> files;
+    switch (await _loadSourceFiles(package, resolvedVersion)) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        files = value;
+    }
 
     // Aggregate results across ALL files: a package may declare a class with
     // the same name in multiple libraries (e.g. part files, extension-type
@@ -197,10 +201,11 @@ final class GetThrowStatementsHandler {
     final aggregated = <Map<String, Object?>>[];
     var classWasFound = false;
     for (final filePath in _sortedDartPaths(files.keys)) {
-      final content = files[filePath]!;
+      final content = files[filePath];
+      if (content == null) continue;
       final partialResults = await _scanEntireClassInFile(
         package,
-        version,
+        resolvedVersion,
         filePath,
         content,
         className,
@@ -211,7 +216,9 @@ final class GetThrowStatementsHandler {
       }
     }
 
-    return classWasFound ? _successJson(aggregated) : _domainError(_classNotFoundError(className));
+    return classWasFound
+        ? _successJson(aggregated, resolvedVersion)
+        : _domainError(_classNotFoundError(className));
   }
 
   /// Scans [filePath] for [className] and collects throws from all its members.
@@ -224,12 +231,12 @@ final class GetThrowStatementsHandler {
   /// and they have no stable `method` name for the response contract.
   Future<List<Map<String, Object?>>?> _scanEntireClassInFile(
     String package,
-    String version,
+    String resolvedVersion,
     String filePath,
     String content,
     String className,
   ) async {
-    final ast = await _getOrParseAst(package, version, filePath, content);
+    final ast = await _getOrParseAst(package, resolvedVersion, filePath, content);
 
     for (final decl in ast.unit.declarations) {
       final members = _membersForDecl(decl, className);
@@ -262,13 +269,17 @@ final class GetThrowStatementsHandler {
 
   Future<CallToolResult> _scanClassMethod(
     String package,
-    String version,
+    String resolvedVersion,
     String className,
     String method,
   ) async {
-    final filesResult = await _loadSourceFiles(package, version);
-    if (filesResult case PubDevFailure(:final error)) return _domainError(error);
-    final files = (filesResult as PubDevSuccess<Map<String, String>>).value;
+    final Map<String, String> files;
+    switch (await _loadSourceFiles(package, resolvedVersion)) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        files = value;
+    }
 
     // Continue scanning ALL files: a package may have two classes with the
     // same name in different libraries.  Stopping at the first match would
@@ -276,10 +287,11 @@ final class GetThrowStatementsHandler {
     // the requested method, ignoring the second class that does.
     var classWasFound = false;
     for (final filePath in _sortedDartPaths(files.keys)) {
-      final content = files[filePath]!;
+      final content = files[filePath];
+      if (content == null) continue;
       final (:result, :classFound) = await _scanClassMethodInFile(
         package,
-        version,
+        resolvedVersion,
         filePath,
         content,
         className,
@@ -315,13 +327,13 @@ final class GetThrowStatementsHandler {
   /// Returns `(result: nonNull, classFound: true)` on success.
   Future<_MethodScanResult> _scanClassMethodInFile(
     String package,
-    String version,
+    String resolvedVersion,
     String filePath,
     String content,
     String className,
     String method,
   ) async {
-    final ast = await _getOrParseAst(package, version, filePath, content);
+    final ast = await _getOrParseAst(package, resolvedVersion, filePath, content);
 
     for (final decl in ast.unit.declarations) {
       final members = _membersForDecl(decl, className);
@@ -345,7 +357,7 @@ final class GetThrowStatementsHandler {
         );
       }
       if (matchedMember) {
-        return (result: _successJson(results), classFound: true);
+        return (result: _successJson(results, resolvedVersion), classFound: true);
       }
 
       // Class found but method absent in this file — signal to keep scanning.
@@ -358,14 +370,13 @@ final class GetThrowStatementsHandler {
 
   Future<CallToolResult> _scanTopLevelFunction(
     String package,
-    String? rawVersion,
-    String effectiveVersion,
+    String resolvedVersion,
     String method,
   ) async {
     // Step 1: load API index to locate the function by qualifiedName suffix.
-    final indexCacheKey = rawVersion == null
-        ? '$kApiIndexCachePrefix:$package'
-        : '$kApiIndexCachePrefix:$package:$rawVersion';
+    // The index cache key always uses the resolved (concrete) version so that a
+    // "latest" lookup and an explicit version lookup share the same cache entry.
+    final indexCacheKey = '$kApiIndexCachePrefix:$package:$resolvedVersion';
 
     List<DartdocSymbol> symbols;
     final cachedIndex = _apiIndexCache.get(indexCacheKey);
@@ -375,11 +386,12 @@ final class GetThrowStatementsHandler {
     } else {
       _log(LoggingLevel.debug, 'get_throw_statements: index cache miss key=$indexCacheKey');
       _log(LoggingLevel.info, 'get_throw_statements: index HTTP request package=$package');
-      final result = await _client.getApiIndex(package, version: effectiveVersion);
-      if (result case PubDevFailure(:final error)) {
-        return _domainError(error);
+      switch (await _client.getApiIndex(package, version: resolvedVersion)) {
+        case PubDevFailure(:final error):
+          return _domainError(error);
+        case PubDevSuccess(:final value):
+          symbols = value;
       }
-      symbols = (result as PubDevSuccess<List<DartdocSymbol>>).value;
       _apiIndexCache.set(indexCacheKey, Future.value(symbols), kApiDocsTtl);
     }
 
@@ -428,9 +440,13 @@ final class GetThrowStatementsHandler {
     }
 
     // Step 3: load source files and locate the function.
-    final filesResult = await _loadSourceFiles(package, effectiveVersion);
-    if (filesResult case PubDevFailure(:final error)) return _domainError(error);
-    final files = (filesResult as PubDevSuccess<Map<String, String>>).value;
+    final Map<String, String> files;
+    switch (await _loadSourceFiles(package, resolvedVersion)) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        files = value;
+    }
 
     final hintPaths = _hrefToSourcePaths(candidates.first.href);
     final orderedPaths = isQualified
@@ -443,8 +459,9 @@ final class GetThrowStatementsHandler {
           ];
 
     for (final filePath in orderedPaths) {
-      final content = files[filePath]!;
-      final ast = await _getOrParseAst(package, effectiveVersion, filePath, content);
+      final content = files[filePath];
+      if (content == null) continue;
+      final ast = await _getOrParseAst(package, resolvedVersion, filePath, content);
       final funcDecl = _findTopLevelFunction(ast, unqualifiedName);
       if (funcDecl != null) {
         // Start traversal from the function body, not the FunctionDeclaration —
@@ -462,7 +479,7 @@ final class GetThrowStatementsHandler {
           unqualifiedName,
           results,
         );
-        return _successJson(results);
+        return _successJson(results, resolvedVersion);
       }
     }
 
@@ -472,7 +489,7 @@ final class GetThrowStatementsHandler {
         message: 'Function body for "$method" could not be located in the source files.',
         suggestion:
             'The function may be generated, external, or defined in a part file. '
-            'Try get_package_source_file to read the relevant source file directly.',
+            'Try get_source_slice to read the relevant source file directly.',
       ),
     );
   }
@@ -496,16 +513,15 @@ final class GetThrowStatementsHandler {
       'get_throw_statements: HTTP tarball request package=$package',
     );
 
-    final result = await _client.getPackageSourceFiles(package, version);
-    if (result case PubDevSuccess(:final value)) {
-      _sourceFilesCache.set(cacheKey, Future.value(value), kSourceFileTtl);
-      return PubDevSuccess(value);
+    switch (await _client.getPackageSourceFiles(package, version)) {
+      case PubDevSuccess(:final value):
+        _sourceFilesCache.set(cacheKey, Future.value(value), kSourceFileTtl);
+        return PubDevSuccess(value);
+      case PubDevFailure(:final error):
+        return PubDevFailure(
+          error.code == DomainErrors.packageNotFound ? _packageNotFoundError(package) : error,
+        );
     }
-
-    final error = (result as PubDevFailure<Map<String, String>>).error;
-    return PubDevFailure(
-      error.code == DomainErrors.packageNotFound ? _packageNotFoundError(package) : error,
-    );
   }
 
   // ─── AST parsing & caching ─────────────────────────────────────────────────
@@ -802,6 +818,15 @@ final class GetThrowStatementsHandler {
 
   // ─── Static error / result builders ──────────────────────────────────────
 
+  static const _kScopeRequired = DomainError(
+    code: DomainErrors.invalidArgument,
+    message: 'Either `class` or `method` must be provided.',
+    suggestion:
+        'To scan all throws in a class, provide `class`. '
+        'To scan a single class method, provide both `class` and `method`. '
+        'To scan a top-level function, provide only `method`.',
+  );
+
   static const _kNoDocumentation = DomainError(
     code: DomainErrors.noDocumentation,
     message: 'No API documentation found for this package.',
@@ -822,8 +847,16 @@ final class GetThrowStatementsHandler {
     suggestion: 'Verify the package name and try again.',
   );
 
-  static CallToolResult _successJson(List<Map<String, Object?>> results) =>
-      CallToolResult(content: [TextContent(text: jsonEncode(results))]);
+  static CallToolResult _successJson(
+    List<Map<String, Object?>> results,
+    String resolvedVersion,
+  ) => CallToolResult(
+    content: [
+      TextContent(
+        text: jsonEncode({'resolvedVersion': resolvedVersion, 'throws': results}),
+      ),
+    ],
+  );
 
   static CallToolResult _domainError(DomainError error) =>
       CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);

@@ -2,6 +2,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
@@ -18,6 +19,8 @@ import 'package:test/test.dart';
 class _MockHttpClient extends Mock implements http.Client {}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
 
 http.Response _ok(String body) => http.Response(body, 200);
 http.Response _notFound() => http.Response('Not Found', 404);
@@ -37,8 +40,22 @@ void _stubUrl({
   ).thenAnswer((_) async => response);
 }
 
+/// Stubs `GET /api/packages/{name}` so [PubDevClient.resolveLatestStable]
+/// returns the latest stable version from package_info.json (`1.6.0`).
+void _stubPackageInfo(_MockHttpClient mock, {String name = 'http'}) {
+  _stubUrl(
+    mock: mock,
+    urlFragment: '/api/packages/$name',
+    response: _ok(_readFixture('package_info.json')),
+  );
+}
+
 /// Stubs a successful changelog fetch for package [name].
+///
+/// Also stubs the version-resolution endpoint so [PubDevClient.resolveLatestStable]
+/// succeeds.
 void _stubSuccess(_MockHttpClient mock, {String name = 'http', String? html}) {
+  _stubPackageInfo(mock, name: name);
   _stubUrl(
     mock: mock,
     urlFragment: '/packages/$name/changelog',
@@ -71,10 +88,18 @@ const _noHeadingsHtml = '<p>This package has no formal changelog yet.</p>';
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_changelog', arguments: args);
 
-/// Decodes the first content item of [result] as a JSON list.
-List<Map<String, Object?>> _entries(CallToolResult result) =>
-    (jsonDecode((result.content.first as TextContent).text) as List<Object?>)
-        .cast<Map<String, Object?>>();
+/// Decodes the first content item of [result] as a JSON success object and
+/// returns the `entries` list.
+List<Map<String, Object?>> _entries(CallToolResult result) {
+  final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  return ((json['entries'] as List<Object?>?) ?? const []).cast<Map<String, Object?>>();
+}
+
+/// Decodes the first content item of [result] and returns its `resolvedVersion`.
+String? _resolvedVersion(CallToolResult result) {
+  final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  return json['resolvedVersion'] as String?;
+}
 
 /// Decodes the first content item of [result] as a JSON error payload.
 Map<String, Object?> _errorPayload(CallToolResult result) {
@@ -224,6 +249,29 @@ void main() {
       final result = await buildHandler().call(_request({'name': 'http'}));
 
       expect(_entries(result).every((e) => e.containsKey('breaking')), isTrue);
+    });
+  });
+
+  // ─── resolvedVersion (P1.11) ────────────────────────────────────────────────
+
+  group('resolvedVersion', () {
+    test('is present and equals the resolved latest stable version', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'name': 'http'}));
+
+      expect(_resolvedVersion(result), equals('1.6.0'));
+    });
+
+    test('is emitted on a cache-hit response as well as a fresh fetch', () async {
+      _stubSuccess(mockHttp);
+      final handler = buildHandler();
+
+      await handler.call(_request({'name': 'http'}));
+      fakeNow = fakeNow.add(const Duration(minutes: 14));
+      final result = await handler.call(_request({'name': 'http'}));
+
+      expect(_resolvedVersion(result), equals('1.6.0'));
     });
   });
 
@@ -500,7 +548,20 @@ void main() {
   // ─── Package not found ────────────────────────────────────────────────────────
 
   group('package not found', () {
+    /// Stubs the resolve endpoint for 'unknown' to succeed (so the test
+    /// exercises the changelog-404 path, not the resolve-404 path).
+    void stubUnknownResolve() {
+      _stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/unknown',
+        response: _ok(
+          '{"versions":[{"version":"1.0.0"}],"latest":{"version":"1.0.0"}}',
+        ),
+      );
+    }
+
     test('returns isError true when the changelog page returns 404', () async {
+      stubUnknownResolve();
       _stubUrl(
         mock: mockHttp,
         urlFragment: '/packages/unknown/changelog',
@@ -513,6 +574,7 @@ void main() {
     });
 
     test('error code is package_not_found on 404', () async {
+      stubUnknownResolve();
       _stubUrl(
         mock: mockHttp,
         urlFragment: '/packages/unknown/changelog',
@@ -525,6 +587,7 @@ void main() {
     });
 
     test('HTTP error result is not cached so the next call retries', () async {
+      stubUnknownResolve();
       _stubUrl(
         mock: mockHttp,
         urlFragment: '/packages/unknown/changelog',
@@ -545,6 +608,42 @@ void main() {
           headers: any(named: 'headers'),
         ),
       ).called(greaterThan(1));
+    });
+  });
+
+  // ─── Resolve failure (P1.17) ─────────────────────────────────────────────────
+  //
+  // The handler resolves the latest stable version before fetching the
+  // changelog (to populate `resolvedVersion`). A failed resolution (404) must
+  // propagate as package_not_found and short-circuit before the changelog
+  // fetch. This is the inverse of the 'package not found' group above, which
+  // stubs resolution to succeed and fails the changelog fetch instead.
+
+  group('resolve failure', () {
+    test('propagates package_not_found when version resolution returns 404', () async {
+      _stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: _notFound());
+
+      final result = await buildHandler().call(_request({'name': 'http'}));
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+    });
+
+    test('does not fetch the changelog page when resolution fails', () async {
+      _stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: _notFound());
+
+      await buildHandler().call(_request({'name': 'http'}));
+
+      verifyNever(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/packages/http/changelog'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      );
     });
   });
 }

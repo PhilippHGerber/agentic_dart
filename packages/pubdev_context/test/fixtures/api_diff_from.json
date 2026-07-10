@@ -1,0 +1,7 @@
+[
+  { "name": "http", "qualifiedName": "http", "href": "http/http-library.html", "kind": 9 },
+  { "name": "Client", "qualifiedName": "http.Client", "href": "http/Client-class.html", "kind": 3 },
+  { "name": "send", "qualifiedName": "http.Client.send", "href": "http/Client/send.html", "kind": 10 },
+  { "name": "OldClient", "qualifiedName": "http.OldClient", "href": "http/OldClient-class.html", "kind": 3 },
+  { "name": "timeout", "qualifiedName": "http.Client.timeout", "href": "http/Client/timeout.html", "kind": 16 }
+]

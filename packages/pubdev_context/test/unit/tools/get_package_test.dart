@@ -87,6 +87,9 @@ CallToolRequest _request(Map<String, Object?> args) =>
 Map<String, Object?> _detail(CallToolResult result) =>
     jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
 
+/// Returns the `resolvedVersion` field of the success [result].
+String? _resolvedVersion(CallToolResult result) => _detail(result)['resolvedVersion'] as String?;
+
 /// Decodes the first content item of [result] as a JSON error payload.
 Map<String, Object?> _errorPayload(CallToolResult result) {
   final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
@@ -357,6 +360,26 @@ void main() {
     });
   });
 
+  // ─── resolvedVersion (P1.12) ──────────────────────────────────────────────────
+
+  group('resolvedVersion', () {
+    test('equals the resolved latest stable version when version is omitted', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'name': 'http'}));
+
+      expect(_resolvedVersion(result), equals('1.6.0'));
+    });
+
+    test('echoes the supplied version on a pinned request', () async {
+      _stubVersionSuccess(mockHttp, '1.5.0');
+
+      final result = await buildHandler().call(_request({'name': 'http', 'version': '1.5.0'}));
+
+      expect(_resolvedVersion(result), equals('1.5.0'));
+    });
+  });
+
   // ─── Cache hit ──────────────────────────────────────────────────────────────
 
   group('cache hit', () {
@@ -368,12 +391,14 @@ void main() {
       fakeNow = fakeNow.add(const Duration(minutes: 14));
       await handler.call(_request({'name': 'http'}));
 
+      // First call: resolve (1) + getPackage (2) + score (3).
+      // Second call: resolve (4) + cache hit (no fetch).
       verify(
         () => mockHttp.get(
           any(that: predicate<Uri>((u) => u.toString().contains('/api/packages/http'))),
           headers: any(named: 'headers'),
         ),
-      ).called(lessThan(4));
+      ).called(4);
     });
 
     test('logs a debug cache-hit message on the second call', () async {

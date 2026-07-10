@@ -12,7 +12,6 @@ import 'package:dart_mcp/server.dart';
 
 import '../cache/memory_cache.dart';
 import '../data/domain_error.dart';
-import '../data/models.dart';
 import '../data/pub_client.dart';
 
 /// Handles calls to the `list_package_source_files` MCP tool.
@@ -34,34 +33,43 @@ final class ListPackageSourceFilesHandler {
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final name = (args['name'] as String?) ?? '';
-    final rawVersion = args['version'] as String?;
+    final suppliedVersion = args['version'] as String?;
     final rawDirectory = args['directory'] as String?;
     final fileExtension = args['fileExtension'] as String?;
 
-    final String version;
-    if (rawVersion != null) {
-      version = rawVersion;
+    // ── Resolve version ────────────────────────────────────────────────────────
+
+    final String resolvedVersion;
+    if (suppliedVersion != null) {
+      resolvedVersion = suppliedVersion;
     } else {
-      _log(LoggingLevel.info, 'list_package_source_files: resolving latest version for $name');
-      final packageResult = await _client.getPackage(name);
-      if (packageResult case PubDevFailure(:final error)) {
-        return _domainError(error);
+      _log(
+        LoggingLevel.info,
+        'list_package_source_files: resolving latest stable version for $name',
+      );
+      switch (await _client.resolveLatestStable(name)) {
+        case PubDevFailure(:final error):
+          return _domainError(error);
+        case PubDevSuccess(:final value):
+          resolvedVersion = value;
       }
-      version = (packageResult as PubDevSuccess<PackageDetail>).value.version;
+      _log(LoggingLevel.debug, 'list_package_source_files: resolved version=$resolvedVersion');
     }
 
     _log(
       LoggingLevel.info,
-      'list_package_source_files: name=$name version=$version'
+      'list_package_source_files: name=$name version=$resolvedVersion'
       '${rawDirectory != null ? ' directory=$rawDirectory' : ''}'
       '${fileExtension != null ? ' ext=$fileExtension' : ''}',
     );
 
-    final filesResult = await _loadSourceFiles(name, version);
-    if (filesResult case PubDevFailure(:final error)) {
-      return _domainError(error);
+    final Map<String, String> files;
+    switch (await _loadSourceFiles(name, resolvedVersion)) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        files = value;
     }
-    final files = (filesResult as PubDevSuccess<Map<String, String>>).value;
 
     final directory = _normalizeDirectory(rawDirectory);
     var paths = files.keys.toList();
@@ -78,8 +86,8 @@ final class ListPackageSourceFilesHandler {
       content: [
         TextContent(
           text: jsonEncode({
+            'resolvedVersion': resolvedVersion,
             'name': name,
-            'version': version,
             'files': paths,
           }),
         ),
@@ -112,29 +120,28 @@ final class ListPackageSourceFilesHandler {
     final completer = Completer<Map<String, String>>();
     _cache.set(cacheKey, completer.future, kSourceFileTtl);
 
-    final result = await _client.getPackageSourceFiles(name, version);
-    if (result case PubDevSuccess(:final value)) {
-      completer.complete(value);
-      return PubDevSuccess(value);
+    switch (await _client.getPackageSourceFiles(name, version)) {
+      case PubDevSuccess(:final value):
+        completer.complete(value);
+        return PubDevSuccess(value);
+      case PubDevFailure(:final error):
+        // Unblock any concurrent waiters with an error, then evict the entry so
+        // the next independent request gets a clean miss.
+        // `ignore()` registers a no-op error handler so Dart does not report an
+        // unhandled Future error when no concurrent caller is actually waiting.
+        completer.future.ignore();
+        completer.completeError(StateError('fetch failed: ${error.code}'));
+        _cache.invalidate(cacheKey);
+        return PubDevFailure(
+          error.code == DomainErrors.packageNotFound
+              ? DomainError(
+                  code: DomainErrors.packageNotFound,
+                  message: 'Package "$name" not found on pub.dev.',
+                  suggestion: 'Verify the package name and try again.',
+                )
+              : error,
+        );
     }
-
-    final error = (result as PubDevFailure<Map<String, String>>).error;
-    // Unblock any concurrent waiters with an error, then evict the entry so
-    // the next independent request gets a clean miss.
-    // `ignore()` registers a no-op error handler so Dart does not report an
-    // unhandled Future error when no concurrent caller is actually waiting.
-    completer.future.ignore();
-    completer.completeError(StateError('fetch failed: ${error.code}'));
-    _cache.invalidate(cacheKey);
-    return PubDevFailure(
-      error.code == DomainErrors.packageNotFound
-          ? DomainError(
-              code: DomainErrors.packageNotFound,
-              message: 'Package "$name" not found on pub.dev.',
-              suggestion: 'Verify the package name and try again.',
-            )
-          : error,
-    );
   }
 
   static String? _normalizeDirectory(String? raw) {

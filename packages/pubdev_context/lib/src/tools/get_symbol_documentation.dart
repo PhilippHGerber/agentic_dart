@@ -31,8 +31,9 @@
 ///
 /// ## Cache keys
 ///
-/// API index: `api_index:<package>` for latest, `api_index:<package>:<version>`
-/// for pinned versions (see [kApiIndexCachePrefix]).
+/// API index: `api_index:<package>:<resolvedVersion>` — the version segment is
+/// always a concrete semver (latest-stable is resolved before the key is built),
+/// shared with `browse_api_symbols` (see [kApiIndexCachePrefix]).
 ///
 /// Symbol doc: `symbol_doc:<package>:<version>:<href>` (see [kSymbolDocCachePrefix]).
 /// Results are cached with a [kSymbolDocTtl] TTL. The version segment prevents
@@ -49,6 +50,8 @@
 /// See issues #28, #32, #33.
 library;
 
+import 'dart:convert';
+
 import 'package:dart_mcp/server.dart';
 
 import '../cache/memory_cache.dart';
@@ -60,8 +63,9 @@ import 'browse_api_symbols.dart';
 /// Cache-key prefix for symbol documentation entries.
 ///
 /// Full key format: `$kSymbolDocCachePrefix:<package>:<version>:<href>`.
-/// The version segment (e.g. `"latest"` or `"1.2.0"`) ensures that pinned-
-/// version requests never reuse docs cached for a different version.
+/// The version segment is always a concrete semver (e.g. `"1.2.0"`) — the
+/// latest-stable version is resolved before the key is built — so requests for
+/// different versions never reuse each other's cached docs.
 const kSymbolDocCachePrefix = 'symbol_doc';
 
 // ─── Internal resolution result types ─────────────────────────────────────────
@@ -112,27 +116,46 @@ final class GetSymbolDocumentationHandler {
 
   /// Handles a [CallToolRequest] for `get_symbol_documentation`.
   ///
-  /// Resolves the `symbol` name to an href via the API index, then fetches
-  /// and returns the dartdoc page content. Returns [CallToolResult.isError]
+  /// Resolves the version (via [PubDevClient.resolveLatestStable] when absent),
+  /// resolves the `symbol` name to an href via the API index, then fetches
+  /// and returns the dartdoc page content wrapped in a JSON object with
+  /// `resolvedVersion` as the first key. Returns [CallToolResult.isError]
   /// `true` with a structured JSON payload on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
 
     final package = (args['package'] as String?) ?? '';
     final symbol = (args['symbol'] as String?) ?? '';
-    final version = args['version'] as String?;
-    final effectiveVersion = version ?? 'latest';
+    final suppliedVersion = args['version'] as String?;
 
     _log(
       LoggingLevel.info,
-      'get_symbol_documentation: package=$package symbol=$symbol version=$effectiveVersion',
+      'get_symbol_documentation: package=$package symbol=$symbol'
+      '${suppliedVersion != null ? ' version=$suppliedVersion' : ''}',
     );
 
-    // ── Step 1: fetch (or warm) the API index ─────────────────────────────────
+    // ── Step 1: resolve version ────────────────────────────────────────────────
 
-    final indexCacheKey = version == null
-        ? '$kApiIndexCachePrefix:$package'
-        : '$kApiIndexCachePrefix:$package:$version';
+    final String resolvedVersion;
+    if (suppliedVersion != null) {
+      resolvedVersion = suppliedVersion;
+    } else {
+      _log(
+        LoggingLevel.info,
+        'get_symbol_documentation: resolving latest stable version for $package',
+      );
+      switch (await _client.resolveLatestStable(package)) {
+        case PubDevFailure(:final error):
+          return _domainError(error);
+        case PubDevSuccess(:final value):
+          resolvedVersion = value;
+      }
+      _log(LoggingLevel.debug, 'get_symbol_documentation: resolved version=$resolvedVersion');
+    }
+
+    // ── Step 2: fetch (or warm) the API index ─────────────────────────────────
+
+    final indexCacheKey = '$kApiIndexCachePrefix:$package:$resolvedVersion';
 
     List<DartdocSymbol> symbols;
 
@@ -142,34 +165,28 @@ final class GetSymbolDocumentationHandler {
       symbols = await cachedIndex;
     } else {
       _log(LoggingLevel.debug, 'get_symbol_documentation: index cache miss key=$indexCacheKey');
-      final indexFuture = _client.getApiIndex(package, version: effectiveVersion);
-
-      _apiIndexCache.set(
-        indexCacheKey,
-        indexFuture.then(
-          (r) => switch (r) {
-            PubDevSuccess(:final value) => value,
-            PubDevFailure() => <DartdocSymbol>[],
-          },
-        ),
-        kApiDocsTtl,
-      );
-
       _log(LoggingLevel.info, 'get_symbol_documentation: index HTTP request package=$package');
 
-      final indexResult = await indexFuture;
-      if (indexResult case PubDevFailure(
-        :final error,
-      ) when error.code == DomainErrors.packageNotFound) {
-        return _domainError(_kNoDocumentation);
+      switch (await _client.getApiIndex(package, version: resolvedVersion)) {
+        case PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound:
+          return _domainError(_kNoDocumentation);
+        case PubDevFailure(:final error):
+          return _domainError(error);
+        case PubDevSuccess(:final value):
+          symbols = value;
       }
-      if (indexResult case PubDevFailure(:final error)) return _domainError(error);
-      symbols = (indexResult as PubDevSuccess<List<DartdocSymbol>>).value;
+
+      // Populate the cache only after a successful fetch. Storing a
+      // failure-mapped empty list would poison the cache: every subsequent
+      // call within the TTL window would return `no_documentation` without
+      // retrying, letting a single transient error (429/503/network) outlive
+      // the outage itself.
+      _apiIndexCache.set(indexCacheKey, Future.value(symbols), kApiDocsTtl);
     }
 
     if (symbols.isEmpty) return _domainError(_kNoDocumentation);
 
-    // ── Step 2: resolve symbol name → href ────────────────────────────────────
+    // ── Step 3: resolve symbol name → href ────────────────────────────────────
 
     final match = _resolveSymbol(symbols, symbol);
 
@@ -193,7 +210,7 @@ final class GetSymbolDocumentationHandler {
           details: {'candidates': alternatives},
         ),
       ),
-      _SingleMatch(:final href) => await _fetchDoc(package, href, effectiveVersion),
+      _SingleMatch(:final href) => await _fetchDoc(package, href, resolvedVersion),
     };
   }
 
@@ -251,41 +268,36 @@ final class GetSymbolDocumentationHandler {
 
   // ── Symbol doc fetch ───────────────────────────────────────────────────────
 
-  Future<CallToolResult> _fetchDoc(String package, String href, String version) async {
-    final cacheKey = '$kSymbolDocCachePrefix:$package:$version:$href';
+  Future<CallToolResult> _fetchDoc(String package, String href, String resolvedVersion) async {
+    final cacheKey = '$kSymbolDocCachePrefix:$package:$resolvedVersion:$href';
 
     final cached = _cache.get(cacheKey);
     if (cached != null) {
       _log(LoggingLevel.debug, 'get_symbol_documentation: doc cache hit key=$cacheKey');
       final text = await cached;
       if (text.isEmpty) return _domainError(_kSymbolNotFound);
-      return _successResult(text);
+      return _successResult(text, resolvedVersion);
     }
 
     _log(LoggingLevel.debug, 'get_symbol_documentation: doc cache miss key=$cacheKey');
-
-    final future = _client.getSymbolDoc(package, href, version: version);
-    _cache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => '',
-        },
-      ),
-      kSymbolDocTtl,
-    );
-
     _log(
       LoggingLevel.info,
       'get_symbol_documentation: doc HTTP request package=$package href=$href',
     );
 
-    final result = await future;
-    return switch (result) {
-      PubDevSuccess(:final value) => _successResult(value),
-      PubDevFailure(:final error) => _domainError(error),
-    };
+    final String text;
+    switch (await _client.getSymbolDoc(package, href, version: resolvedVersion)) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        text = value;
+    }
+    // Cache only after a successful fetch. Storing a failure-mapped empty
+    // string would poison the cache: every subsequent call within the TTL
+    // window would return `symbol_not_found` without retrying, letting a
+    // single transient error (429/503/network) outlive the outage itself.
+    _cache.set(cacheKey, Future.value(text), kSymbolDocTtl);
+    return _successResult(text, resolvedVersion);
   }
 
   // ── Static helpers ─────────────────────────────────────────────────────────
@@ -302,8 +314,13 @@ final class GetSymbolDocumentationHandler {
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
 
-  static CallToolResult _successResult(String text) =>
-      CallToolResult(content: [TextContent(text: text)]);
+  static CallToolResult _successResult(String text, String resolvedVersion) => CallToolResult(
+    content: [
+      TextContent(
+        text: jsonEncode({'resolvedVersion': resolvedVersion, 'documentation': text}),
+      ),
+    ],
+  );
 
   static CallToolResult _domainError(DomainError error) =>
       CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);

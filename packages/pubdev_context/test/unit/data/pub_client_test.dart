@@ -15,11 +15,23 @@ import 'package:pubdev_context/src/cache/tarball_disk_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
+import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 class _MockHttpClient extends Mock implements http.Client {}
+
+/// A [WireTraceSink] that records emitted lines in memory.
+final class _RecordingSink implements WireTraceSink {
+  final List<String> lines = <String>[];
+
+  @override
+  void writeLine(String line) => lines.add(line);
+
+  @override
+  void close() {}
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -755,6 +767,114 @@ void main() {
     });
   });
 
+  // ─── resolveLatestStable ────────────────────────────────────────────────────
+
+  group('PubDevClient.resolveLatestStable', () {
+    test('returns the newest non-pre-release version', () async {
+      final mock = _setUp();
+      // fixture has versions 1.4.0, 1.5.0-beta, 1.5.0-beta.2, 1.5.0, 1.6.0
+      _stubGet(mock, '/api/packages/http', _jsonFile('package_info.json'));
+      final result = await _client(mock).resolveLatestStable('http');
+      expect((result as PubDevSuccess<String>).value, equals('1.6.0'));
+    });
+
+    test('skips pre-release versions that contain a hyphen', () async {
+      final mock = _setUp();
+      final body = jsonEncode({
+        'versions': [
+          {'version': '1.0.0'},
+          {'version': '2.0.0-beta'},
+          {'version': '2.0.0-rc.1'},
+        ],
+        'latest': {'version': '2.0.0-rc.1'},
+      });
+      _stubGet(mock, '/api/packages/http', _json(body));
+      final result = await _client(mock).resolveLatestStable('http');
+      expect((result as PubDevSuccess<String>).value, equals('1.0.0'));
+    });
+
+    test('falls back to latest.version when all versions are pre-releases', () async {
+      final mock = _setUp();
+      final body = jsonEncode({
+        'versions': [
+          {'version': '1.0.0-alpha'},
+          {'version': '1.0.0-beta'},
+        ],
+        'latest': {'version': '1.0.0-beta'},
+      });
+      _stubGet(mock, '/api/packages/http', _json(body));
+      final result = await _client(mock).resolveLatestStable('http');
+      expect((result as PubDevSuccess<String>).value, equals('1.0.0-beta'));
+    });
+
+    test('returns package_not_found when the package does not exist', () async {
+      final mock = _setUp();
+      _stubGet(mock, '/api/packages/unknown', _json('', status: 404));
+      final result = await _client(mock).resolveLatestStable('unknown');
+      expect(
+        (result as PubDevFailure<String>).error.code,
+        equals(DomainErrors.packageNotFound),
+      );
+    });
+
+    test(
+      'returns unexpected_response when versions is empty and latest is absent',
+      () async {
+        final mock = _setUp();
+        final body = jsonEncode({'versions': <Object?>[]});
+        _stubGet(mock, '/api/packages/http', _json(body));
+        final result = await _client(mock).resolveLatestStable('http');
+        expect(
+          (result as PubDevFailure<String>).error.code,
+          equals(DomainErrors.unexpectedResponse),
+        );
+      },
+    );
+
+    test(
+      'returns unexpected_response when versions and latest are both absent',
+      () async {
+        final mock = _setUp();
+        _stubGet(mock, '/api/packages/http', _json(jsonEncode(<String, Object?>{})));
+        final result = await _client(mock).resolveLatestStable('http');
+        expect(
+          (result as PubDevFailure<String>).error.code,
+          equals(DomainErrors.unexpectedResponse),
+        );
+      },
+    );
+
+    test('skips malformed entries whose version is a non-string value', () async {
+      final mock = _setUp();
+      // The first (newest) entry has a non-string `version`; resolution must
+      // skip it rather than throw, falling through to the next stable entry.
+      final body = jsonEncode({
+        'versions': [
+          {'version': '1.0.0'},
+          {'version': 42},
+        ],
+        'latest': {'version': '1.0.0'},
+      });
+      _stubGet(mock, '/api/packages/http', _json(body));
+      final result = await _client(mock).resolveLatestStable('http');
+      expect((result as PubDevSuccess<String>).value, equals('1.0.0'));
+    });
+
+    test('falls back to latest.version when every entry is malformed', () async {
+      final mock = _setUp();
+      final body = jsonEncode({
+        'versions': [
+          {'version': 42},
+          {'noVersionKey': true},
+        ],
+        'latest': {'version': '3.1.4'},
+      });
+      _stubGet(mock, '/api/packages/http', _json(body));
+      final result = await _client(mock).resolveLatestStable('http');
+      expect((result as PubDevSuccess<String>).value, equals('3.1.4'));
+    });
+  });
+
   // ─── retry integration ──────────────────────────────────────────────────────
 
   group('PubDevClient — retry on 503', () {
@@ -778,6 +898,314 @@ void main() {
       final result = await client.getScore('http');
       expect(result, isA<PubDevSuccess<PackageScore>>());
       expect(calls, equals(3));
+    });
+  });
+
+  // ─── wire-trace logging ──────────────────────────────────────────────────────
+
+  group('PubDevClient — wire-trace logging', () {
+    late _RecordingSink sink;
+    late WireTrace trace;
+
+    setUp(() {
+      sink = _RecordingSink();
+      trace = WireTrace.withSink(
+        sink,
+        serverVersion: '0.0.0-test',
+        maxPreviewBytes: 2048,
+        concurrency: 5,
+        cacheDir: '/tmp',
+      );
+    });
+
+    /// Runs [body] as if inside a traced request carrying Correlation Id [id].
+    Future<T> inTracedRequest<T>(String id, Future<T> Function() body) =>
+        runZoned(body, zoneValues: {wireTraceZoneIdKey: id});
+
+    List<String> pubLines() =>
+        sink.lines.where((l) => l.contains('→ pub') || l.contains('← pub')).toList();
+
+    test('logs the outbound request and response under the ambient Correlation Id', () async {
+      final mock = _setUp();
+      _stubGet(
+        mock,
+        '/api/packages/http/score',
+        http.Response(
+          _readFixture('package_score.json'),
+          200,
+          headers: const {'content-type': 'application/vnd.pub.v2+json'},
+        ),
+      );
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest('#042', () => client.getScore('http'));
+
+      final request = sink.lines.firstWhere((l) => l.contains('→ pub'));
+      final response = sink.lines.firstWhere((l) => l.contains('← pub'));
+      expect(request, contains('#042'));
+      expect(request, contains('GET /api/packages/http/score'));
+      expect(response, contains('#042'));
+      expect(response, contains('200 /api/packages/http/score'));
+      // Response trailer carries latency, byte size, and a compact content type.
+      expect(response, contains(' ms'));
+      expect(response, contains('JSON'));
+    });
+
+    test('includes the full query string on the request line', () async {
+      final mock = _setUp();
+      _stubGet(
+        mock,
+        '/api/search',
+        http.Response(
+          '{"packages":[]}',
+          200,
+          headers: const {'content-type': 'application/json'},
+        ),
+      );
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest('#001', () => client.search('http client'));
+
+      final request = sink.lines.firstWhere(
+        (l) => l.contains('→ pub') && l.contains('/api/search'),
+      );
+      expect(request, contains('q=http+client'));
+    });
+
+    test('logs a non-200 response before the call fails', () async {
+      final mock = _setUp();
+      _stubGet(mock, '/api/packages/htp/score', http.Response('', 404));
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest('#009', () => client.getScore('htp'));
+
+      expect(
+        sink.lines.any((l) => l.contains('← pub') && l.contains('404')),
+        isTrue,
+      );
+    });
+
+    test('outside a traced request (no Correlation Id), nothing is logged', () async {
+      final mock = _setUp();
+      _stubGet(mock, '/api/packages/http/score', _jsonFile('package_score.json'));
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await client.getScore('http');
+
+      expect(pubLines(), isEmpty);
+    });
+
+    test('with no trace injected, nothing is built or logged', () async {
+      final mock = _setUp();
+      _stubGet(mock, '/api/packages/http/score', _jsonFile('package_score.json'));
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant);
+
+      await inTracedRequest('#001', () => client.getScore('http'));
+
+      expect(pubLines(), isEmpty);
+    });
+
+    test('a JSON response is previewed as a body continuation line', () async {
+      final mock = _setUp();
+      _stubGet(
+        mock,
+        '/api/packages/http/score',
+        http.Response(
+          _readFixture('package_score.json'),
+          200,
+          headers: const {'content-type': 'application/vnd.pub.v2+json'},
+        ),
+      );
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest('#042', () => client.getScore('http'));
+
+      final response = sink.lines.firstWhere((l) => l.contains('← pub'));
+      expect(response, contains('#042'));
+      // The preview carries the actual JSON the endpoint returned.
+      final body = sink.lines.firstWhere((l) => l.contains('body:'));
+      expect(body, contains('grantedPoints'));
+    });
+
+    test('a large JSON response is truncated with a total-size annotation', () async {
+      final mock = _setUp();
+      // A body far larger than the 32-byte cap forces truncation.
+      final big = '{"data":"${'x' * 5000}"}';
+      _stubGet(
+        mock,
+        '/api/packages/http/score',
+        http.Response(big, 200, headers: const {'content-type': 'application/json'}),
+      );
+      final smallCapSink = _RecordingSink();
+      final smallCapTrace = WireTrace.withSink(
+        smallCapSink,
+        serverVersion: '0.0.0-test',
+        maxPreviewBytes: 32,
+        concurrency: 5,
+        cacheDir: '/tmp',
+      );
+      final client = PubDevClient(
+        httpClient: mock,
+        retryPolicy: _instant,
+        trace: smallCapTrace,
+      );
+
+      await inTracedRequest('#001', () => client.getScore('http'));
+
+      final body = smallCapSink.lines.firstWhere((l) => l.contains('body:'));
+      expect(body, contains('(truncated,'));
+      expect(body, contains('total)'));
+    });
+
+    test('an HTML endpoint logs the converted markdown, never the raw HTML', () async {
+      final mock = _setUp();
+      _stubGet(
+        mock,
+        '/packages/foo/changelog',
+        _json(
+          '<html><body><h2>1.0.0</h2><p>Initial release of foo.</p></body></html>',
+        ),
+      );
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest('#007', () => client.getChangelog('foo'));
+
+      final response = sink.lines.firstWhere((l) => l.contains('← pub'));
+      // Both sizes are annotated as an HTML → md conversion.
+      expect(response, contains('HTML →'));
+      expect(response, contains(' md'));
+      // The converted markdown is previewed; the raw HTML never reaches the file.
+      final body = sink.lines.firstWhere((l) => l.contains('body:'));
+      expect(body, contains('1.0.0'));
+      expect(sink.lines.any((l) => l.contains('<')), isFalse);
+    });
+
+    test('a tarball download logs size and file count, and no archive bytes', () async {
+      final mock = _setUp();
+      final bytes = _buildTarGz({
+        'foo-1.0.0/pubspec.yaml': 'name: foo\n',
+        'foo-1.0.0/lib/foo.dart': 'class Foo {}\n',
+      });
+      _stubTarballStream(mock, bytes);
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest(
+        '#011',
+        () => client.getPackageSourceFiles('foo', '1.0.0'),
+      );
+
+      final response = sink.lines.firstWhere(
+        (l) => l.contains('← pub') && l.contains('archive.tar.gz'),
+      );
+      expect(response, contains('#011'));
+      expect(response, contains('tar.gz'));
+      expect(response, contains('2 files'));
+      // Metadata only: no body/archive content is ever written.
+      expect(sink.lines.any((l) => l.contains('body:')), isFalse);
+    });
+
+    test('a transient failure logs a retry line and a [retry N] request', () async {
+      final mock = _setUp();
+      var calls = 0;
+      when(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.toString().contains('/api/packages/http/score'))),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async {
+        calls++;
+        if (calls == 1) return _json('', status: 503);
+        return http.Response(
+          _readFixture('package_score.json'),
+          200,
+          headers: const {'content-type': 'application/vnd.pub.v2+json'},
+        );
+      });
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest('#055', () => client.getScore('http'));
+
+      final retry = sink.lines.firstWhere((l) => l.contains('⚠ pub'));
+      expect(retry, contains('#055'));
+      expect(retry, contains('503 /api/packages/http/score'));
+      expect(retry, contains('retry 1/3 in 500 ms'));
+      // The subsequent request line is tagged as a retry.
+      expect(
+        sink.lines.any((l) => l.contains('→ pub') && l.contains('[retry 1]')),
+        isTrue,
+      );
+      // The retried 503 is rendered as the ⚠ line only — never also as a
+      // `← pub 503`, which would duplicate it against the authoritative format.
+      expect(
+        sink.lines.where((l) => l.contains('← pub')).every((l) => l.contains('200')),
+        isTrue,
+      );
+    });
+
+    test('an exhausted transient failure logs a final ← pub response, not a dangling request', () async {
+      final mock = _setUp();
+      // Every attempt 503s: two ⚠ retry lines, then a give-up ← pub line.
+      _stubGet(mock, '/api/packages/http/score', _json('', status: 503));
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      await inTracedRequest('#077', () => client.getScore('http'));
+
+      expect(sink.lines.where((l) => l.contains('⚠ pub')), hasLength(2));
+      // The final failed attempt still gets one ← pub 503 line (the give-up),
+      // so no request is left dangling without a response.
+      final finals = sink.lines.where(
+        (l) => l.contains('← pub') && l.contains('503 /api/packages/http/score'),
+      );
+      expect(finals, hasLength(1));
+    });
+
+    test('--wire-trace-max-preview 0 produces metadata-only lines, no bodies', () async {
+      final mock = _setUp();
+      _stubGet(
+        mock,
+        '/api/packages/http/score',
+        http.Response(
+          _readFixture('package_score.json'),
+          200,
+          headers: const {'content-type': 'application/vnd.pub.v2+json'},
+        ),
+      );
+      final metaSink = _RecordingSink();
+      final metaTrace = WireTrace.withSink(
+        metaSink,
+        serverVersion: '0.0.0-test',
+        maxPreviewBytes: 0,
+        concurrency: 5,
+        cacheDir: '/tmp',
+      );
+      final client =
+          PubDevClient(httpClient: mock, retryPolicy: _instant, trace: metaTrace);
+
+      await inTracedRequest('#001', () => client.getScore('http'));
+
+      // The boundary lines are present…
+      expect(metaSink.lines.any((l) => l.contains('← pub  200')), isTrue);
+      // …but no body is ever written.
+      expect(metaSink.lines.any((l) => l.contains('body:')), isFalse);
+    });
+
+    test('a mapped Tool Error surfaces its 404 status on the ← pub line', () async {
+      final mock = _setUp();
+      _stubGet(mock, '/api/packages/htp/score', _json('', status: 404));
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+
+      final result = await inTracedRequest('#009', () => client.getScore('htp'));
+
+      // The pub boundary shows the failing status…
+      expect(
+        sink.lines.any((l) => l.contains('← pub') && l.contains('404 /api/packages/htp/score')),
+        isTrue,
+      );
+      // …and the client maps it to the ADR-0002 Tool Error the LLM boundary renders.
+      expect(
+        (result as PubDevFailure<PackageScore>).error.code,
+        equals(DomainErrors.packageNotFound),
+      );
     });
   });
 }

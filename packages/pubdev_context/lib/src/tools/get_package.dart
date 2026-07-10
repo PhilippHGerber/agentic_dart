@@ -1,18 +1,19 @@
 /// Handler for the `get_package` MCP tool.
 ///
 /// Returns a full [PackageDetail] for one package, optionally at a pinned
-/// version. Merges metadata from `/api/packages/{name}`, scores from
-/// `/api/packages/{name}/score`, and a README excerpt from the docs page
-/// in a single logical call. Results are cached with a [kPackageMetadataTtl]
-/// TTL.
+/// version. When `version` is omitted the handler resolves the latest stable
+/// version via [PubDevClient.resolveLatestStable] so that the cache key is
+/// always version-anchored (e.g. `package:http:1.6.0`, never `package:http:`).
 ///
-/// Cache key format: `package:<name>:<version>` (version is empty for latest).
+/// Every success response includes `resolvedVersion` as its first JSON key,
+/// reflecting the exact semver used — whether the caller supplied it or the
+/// server inferred it.
+///
+/// Cache key format: `package:<name>:<resolvedVersion>`.
 /// Cache hits are logged at [LoggingLevel.debug].
 ///
 /// Domain errors are returned as [CallToolResult] with [CallToolResult.isError]
 /// `true` and a structured JSON payload — exceptions are never swallowed silently.
-///
-/// See `issues/pub-dev-mcp/06-get-package-tool.md`.
 library;
 
 import 'dart:convert';
@@ -26,10 +27,11 @@ import '../data/pub_client.dart';
 
 /// Handles calls to the `get_package` MCP tool.
 ///
-/// Consults the cache before issuing HTTP requests; stores successful results
-/// with [kPackageMetadataTtl]. Logs cache hits at [LoggingLevel.debug] and
-/// HTTP requests at [LoggingLevel.info]. Error results are not cached so
-/// transient failures can be retried by the next call.
+/// Resolves the latest stable version when no version is supplied so that
+/// the cache key is always pinned to a concrete semver. Consults the cache
+/// before issuing HTTP requests; stores successful results with
+/// [kPackageMetadataTtl]. Error results are not cached so transient failures
+/// can be retried by the next call.
 final class GetPackageHandler {
   /// Creates a [GetPackageHandler].
   ///
@@ -49,43 +51,69 @@ final class GetPackageHandler {
 
   /// Handles a [CallToolRequest] for `get_package`.
   ///
-  /// Looks up [PackageDetail] in cache, or fetches it from pub.dev.
-  /// Returns [CallToolResult.isError] `true` on any domain failure.
+  /// Resolves the version (via [PubDevClient.resolveLatestStable] when absent),
+  /// consults the cache, or fetches from pub.dev. Returns
+  /// [CallToolResult.isError] `true` on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final name = (args['name'] as String?) ?? '';
-    final version = args['version'] as String?;
-
-    final cacheKey = 'package:$name:${version ?? ''}';
+    final suppliedVersion = args['version'] as String?;
 
     _log(
       LoggingLevel.info,
-      'get_package: name=$name${version != null ? ' version=$version' : ''}',
+      'get_package: name=$name${suppliedVersion != null ? ' version=$suppliedVersion' : ''}',
     );
 
+    // ── Resolve version ────────────────────────────────────────────────────────
+
+    final String resolvedVersion;
+    if (suppliedVersion != null) {
+      resolvedVersion = suppliedVersion;
+    } else {
+      _log(LoggingLevel.info, 'get_package: resolving latest stable version for $name');
+      switch (await _client.resolveLatestStable(name)) {
+        case PubDevFailure(:final error):
+          return _domainError(error);
+        case PubDevSuccess(:final value):
+          resolvedVersion = value;
+      }
+      _log(LoggingLevel.debug, 'get_package: resolved version=$resolvedVersion');
+    }
+
+    // ── Cache lookup ───────────────────────────────────────────────────────────
+
+    final cacheKey = 'package:$name:$resolvedVersion';
     final cached = _cache.get(cacheKey);
     if (cached != null) {
       _log(LoggingLevel.debug, 'get_package: cache hit key=$cacheKey');
-      return _success(await cached);
+      return _success(await cached, resolvedVersion);
     }
 
     _log(LoggingLevel.debug, 'get_package: cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'get_package: HTTP request name=$name');
+    _log(LoggingLevel.info, 'get_package: HTTP request name=$name version=$resolvedVersion');
 
-    final result = version != null
-        ? await _client.getPackageVersion(name, version)
+    // ── Fetch ──────────────────────────────────────────────────────────────────
+
+    // Trade-off: when the version was omitted we resolved latest-stable above
+    // (for a version-anchored cache key) and now call getPackage, which fetches
+    // the same latest metadata again — one extra lightweight GET. We accept this
+    // for a stable cache key and simpler control flow rather than threading the
+    // already-resolved detail through the resolver (see plan W4).
+    final result = suppliedVersion != null
+        ? await _client.getPackageVersion(name, resolvedVersion)
         : await _client.getPackage(name);
 
-    if (result case PubDevSuccess(:final value)) {
-      _cache.set(cacheKey, Future.value(value), kPackageMetadataTtl);
-      return _success(value);
+    switch (result) {
+      case PubDevSuccess(:final value):
+        _cache.set(cacheKey, Future.value(value), kPackageMetadataTtl);
+        return _success(value, resolvedVersion);
+      case PubDevFailure(:final error):
+        return _domainError(error);
     }
-
-    return _domainError((result as PubDevFailure<PackageDetail>).error);
   }
 
-  static CallToolResult _success(PackageDetail detail) => CallToolResult(
-    content: [TextContent(text: jsonEncode(_detailToJson(detail)))],
+  static CallToolResult _success(PackageDetail detail, String resolvedVersion) => CallToolResult(
+    content: [TextContent(text: jsonEncode(_detailToJson(detail, resolvedVersion)))],
   );
 
   static CallToolResult _domainError(DomainError error) => CallToolResult(
@@ -93,12 +121,13 @@ final class GetPackageHandler {
     isError: true,
   );
 
-  static Map<String, Object?> _detailToJson(PackageDetail d) => {
+  static Map<String, Object?> _detailToJson(PackageDetail d, String resolvedVersion) => {
+    'resolvedVersion': resolvedVersion,
     'name': d.name,
     'version': d.version,
     'description': d.description,
     'verified': d.verified,
-    if (d.publishedAt != null) 'publishedAt': d.publishedAt!.toIso8601String(),
+    if (d.publishedAt case final ts?) 'publishedAt': ts.toIso8601String(),
     'activeMaintenance': d.activeMaintenance,
     'likes': d.score.likes,
     'pubPoints': d.score.pubPoints,

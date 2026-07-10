@@ -7,7 +7,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- On-disk tarball cache for package source archives with persisted LRU eviction (default cap: 500 MiB), plus CLI configuration via `--cache-dir` and `--max-cache-size`.
+- **`find_symbols`** — search a package's public API for symbols matching a query.
+- **`get_api_diff`** — diff the public API between two versions (added/removed libraries, classes, methods, fields).
+- **`get_source_slice`** — read package source by line range or by AST-located symbol.
+- **`list_package_versions`** — all published versions bucketed into stable/prerelease/retracted.
+- **`pub://package/{name}@{version}/pubspec`** and **`pub://meta/instructions`** resources.
+- On-disk tarball cache with LRU eviction (`--cache-dir`, `--max-cache-size`) and a global request concurrency limiter (`--max-concurrent-requests`).
+- **Wire Trace** — opt-in `--wire-trace` writes a human-readable log of every LLM tool/resource call and pub.dev request to a per-session file under `<cache-dir>/wire-trace`. Off by default; tune with `--wire-trace-dir` and `--wire-trace-max-preview`. See the README.
+
+### Changed
+
+- **Breaking:** package resource URIs are now versioned — `pub://package/{name}@{version}/{resource}`. `{version}` is mandatory; `@latest` resolves to the latest stable and every body is prefixed with a `[Resolved Version: x.y.z]` header.
+- `compare_packages` fetches concurrently and emits the ADR 0002 nested error schema.
+
+### Removed
+
+- **`get_method_body` and `get_package_source_file`** — superseded by `get_source_slice`.
+- **All three MCP prompts** and the `find_alternatives` stub — out of V1 scope; the server no longer advertises the `prompts` capability.
 
 
 ## [0.4.0-rc.2]
