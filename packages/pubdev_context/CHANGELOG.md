@@ -25,6 +25,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`get_method_body` and `get_package_source_file`** — superseded by `get_source_slice`.
 - **All three MCP prompts** and the `find_alternatives` stub — out of V1 scope; the server no longer advertises the `prompts` capability.
 
+### Fixed
+
+- **Wire Trace** — each top-level LLM request now separates from the previous one with a blank line, so interleaved concurrent requests stay visually distinct.
+
 
 ## [0.4.0-rc.2]
 

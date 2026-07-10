@@ -74,10 +74,26 @@ _Avoid_: Error type, error string, exception code
 An LRU, size-capped on-disk store of downloaded `.tar.gz` package archives, keyed by `{name}@{version}`. Default location: `~/.cache/pubdev_context/` (XDG cache dir), overridable via `--cache-dir`. Default cap: 500 MB. Per-tarball download limit: 50 MB; exceeded downloads abort and return a `PACKAGE_TOO_LARGE` Tool Error. Survives server restarts.
 _Avoid_: File cache, package cache (ambiguous with in-memory caches)
 
+**Cache Hit**:
+A `ResponseCache.get()` call that returns a live, non-expired entry for the exact key requested — served with no pub.dev call. Logged to the Wire Trace as `⚡ cache hit`.
+_Avoid_: Warm cache, cached response (favor "Cache Hit" as the noun form)
+
+**Cache Miss**:
+A `ResponseCache.get()` call that finds no entry, or an expired one, for the key requested — the caller must fetch from pub.dev. Distinct from an **Uncached Call**, which renders identically in the Wire Trace but is a different situation.
+_Avoid_: Cold cache
+
+**Uncached Call**:
+A pub.dev request made by a code path that has no cache in front of it at all — there is nothing to check, so nothing can miss. Indistinguishable from a Cache Miss in the current Wire Trace format (both render as a bare `→ pub` line).
+
+**Package Info Cache**:
+The `ResponseCache<Map<String, Object?>>` inside `PubDevClient` for the raw `GET /api/packages/{name}` response, keyed by package name only (the endpoint returns every version, so no version segment is needed), TTL `kPackageMetadataTtl` (15 min). Shared transparently by every `PubDevClient` method touching that endpoint — `resolveLatestStable`, `getPackage`, `listVersions`, `search`'s per-result enrichment — so one package's metadata is fetched from pub.dev at most once per TTL window regardless of how many tools ask for it.
+_Avoid_: Package cache (ambiguous with Tarball Disk Cache), metadata cache
+
 ### Observability
 
 **Wire Trace**:
 The human-readable, chronological file log that records every message crossing the server's two boundaries — the **LLM boundary** (inbound tool/resource calls and the results returned to the LLM) and the **pub.dev boundary** (outbound HTTP requests and their responses). Each line is tagged with a **Correlation Id** so a single LLM request and the pub.dev calls it triggered can be read together. Format is human-first pretty text (never JSON). Written live to a dedicated file the server owns, so `tail -f` works during a session. Bodies are logged as size-capped previews (tarballs: metadata only; HTML endpoints: converted-markdown preview only).
+_Purpose beyond error debugging_: because every pub.dev call and cache hit/miss is visible, Wire Trace is also the instrument for auditing whether the server's caching and fetch strategy actually delivers the token-efficient access promised in this document's opening line — rather than assuming an LLM would do better reading pub.dev data unmediated.
 _Distinct from_: the MCP `log()` notification mechanism (`notifications/message`, client-facing, gated by the client-settable `--log-level`), which is unchanged and orthogonal.
 _Avoid_: Wire log, trace log, debug log, audit log.
 

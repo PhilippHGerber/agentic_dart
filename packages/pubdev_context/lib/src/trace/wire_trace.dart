@@ -215,6 +215,7 @@ final class WireTrace {
 
   bool _enabled;
   int _correlationCounter = 0;
+  bool _inboundCallWritten = false;
 
   /// Whether tracing is currently active. Becomes `false` after an open failure
   /// or a mid-session write failure, after which every method is a no-op.
@@ -242,6 +243,12 @@ final class WireTrace {
 
   /// Logs an inbound LLM-boundary call: `← LLM  {method}  {name}`.
   ///
+  /// A blank line is written immediately before the primary line so each
+  /// top-level LLM request visually separates from the last — including when it
+  /// lands inside another still-open request's interleaved pub.dev lines. The
+  /// very first inbound call of a session is the exception: it follows the
+  /// header's own trailing blank line, so no extra one is written.
+  ///
   /// When [argsJson] is non-null an `args:` continuation line carrying it is
   /// written beneath the primary line. Pass `null` to omit it — for a resource
   /// read the [name] already carries the full request (the URI), so there are
@@ -253,6 +260,8 @@ final class WireTrace {
     String? argsJson,
   }) {
     if (!_enabled) return;
+    if (_inboundCallWritten) _write('');
+    _inboundCallWritten = true;
     _write('${_prefix(id)}  ← LLM   $method  $name');
     if (argsJson != null) {
       _writeContinuation('args', argsJson);

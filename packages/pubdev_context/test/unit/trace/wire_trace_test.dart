@@ -227,6 +227,26 @@ void main() {
       );
     });
 
+    test('separates inbound calls with a blank line but not the first', () {
+      trace
+        ..logInboundCall(id: '#001', method: 'tools/call', name: 'search_packages')
+        ..logInboundCall(id: '#002', method: 'tools/call', name: 'get_package');
+
+      final lines = body();
+      final first = lines.indexWhere((l) => l.contains('#001  ← LLM'));
+      final second = lines.indexWhere((l) => l.contains('#002  ← LLM'));
+
+      // The first inbound call adds no blank line of its own: it sits directly
+      // after the header's single trailing blank line, with header content (the
+      // rule bar) right above that — i.e. exactly one blank, not two.
+      expect(lines[first - 1], isEmpty, reason: "header's trailing blank");
+      expect(lines[first - 2], isNot(isEmpty), reason: 'no extra wrapper blank');
+      // The second inbound call is immediately preceded by a wrapper blank line,
+      // with the first request's content above it.
+      expect(lines[second - 1], isEmpty);
+      expect(lines[second - 2], isNot(isEmpty));
+    });
+
     test('outbound pub request renders → marker and cache-miss context', () {
       trace.logRequest(
         id: '#001',
