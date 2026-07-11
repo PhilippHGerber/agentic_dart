@@ -1,9 +1,9 @@
 /// Handler for the `find_symbols` MCP tool.
 ///
 /// Searches a package's public API for symbols matching a query, backed by the
-/// same dartdoc `index.json` as `browse_api_symbols`. The two tools share the
-/// [kApiIndexCachePrefix] cache key, so a warm index serves both without an
-/// extra download.
+/// same dartdoc `index.json` as `browse_api_symbols`. Both tools resolve the
+/// index through the shared `apiIndex` [KeyedCache] facade, so a warm entry
+/// serves both without an extra download.
 ///
 /// Matching is a case-insensitive substring match against [DartdocSymbol.name],
 /// falling back to a token-based fuzzy match against [DartdocSymbol.desc] for
@@ -27,45 +27,46 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
-import 'browse_api_symbols.dart' show BrowseApiSymbolsHandler, kApiIndexCachePrefix;
+import 'browse_api_symbols.dart' show BrowseApiSymbolsHandler;
 
 /// Maximum number of symbol matches returned in a single response.
 const _kMaxResults = 20;
 
 /// Handles calls to the `find_symbols` MCP tool.
 ///
-/// Consults `cache` before issuing HTTP requests; stores results with
-/// [kApiDocsTtl] under the [kApiIndexCachePrefix]-prefixed key shared with
-/// [BrowseApiSymbolsHandler]. Logs cache activity at [LoggingLevel.debug] and
-/// HTTP requests at [LoggingLevel.info] via `log`.
+/// Resolves the dartdoc symbol index through `apiIndex` before issuing any
+/// HTTP request. Logs at [LoggingLevel.info] via `log`.
 final class FindSymbolsHandler {
   /// Creates a [FindSymbolsHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [cache] is the shared TTL store for
-  /// dartdoc symbol indexes; pass the same instance used by
-  /// [BrowseApiSymbolsHandler] so both tools warm each other's cache. [log]
-  /// receives structured log events at the appropriate [LoggingLevel].
+  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
+  /// [apiIndex] is the shared [KeyedCache] facade (from `CacheRegistry`) that
+  /// resolves and caches the dartdoc symbol index by [ApiIndexId]; pass the
+  /// same instance used by [BrowseApiSymbolsHandler] so both tools warm each
+  /// other's cache. [log] receives structured log events at the appropriate
+  /// [LoggingLevel].
   const FindSymbolsHandler({
     required PubDevClient client,
-    required ResponseCache<List<DartdocSymbol>> cache,
+    required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required void Function(LoggingLevel, Object) log,
   }) : _client = client,
-       _cache = cache,
+       _apiIndex = apiIndex,
        _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<List<DartdocSymbol>> _cache;
+  final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `find_symbols`.
   ///
   /// Validates that both `package` and `query` are present, resolves the
-  /// version (via [PubDevClient.resolveLatestStable] when absent), consults the
-  /// cache, and delegates to [PubDevClient.getApiIndex]. Returns
+  /// version (via [PubDevClient.resolveLatestStable] when absent), and
+  /// resolves the dartdoc symbol index through `apiIndex`. Returns
   /// [CallToolResult.isError] `true` with a structured JSON payload on any
   /// domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
@@ -115,41 +116,12 @@ final class FindSymbolsHandler {
       _log(LoggingLevel.debug, 'find_symbols: resolved version=$resolvedVersion');
     }
 
-    // ── Cache lookup ───────────────────────────────────────────────────────────
+    // ── Resolve the API index ───────────────────────────────────────────────────
 
-    final cacheKey = '$kApiIndexCachePrefix:$package:$resolvedVersion';
-
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'find_symbols: cache hit key=$cacheKey');
-      final symbols = await cached;
-      return _buildResponse(symbols, package, query, resolvedVersion);
-    }
-
-    _log(LoggingLevel.debug, 'find_symbols: cache miss key=$cacheKey');
-
-    final future = _client.getApiIndex(package, version: resolvedVersion);
-
-    _cache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => <DartdocSymbol>[],
-        },
-      ),
-      kApiDocsTtl,
-    );
-
-    _log(LoggingLevel.info, 'find_symbols: HTTP request package=$package');
-
-    final result = await future;
+    final result = await _apiIndex.resolve((name: package, version: resolvedVersion));
 
     return switch (result) {
       PubDevSuccess(:final value) => _buildResponse(value, package, query, resolvedVersion),
-      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound => _domainError(
-        _kNoDocumentation,
-      ),
       PubDevFailure(:final error) => _domainError(error),
     };
   }

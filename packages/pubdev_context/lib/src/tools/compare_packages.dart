@@ -1,11 +1,13 @@
 /// Handler for the `compare_packages` MCP tool.
 ///
 /// [ComparePackagesHandler] compares 2–5 packages side by side, returning a
-/// [_ComparisonMatrix]. Packages are fetched using the shared package-metadata
-/// cache (same key format as `GetPackageHandler`) so prior `get_package` calls
-/// are served from cache at no extra cost. Requests for uncached packages are
-/// gated by the global concurrency limiter inside [PubDevClient], which caps
-/// the number of in-flight pub.dev requests across the whole server.
+/// [_ComparisonMatrix]. Each package's [PackageDetail] is resolved through the
+/// shared `packageDetail` [KeyedCache] facade (from `CacheRegistry`, keyed by
+/// `(name, version)`) after resolving its Latest Stable Version, so a prior
+/// `get_package` call for the same package and resolved version is reused
+/// rather than re-fetched. Requests for uncached packages are gated by the
+/// global concurrency limiter inside [PubDevClient], which caps the number of
+/// in-flight pub.dev requests across the whole server.
 ///
 /// Domain errors are returned as [CallToolResult] with [CallToolResult.isError]
 /// `true` and a structured JSON payload — exceptions are never swallowed
@@ -20,34 +22,36 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 
 /// Handles calls to the `compare_packages` MCP tool.
 ///
-/// Constructor dependencies are `client`, `cache`, and `log`. The `cache`
-/// should be the same [ResponseCache] instance shared with `GetPackageHandler`
-/// so that prior `get_package` calls are reused. Packages are fetched
-/// concurrently; the global concurrency limiter inside [PubDevClient] bounds
-/// the number of simultaneous pub.dev requests.
+/// Constructor dependencies are `client`, `packageDetail`, and `log`. The
+/// `packageDetail` facade should be the same [KeyedCache] instance shared with
+/// `GetPackageHandler` so that prior `get_package` calls are reused. Packages
+/// are fetched concurrently; the global concurrency limiter inside
+/// [PubDevClient] bounds the number of simultaneous pub.dev requests.
 final class ComparePackagesHandler {
   /// Creates a [ComparePackagesHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [cache] is the shared TTL store for
-  /// [PackageDetail] values (same instance as used by `GetPackageHandler`).
-  /// [log] receives structured log events at the appropriate [LoggingLevel].
+  /// [client] is the pub.dev HTTP gateway, used for Latest Stable Version
+  /// resolution. [packageDetail] is the shared [KeyedCache] facade (same
+  /// instance as used by `GetPackageHandler`). [log] receives structured log
+  /// events at the appropriate [LoggingLevel].
   const ComparePackagesHandler({
     required PubDevClient client,
-    required ResponseCache<PackageDetail> cache,
+    required KeyedCache<PackageDetailId, PackageDetail> packageDetail,
     required void Function(LoggingLevel, Object) log,
   }) : _client = client,
-       _cache = cache,
+       _packageDetail = packageDetail,
        _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<PackageDetail> _cache;
+  final KeyedCache<PackageDetailId, PackageDetail> _packageDetail;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `compare_packages`.
@@ -123,6 +127,12 @@ final class ComparePackagesHandler {
 
   /// Fetches one package, mapping any thrown error to a [PubDevFailure].
   ///
+  /// Resolves the Latest Stable Version first — a Package Info Cache hit under
+  /// ADR-0004, not a fresh pub.dev round-trip — so the subsequent
+  /// `packageDetail` lookup is version-anchored and shares its entry with
+  /// `get_package`. A resolve failure demotes into the caller's `errors` map
+  /// exactly as a fetch failure does, preserving graceful degradation.
+  ///
   /// This handler fans out across [Future.wait]; an exception escaping here
   /// (e.g. a `TimeoutException` from the README fetch or a socket error not
   /// caught by [PubDevClient]'s [RetryPolicy]) would abort the *entire*
@@ -130,20 +140,18 @@ final class ComparePackagesHandler {
   /// Guaranteeing a [PubDevResult] return keeps the documented
   /// graceful-degradation contract intact.
   Future<PubDevResult<PackageDetail>> _fetchPackage(String name) async {
-    final cacheKey = 'package:$name:';
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'compare_packages: cache hit key=$cacheKey');
-      return PubDevSuccess(await cached);
-    }
-    _log(LoggingLevel.debug, 'compare_packages: cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'compare_packages: HTTP request name=$name');
     try {
-      final result = await _client.getPackage(name);
-      if (result case PubDevSuccess(:final value)) {
-        _cache.set(cacheKey, Future.value(value), kPackageMetadataTtl);
+      final versionResult = await _client.resolveLatestStable(name);
+      switch (versionResult) {
+        case PubDevFailure(:final error):
+          return PubDevFailure(error);
+        case PubDevSuccess(:final value):
+          return await _packageDetail.resolve((
+            name: name,
+            version: value,
+            pinned: false,
+          ));
       }
-      return result;
     } on Object catch (error) {
       _log(
         LoggingLevel.warning,

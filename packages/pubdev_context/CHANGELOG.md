@@ -3,6 +3,12 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0-rc.5]
+
+### Changed
+
+- Handler caching (package metadata, API indexes, source files, ASTs, search and version lists) was consolidated onto a single caching layer. Concurrent tool calls for the same package — e.g. `browse_api_symbols`, `find_symbols`, and `get_symbol_documentation` in one agent turn — now share a single pub.dev fetch instead of issuing redundant requests, and `get_package` / `compare_packages` share one cache entry per package version instead of fetching and caching it twice. No change to tool inputs, outputs, or error codes.
+
 ## [0.4.0-rc.4]
 
 ### Added
@@ -19,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Breaking:** package resource URIs are now versioned — `pub://package/{name}@{version}/{resource}`. `{version}` is mandatory; `@latest` resolves to the latest stable and every body is prefixed with a `[Resolved Version: x.y.z]` header.
 - `compare_packages` fetches concurrently and emits the ADR 0002 nested error schema.
+
 
 ### Removed
 

@@ -7,9 +7,8 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
-import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/list_package_versions.dart';
 import 'package:test/test.dart';
@@ -68,11 +67,10 @@ List<String> _versions(CallToolResult result, String bucket) =>
 void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
-  late ResponseCache<List<PackageVersion>> cache;
+  late CacheRegistry registry;
 
   ListPackageVersionsHandler buildHandler() => ListPackageVersionsHandler(
-    client: client,
-    cache: cache,
+    versionList: registry.versionList,
     log: (_, _) {},
   );
 
@@ -80,7 +78,7 @@ void main() {
     mockHttp = _MockHttpClient();
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    cache = ResponseCache<List<PackageVersion>>();
+    registry = CacheRegistry(client: client);
   });
 
   tearDown(() => client.close());

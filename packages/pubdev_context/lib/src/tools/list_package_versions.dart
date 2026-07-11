@@ -9,6 +9,11 @@
 /// This tool takes no `version` parameter and therefore emits no
 /// `resolvedVersion` field.
 ///
+/// The full version list is resolved through the shared `versionList`
+/// [KeyedCache] facade (from `CacheRegistry`), keyed by package `name`
+/// ([VersionListId]) — the cache-key format, TTL, and skip-on-failure policy
+/// all live there. The same facade backs the server's `{version}` autocomplete.
+///
 /// See `issues/pubdev-context-v1/06-list-package-versions.md`.
 library;
 
@@ -16,17 +21,10 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
-
-/// Cache-key prefix for the full published-version list of a package.
-///
-/// Full key format: `$kVersionsCachePrefix:<packageName>`. Shared with the
-/// server completion handler so `{version}` autocompletion can read the same
-/// cache this tool warms.
-const kVersionsCachePrefix = 'versions';
 
 // ─── Domain error constants ───────────────────────────────────────────────────
 
@@ -40,31 +38,26 @@ const _missingName = DomainError(
 
 /// Handles calls to the `list_package_versions` MCP tool.
 ///
-/// Consults the cache before issuing HTTP requests; stores the full parsed
-/// [PackageVersion] list under [kPackageVersionsTtl] so repeat calls are served
-/// without a network round-trip. HTTP failures are not cached so transient
-/// errors can be retried.
+/// Resolves through `versionList` before issuing any HTTP request.
 final class ListPackageVersionsHandler {
   /// Creates a [ListPackageVersionsHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [cache] holds the full unbucketed
-  /// version list keyed by package name. [log] receives structured log events
-  /// at the appropriate [LoggingLevel].
+  /// [versionList] is the shared [KeyedCache] facade (from `CacheRegistry`)
+  /// that resolves and caches the full unbucketed version list by
+  /// [VersionListId]. [log] receives structured log events at the appropriate
+  /// [LoggingLevel].
   const ListPackageVersionsHandler({
-    required PubDevClient client,
-    required ResponseCache<List<PackageVersion>> cache,
+    required KeyedCache<VersionListId, List<PackageVersion>> versionList,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
-       _cache = cache,
+  }) : _versionList = versionList,
        _log = log;
 
-  final PubDevClient _client;
-  final ResponseCache<List<PackageVersion>> _cache;
+  final KeyedCache<VersionListId, List<PackageVersion>> _versionList;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `list_package_versions`.
   ///
-  /// Fetches the version list from cache or pub.dev, buckets it into
+  /// Resolves the version list through `versionList`, buckets it into
   /// `stable` / `prerelease` / `retracted`, and returns each bucket sorted
   /// newest-first. Returns [CallToolResult.isError] `true` on any domain
   /// failure — including [DomainErrors.packageNotFound] for unknown packages.
@@ -76,17 +69,7 @@ final class ListPackageVersionsHandler {
 
     _log(LoggingLevel.info, 'list_package_versions: name=$name');
 
-    final cacheKey = '$kVersionsCachePrefix:$name';
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'list_package_versions: cache hit key=$cacheKey');
-      return _success(name, await cached);
-    }
-
-    _log(LoggingLevel.debug, 'list_package_versions: cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'list_package_versions: HTTP request name=$name');
-
-    switch (await _client.listVersions(name)) {
+    switch (await _versionList.resolve((name: name))) {
       case PubDevFailure(:final error):
         _log(
           LoggingLevel.warning,
@@ -94,7 +77,6 @@ final class ListPackageVersionsHandler {
         );
         return _domainError(error);
       case PubDevSuccess(:final value):
-        _cache.set(cacheKey, Future.value(value), kPackageVersionsTtl);
         return _success(name, value);
     }
   }

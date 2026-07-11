@@ -9,7 +9,7 @@ import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/list_package_source_files.dart';
@@ -136,13 +136,12 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
-  late ResponseCache<Map<String, String>> cache;
-  final loggedMessages = <(LoggingLevel, Object)>[];
+  late CacheRegistry registry;
 
   ListPackageSourceFilesHandler buildHandler() => ListPackageSourceFilesHandler(
     client: client,
-    cache: cache,
-    log: (level, data) => loggedMessages.add((level, data)),
+    sourceFiles: registry.sourceFiles,
+    log: (_, _) {},
   );
 
   setUp(() {
@@ -150,8 +149,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    cache = ResponseCache();
-    loggedMessages.clear();
+    registry = CacheRegistry(client: client);
   });
 
   tearDown(() => client.close());
@@ -411,20 +409,6 @@ void main() {
           ),
         ),
       ).called(1);
-    });
-
-    test('logs a debug cache-hit message on the second call', () async {
-      _stubTarball(mockHttp, _defaultFiles);
-      final handler = buildHandler();
-
-      await handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
-      loggedMessages.clear();
-      await handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
     });
 
     test('concurrent calls share one in-flight download (stampede prevention)', () async {

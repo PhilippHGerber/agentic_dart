@@ -9,10 +9,10 @@ library;
 import 'dart:io';
 
 import 'package:dart_mcp/stdio.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
 import 'package:pubdev_context/src/cache/tarball_disk_cache.dart';
 import 'package:pubdev_context/src/config/config.dart';
-import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/server.dart';
 import 'package:pubdev_context/src/trace/wire_trace.dart';
@@ -122,31 +122,13 @@ Future<void> main(List<String> args) async {
     trace: trace,
   );
 
-  final searchCache = ResponseCache<List<PackageSummary>>(trace: trace);
-  final packageCache = ResponseCache<PackageDetail>(trace: trace);
-  final packageVersionsCache = ResponseCache<List<PackageVersion>>(trace: trace);
-  final changelogCache = ResponseCache<List<ChangelogEntry>>(trace: trace);
-  final changelogRawCache = ResponseCache<String>(trace: trace);
-  final apiIndexCache = ResponseCache<List<DartdocSymbol>>(trace: trace);
-  final readmeCache = ResponseCache<String>(trace: trace);
-  final symbolDocCache = ResponseCache<String>(trace: trace);
-  final sourceFilesCache = ResponseCache<Map<String, String>>(trace: trace);
-  final metaCache = ResponseCache<String>(trace: trace);
+  final cacheRegistry = CacheRegistry(client: client, trace: trace);
 
   final server = PubMcpServer(
     stdioChannel(input: stdin, output: stdout),
     config: config,
     client: client,
-    searchCache: searchCache,
-    packageCache: packageCache,
-    packageVersionsCache: packageVersionsCache,
-    changelogCache: changelogCache,
-    changelogRawCache: changelogRawCache,
-    apiIndexCache: apiIndexCache,
-    readmeCache: readmeCache,
-    symbolDocCache: symbolDocCache,
-    sourceFilesCache: sourceFilesCache,
-    metaCache: metaCache,
+    cacheRegistry: cacheRegistry,
     trace: trace,
   );
 

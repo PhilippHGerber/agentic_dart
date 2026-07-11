@@ -16,9 +16,8 @@ import 'dart:io';
 import 'package:dart_mcp/client.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/config/config.dart';
-import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/server.dart';
 import 'package:pubdev_context/src/trace/wire_trace.dart';
@@ -117,20 +116,12 @@ void main() {
     );
     final activeTrace = trace;
     final (clientChannel, serverChannel) = _inProcessChannels();
+    final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: activeTrace);
     server = PubMcpServer(
       serverChannel,
       config: const PubMcpConfig(),
-      client: PubDevClient(httpClient: mock, retryPolicy: _instant, trace: activeTrace),
-      searchCache: ResponseCache<List<PackageSummary>>(trace: activeTrace),
-      packageCache: ResponseCache<PackageDetail>(trace: activeTrace),
-      packageVersionsCache: ResponseCache<List<PackageVersion>>(trace: activeTrace),
-      changelogCache: ResponseCache<List<ChangelogEntry>>(trace: activeTrace),
-      changelogRawCache: ResponseCache<String>(trace: activeTrace),
-      apiIndexCache: ResponseCache<List<DartdocSymbol>>(trace: activeTrace),
-      readmeCache: ResponseCache<String>(trace: activeTrace),
-      symbolDocCache: ResponseCache<String>(trace: activeTrace),
-      sourceFilesCache: ResponseCache<Map<String, String>>(trace: activeTrace),
-      metaCache: ResponseCache<String>(trace: activeTrace),
+      client: client,
+      cacheRegistry: CacheRegistry(client: client, trace: activeTrace),
       trace: activeTrace,
     );
     serverConnection = testClient.connectServer(clientChannel);
@@ -187,95 +178,101 @@ void main() {
     expect(response, contains('JSON'));
   });
 
-  test('a cached tool call shows a cache-hit line and no pub.dev lines, under its own id', () async {
-    _stubGet(mock, '/api/packages/http', _jsonFile('package_info.json'));
+  test(
+    'a cached tool call shows a cache-hit line and no pub.dev lines, under its own id',
+    () async {
+      _stubGet(mock, '/api/packages/http', _jsonFile('package_info.json'));
 
-    await connect();
-    // First call warms the cache (and produces pub lines under its own id).
-    await serverConnection.callTool(
-      CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
-    );
-    // Second call must be served from cache: a ⚡ cache hit and no new pub call.
-    await serverConnection.callTool(
-      CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
-    );
-
-    final lines = traceLines();
-    final cacheHit = lines.firstWhere(
-      (l) => l.contains('⚡ cache hit  versions:http'),
-    );
-    final hitId = _idOf(cacheHit);
-    expect(hitId, isNotNull);
-
-    // Exactly one pub request went out across both calls — the second was cached.
-    expect(
-      lines.where((l) => l.contains('→ pub  GET /api/packages/http')),
-      hasLength(1),
-    );
-
-    // The cache hit belongs to the second inbound call, and no pub line shares
-    // that id.
-    final inboundIds = lines
-        .where((l) => l.contains('← LLM   tools/call  list_package_versions'))
-        .map(_idOf)
-        .toList();
-    expect(inboundIds, hasLength(2));
-    expect(inboundIds.last, equals(hitId));
-    expect(
-      lines.where((l) => (l.contains('→ pub') || l.contains('← pub')) && _idOf(l) == hitId),
-      isEmpty,
-    );
-  });
-
-  test('two concurrent tool calls stay fully attributable by id — no cross-contamination', () async {
-    // Delay the responses so the two calls are genuinely in flight together and
-    // their boundary lines interleave in the file.
-    _stubGet(
-      mock,
-      '/api/packages/http',
-      _jsonFile('package_info.json'),
-      delay: const Duration(milliseconds: 30),
-    );
-    _stubGet(
-      mock,
-      '/api/packages/dio',
-      _jsonFile('package_info.json'),
-      delay: const Duration(milliseconds: 30),
-    );
-
-    await connect();
-    await Future.wait([
-      serverConnection.callTool(
+      await connect();
+      // First call warms the cache (and produces pub lines under its own id).
+      await serverConnection.callTool(
         CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
-      ),
-      serverConnection.callTool(
-        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'dio'}),
-      ),
-    ]);
+      );
+      // Second call must be served from cache: a ⚡ cache hit and no new pub call.
+      await serverConnection.callTool(
+        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+      );
 
-    final lines = traceLines();
-    final reqHttp = lines.firstWhere((l) => l.contains('→ pub  GET /api/packages/http'));
-    final reqDio = lines.firstWhere((l) => l.contains('→ pub  GET /api/packages/dio'));
-    final resHttp = lines.firstWhere((l) => l.contains('← pub  200 /api/packages/http'));
-    final resDio = lines.firstWhere((l) => l.contains('← pub  200 /api/packages/dio'));
+      final lines = traceLines();
+      final cacheHit = lines.firstWhere(
+        (l) => l.contains('⚡ cache hit  versions:http'),
+      );
+      final hitId = _idOf(cacheHit);
+      expect(hitId, isNotNull);
 
-    final idHttp = _idOf(reqHttp);
-    final idDio = _idOf(reqDio);
-    expect(idHttp, isNotNull);
-    expect(idDio, isNotNull);
-    // The two requests carry distinct ids…
-    expect(idHttp, isNot(equals(idDio)));
-    // …and each response is attributed to its own request's id.
-    expect(_idOf(resHttp), equals(idHttp));
-    expect(_idOf(resDio), equals(idDio));
+      // Exactly one pub request went out across both calls — the second was cached.
+      expect(
+        lines.where((l) => l.contains('→ pub  GET /api/packages/http')),
+        hasLength(1),
+      );
 
-    // No pub line carrying the http id ever mentions the dio package, and vice
-    // versa: the Zone kept each request's traffic on its own id.
-    for (final line in lines.where((l) => l.contains('pub') && _idOf(l) == idHttp)) {
-      expect(line, isNot(contains('/dio')));
-    }
-    for (final line in lines.where((l) => l.contains('pub') && _idOf(l) == idDio)) {
-      expect(line, isNot(contains('/http')));
-    }
-  });
+      // The cache hit belongs to the second inbound call, and no pub line shares
+      // that id.
+      final inboundIds = lines
+          .where((l) => l.contains('← LLM   tools/call  list_package_versions'))
+          .map(_idOf)
+          .toList();
+      expect(inboundIds, hasLength(2));
+      expect(inboundIds.last, equals(hitId));
+      expect(
+        lines.where((l) => (l.contains('→ pub') || l.contains('← pub')) && _idOf(l) == hitId),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'two concurrent tool calls stay fully attributable by id — no cross-contamination',
+    () async {
+      // Delay the responses so the two calls are genuinely in flight together and
+      // their boundary lines interleave in the file.
+      _stubGet(
+        mock,
+        '/api/packages/http',
+        _jsonFile('package_info.json'),
+        delay: const Duration(milliseconds: 30),
+      );
+      _stubGet(
+        mock,
+        '/api/packages/dio',
+        _jsonFile('package_info.json'),
+        delay: const Duration(milliseconds: 30),
+      );
+
+      await connect();
+      await Future.wait([
+        serverConnection.callTool(
+          CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+        ),
+        serverConnection.callTool(
+          CallToolRequest(name: 'list_package_versions', arguments: {'name': 'dio'}),
+        ),
+      ]);
+
+      final lines = traceLines();
+      final reqHttp = lines.firstWhere((l) => l.contains('→ pub  GET /api/packages/http'));
+      final reqDio = lines.firstWhere((l) => l.contains('→ pub  GET /api/packages/dio'));
+      final resHttp = lines.firstWhere((l) => l.contains('← pub  200 /api/packages/http'));
+      final resDio = lines.firstWhere((l) => l.contains('← pub  200 /api/packages/dio'));
+
+      final idHttp = _idOf(reqHttp);
+      final idDio = _idOf(reqDio);
+      expect(idHttp, isNotNull);
+      expect(idDio, isNotNull);
+      // The two requests carry distinct ids…
+      expect(idHttp, isNot(equals(idDio)));
+      // …and each response is attributed to its own request's id.
+      expect(_idOf(resHttp), equals(idHttp));
+      expect(_idOf(resDio), equals(idDio));
+
+      // No pub line carrying the http id ever mentions the dio package, and vice
+      // versa: the Zone kept each request's traffic on its own id.
+      for (final line in lines.where((l) => l.contains('pub') && _idOf(l) == idHttp)) {
+        expect(line, isNot(contains('/dio')));
+      }
+      for (final line in lines.where((l) => l.contains('pub') && _idOf(l) == idDio)) {
+        expect(line, isNot(contains('/http')));
+      }
+    },
+  );
 }

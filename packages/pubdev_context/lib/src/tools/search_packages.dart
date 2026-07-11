@@ -4,9 +4,10 @@
 /// Returns a `List<PackageSummary>` with computed [PackageSummary.activeMaintenance]
 /// and [PackageSummary.daysSinceUpdate] fields.
 ///
-/// Cache key format: `search:<query>:<limit>:<page>:<sdk>:<sort>:<platform>`.
-/// Results are cached with a [kSearchResultsTtl] TTL. Cache hits are logged
-/// at [LoggingLevel.debug].
+/// Results are resolved through the shared `searchResults` [KeyedCache] facade
+/// (from `CacheRegistry`), keyed by the full query tuple ([SearchResultsId]) —
+/// the cache-key format, TTL, and skip-on-failure policy all live there. The
+/// same facade backs the server's `{name}` autocomplete.
 ///
 /// Domain errors are returned as [CallToolResult] with [CallToolResult.isError]
 /// `true` and a structured JSON payload — exceptions are never swallowed silently.
@@ -18,41 +19,38 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
 
 /// Well-known error code returned when the caller supplies an invalid input.
 const String _kInvalidInput = DomainErrors.invalidArgument;
 
 /// Handles calls to the `search_packages` MCP tool.
 ///
-/// Consults `cache` before issuing HTTP requests; stores results with
-/// [kSearchResultsTtl]. Logs cache hits at [LoggingLevel.debug] and HTTP
-/// requests at [LoggingLevel.info] via `log`.
+/// Resolves through `searchResults` before issuing any HTTP request. Logs at
+/// [LoggingLevel.info] via `log`.
 final class SearchPackagesHandler {
   /// Creates a [SearchPackagesHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [cache] is the shared TTL store.
+  /// [searchResults] is the shared [KeyedCache] facade (from `CacheRegistry`)
+  /// that resolves and caches a search-results page by [SearchResultsId].
   /// [log] receives structured log events at the appropriate [LoggingLevel].
   const SearchPackagesHandler({
-    required PubDevClient client,
-    required ResponseCache<List<PackageSummary>> cache,
+    required KeyedCache<SearchResultsId, List<PackageSummary>> searchResults,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
-       _cache = cache,
+  }) : _searchResults = searchResults,
        _log = log;
 
-  final PubDevClient _client;
-  final ResponseCache<List<PackageSummary>> _cache;
+  final KeyedCache<SearchResultsId, List<PackageSummary>> _searchResults;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `search_packages`.
   ///
-  /// Validates `limit` against the 20-result cap, consults the cache, and
-  /// delegates to [PubDevClient.search]. Returns [CallToolResult.isError] `true`
-  /// with a structured JSON payload on any domain failure.
+  /// Validates `limit` against the 20-result cap, then resolves the page
+  /// through `searchResults`. Returns [CallToolResult.isError] `true` with a
+  /// structured JSON payload on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
 
@@ -75,40 +73,14 @@ final class SearchPackagesHandler {
 
     _log(LoggingLevel.info, 'search_packages: query=$query limit=$limit page=$page');
 
-    final cacheKey = 'search:$query:$limit:$page:${sdk ?? ''}:$sort:${platform ?? ''}';
-
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'search_packages: cache hit key=$cacheKey');
-      final summaries = await cached;
-      return _success(summaries);
-    }
-
-    _log(LoggingLevel.debug, 'search_packages: cache miss key=$cacheKey');
-
-    final future = _client.search(
-      query,
-      sort: sort,
-      sdk: sdk,
-      platform: platform,
-      page: page,
+    final result = await _searchResults.resolve((
+      query: query,
       limit: limit,
-    );
-
-    _cache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => <PackageSummary>[],
-        },
-      ),
-      kSearchResultsTtl,
-    );
-
-    _log(LoggingLevel.info, 'search_packages: HTTP request query=$query');
-
-    final result = await future;
+      page: page,
+      sdk: sdk,
+      sort: sort,
+      platform: platform,
+    ));
 
     return switch (result) {
       PubDevSuccess(:final value) => _success(value),

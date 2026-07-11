@@ -10,7 +10,8 @@ import 'dart:convert';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
+import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/resources/meta_resources.dart';
 import 'package:pubdev_context/src/tools/tool_definitions.dart';
 import 'package:test/test.dart';
@@ -56,24 +57,22 @@ ReadResourceRequest _request(String uri) => ReadResourceRequest(uri: uri);
 void main() {
   late _MockHttpClient mockHttp;
   late DateTime fakeNow;
-  late ResponseCache<String> cache;
-  final loggedMessages = <(LoggingLevel, Object)>[];
+  late CacheRegistry registry;
 
   const kTestManifest = '[{"uri":"pub://meta/scoring"}]';
 
-  MetaResourcesHandler buildHandler() => MetaResourcesHandler(
-    httpClient: mockHttp,
-    cache: cache,
-    log: (level, data) => loggedMessages.add((level, data)),
-    resourcesManifest: kTestManifest,
-  );
+  MetaResourcesHandler buildHandler() =>
+      MetaResourcesHandler(meta: registry.meta, resourcesManifest: kTestManifest);
 
   setUp(() {
     mockHttp = _MockHttpClient();
     registerFallbackValue(Uri.parse('https://example.com'));
     fakeNow = DateTime(2025, 5, 10);
-    cache = ResponseCache(clock: () => fakeNow);
-    loggedMessages.clear();
+    registry = CacheRegistry(
+      client: PubDevClient(),
+      metaHttpClient: mockHttp,
+      clock: () => fakeNow,
+    );
   });
 
   // ─── Scoring resource ────────────────────────────────────────────────────────
@@ -108,16 +107,6 @@ void main() {
       expect(content, equals(kScoringContent));
     });
 
-    test('logs a debug cache-miss message on first access', () async {
-      await buildHandler().handleScoring(_request('pub://meta/scoring'));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString())
-          .toList();
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
-
     test('returns the scoring content on second access served from cache', () async {
       final handler = buildHandler();
 
@@ -127,20 +116,6 @@ void main() {
 
       final content = (result.contents.single as TextResourceContents).text;
       expect(content, equals(kScoringContent));
-    });
-
-    test('logs a debug cache-hit message on second access', () async {
-      final handler = buildHandler();
-
-      await handler.handleScoring(_request('pub://meta/scoring'));
-      fakeNow = fakeNow.add(const Duration(hours: 1));
-      await handler.handleScoring(_request('pub://meta/scoring'));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString())
-          .toList();
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
     });
 
     test('does not call the HTTP client on second access', () async {
@@ -219,30 +194,6 @@ void main() {
       expect(content.uri, equals('pub://meta/sdk-versions'));
     });
 
-    test('logs a debug cache-miss message on first access', () async {
-      _stubSdkVersionsEndpoints(mockHttp);
-
-      await buildHandler().handleSdkVersions(_request('pub://meta/sdk-versions'));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString())
-          .toList();
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
-
-    test('logs an info message when issuing the HTTP fetch', () async {
-      _stubSdkVersionsEndpoints(mockHttp);
-
-      await buildHandler().handleSdkVersions(_request('pub://meta/sdk-versions'));
-
-      final infoLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.info)
-          .map((m) => m.$2.toString())
-          .toList();
-      expect(infoLogs.any((m) => m.contains('HTTP fetch')), isTrue);
-    });
-
     test('returns a cached result on second access without making HTTP calls', () async {
       _stubSdkVersionsEndpoints(mockHttp);
       final handler = buildHandler();
@@ -256,21 +207,6 @@ void main() {
           any(that: predicate<Uri>((u) => u.toString().contains('dart-archive'))),
         ),
       ).called(1);
-    });
-
-    test('logs a debug cache-hit message on second access', () async {
-      _stubSdkVersionsEndpoints(mockHttp);
-      final handler = buildHandler();
-
-      await handler.handleSdkVersions(_request('pub://meta/sdk-versions'));
-      fakeNow = fakeNow.add(const Duration(hours: 1));
-      await handler.handleSdkVersions(_request('pub://meta/sdk-versions'));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString())
-          .toList();
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
     });
 
     test('re-fetches both endpoints after the 24-hour TTL expires', () async {

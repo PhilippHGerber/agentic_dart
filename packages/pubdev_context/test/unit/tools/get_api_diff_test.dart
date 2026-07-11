@@ -7,11 +7,11 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
+import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
-import 'package:pubdev_context/src/tools/browse_api_symbols.dart' show kApiIndexCachePrefix;
 import 'package:pubdev_context/src/tools/get_api_diff.dart';
 import 'package:test/test.dart';
 
@@ -83,12 +83,11 @@ void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
   late DateTime fakeNow;
-  late ResponseCache<List<DartdocSymbol>> cache;
+  late KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetApiDiffHandler buildHandler() => GetApiDiffHandler(
-    client: client,
-    cache: cache,
+    apiIndex: apiIndex,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -97,7 +96,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    cache = ResponseCache(clock: () => fakeNow);
+    apiIndex = CacheRegistry(client: client, clock: () => fakeNow).apiIndex;
     loggedMessages.clear();
   });
 
@@ -334,27 +333,25 @@ void main() {
   // ─── Caching ──────────────────────────────────────────────────────────────────
 
   group('caching', () {
-    test('caches both version indexes under the shared api_index key', () async {
+    test('caches both version indexes in the shared apiIndex facade', () async {
       stubBothVersions();
       await buildHandler().call(diffRequest());
 
-      expect(cache.get('$kApiIndexCachePrefix:http:0.13.0'), isNotNull);
-      expect(cache.get('$kApiIndexCachePrefix:http:1.2.0'), isNotNull);
+      expect(await apiIndex.peek((name: 'http', version: '0.13.0')), isNotNull);
+      expect(await apiIndex.peek((name: 'http', version: '1.2.0')), isNotNull);
     });
 
     test('reuses a warm cache entry without issuing an HTTP request', () async {
-      // Only the from-version needs a live fetch; pre-seed the to-version.
+      // Only the from-version needs a live fetch; the to-version is already warm.
       _stubIndexJson(mockHttp, version: '0.13.0', fixture: 'api_diff_from.json');
-      final toSymbols = (jsonDecode(_readFixture('api_diff_to.json')) as List<Object?>)
-          .whereType<Map<String, Object?>>()
-          .map(DartdocSymbol.fromJson)
-          .toList();
-      cache.set('$kApiIndexCachePrefix:http:1.2.0', Future.value(toSymbols), kApiDocsTtl);
+      _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
+      await apiIndex.resolve((name: 'http', version: '1.2.0'));
 
       final result = await buildHandler().call(diffRequest());
 
       expect(result.isError, isNull);
-      verifyNever(
+      // Exactly the warm-up fetch above — the diff request itself was a hit.
+      verify(
         () => mockHttp.get(
           any(
             that: predicate<Uri>(
@@ -363,10 +360,10 @@ void main() {
           ),
           headers: any(named: 'headers'),
         ),
-      );
+      ).called(1);
     });
 
-    test('a warm cache is shared with browse_api_symbols (same key prefix)', () async {
+    test('a second diff over the same versions issues no further HTTP requests', () async {
       stubBothVersions();
       final handler = buildHandler();
 

@@ -7,7 +7,8 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
+import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
@@ -104,12 +105,12 @@ void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
   late DateTime fakeNow;
-  late ResponseCache<PackageDetail> cache;
+  late KeyedCache<PackageDetailId, PackageDetail> packageDetail;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetPackageHandler buildHandler() => GetPackageHandler(
     client: client,
-    cache: cache,
+    packageDetail: packageDetail,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -118,7 +119,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2026, 5, 12);
-    cache = ResponseCache(clock: () => fakeNow);
+    packageDetail = CacheRegistry(client: client, clock: () => fakeNow).packageDetail;
     loggedMessages.clear();
   });
 
@@ -401,22 +402,7 @@ void main() {
       ).called(4);
     });
 
-    test('logs a debug cache-hit message on the second call', () async {
-      _stubSuccess(mockHttp);
-      final handler = buildHandler();
-
-      await handler.call(_request({'name': 'http'}));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 14));
-      await handler.call(_request({'name': 'http'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
-
-    test('uses a separate cache key for version-pinned requests', () async {
+    test('fetches version-pinned requests independently of the latest entry', () async {
       _stubSuccess(mockHttp);
       _stubVersionSuccess(mockHttp, '1.5.0');
       final handler = buildHandler();
@@ -440,18 +426,7 @@ void main() {
   // ─── Cache miss ─────────────────────────────────────────────────────────────
 
   group('cache miss', () {
-    test('logs a debug cache-miss message on first call', () async {
-      _stubSuccess(mockHttp);
-
-      await buildHandler().call(_request({'name': 'http'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
-
-    test('logs an info HTTP-request message containing the package name', () async {
+    test('logs an info message containing the package name', () async {
       _stubSuccess(mockHttp);
 
       await buildHandler().call(_request({'name': 'http'}));

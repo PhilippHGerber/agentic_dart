@@ -51,11 +51,15 @@
 ///
 /// ## Caches
 ///
-/// Source files: `source:<name>:<version>` — shared with
-/// `list_package_source_files`.
+/// Source files are resolved through the shared `sourceFiles` [KeyedCache]
+/// facade (from `CacheRegistry`), keyed by `(package, resolvedVersion)`. That
+/// facade is also shared by `get_throw_statements`, `list_package_source_files`,
+/// and the `pubspec` package resource.
 ///
-/// AST snapshots: `ast:<name>:<version>:<filepath>` — shared with
-/// `get_throw_statements` when the same `astCache` instance is injected.
+/// AST snapshots are resolved through the shared `ast` [KeyedCache] facade,
+/// keyed by the file coordinate `(package, resolvedVersion, filepath)`.
+/// That facade is shared with `get_throw_statements`, so the same source file
+/// is never parsed twice across a single agent turn.
 ///
 /// ## Domain errors
 ///
@@ -65,54 +69,44 @@
 /// - `INVALID_ARGUMENT` (`file` missing, or path contains `..` segments)
 library;
 
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:analyzer/dart/analysis/results.dart';
-import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/source/line_info.dart';
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/pub_client.dart';
 
-/// Cache-key prefix for AST snapshot entries.
-///
-/// Full key format: `$kAstSnapshotCachePrefix:<package>:<version>:<filepath>`.
-const kAstSnapshotCachePrefix = 'ast';
-
 /// Handles calls to the `get_source_slice` MCP tool.
 ///
-/// Source-file loading is shared via `sourceFilesCache` with
-/// `ListPackageSourceFilesHandler`. The AST snapshot cache `astCache` is shared
-/// with `GetThrowStatementsHandler` when the same instance is injected.
-///
-/// Pass a `clock` override in tests to control cache TTL expiry without
-/// sleeping.
+/// Source-file loading is resolved through the shared `sourceFiles`
+/// [KeyedCache] facade. The `ast` [KeyedCache] facade is shared with
+/// `GetThrowStatementsHandler`, so the same file is never parsed twice across
+/// a single agent turn.
 final class GetSourceSliceHandler {
   /// Creates a [GetSourceSliceHandler].
   ///
-  /// Supply [astCache] to share the parsed-AST store with another handler
-  /// (e.g. `GetThrowStatementsHandler`) so the same source file is never parsed
-  /// twice across a single agent turn. When omitted, an internal cache is
-  /// created and owned by this handler.
+  /// [sourceFiles] and [ast] are the shared [KeyedCache] facades (from
+  /// `CacheRegistry`) — pass the same instances used by
+  /// `GetThrowStatementsHandler` so the two handlers share both caches.
   GetSourceSliceHandler({
     required PubDevClient client,
-    required ResponseCache<Map<String, String>> sourceFilesCache,
+    required KeyedCache<SourceFilesId, Map<String, String>> sourceFiles,
+    required KeyedCache<AstSnapshotId, ParseStringResult> ast,
     required void Function(LoggingLevel, Object) log,
-    ResponseCache<ParseStringResult>? astCache,
-    Clock? clock,
   }) : _client = client,
-       _sourceFilesCache = sourceFilesCache,
-       _log = log,
-       _astCache = astCache ?? ResponseCache(clock: clock ?? DateTime.now);
+       _sourceFiles = sourceFiles,
+       _ast = ast,
+       _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<Map<String, String>> _sourceFilesCache;
+  final KeyedCache<SourceFilesId, Map<String, String>> _sourceFiles;
+  final KeyedCache<AstSnapshotId, ParseStringResult> _ast;
   final void Function(LoggingLevel, Object) _log;
-  final ResponseCache<ParseStringResult> _astCache;
 
   /// Handles a [CallToolRequest] for `get_source_slice`.
   Future<CallToolResult> call(CallToolRequest request) async {
@@ -453,69 +447,31 @@ final class GetSourceSliceHandler {
 
   // ─── Source file loading ───────────────────────────────────────────────────
 
-  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(
-    String name,
-    String version,
-  ) async {
-    final cacheKey = 'source:$name:$version';
-    final cached = _sourceFilesCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'get_source_slice: source cache hit key=$cacheKey');
-      try {
-        return PubDevSuccess(await cached);
-      } on Object {
-        // The in-flight request sharing this future failed; fall through to
-        // issue an independent request.
-      }
-    }
-
-    _log(LoggingLevel.debug, 'get_source_slice: source cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'get_source_slice: HTTP tarball request name=$name');
-
-    // Store the in-flight future before awaiting so concurrent callers for the
-    // same key share this single download instead of issuing duplicates
-    // (cache-stampede prevention, as required by ResponseCache's contract).
-    final completer = Completer<Map<String, String>>();
-    _sourceFilesCache.set(cacheKey, completer.future, kSourceFileTtl);
-
-    switch (await _client.getPackageSourceFiles(name, version)) {
-      case PubDevSuccess(:final value):
-        completer.complete(value);
-        return PubDevSuccess(value);
-      case PubDevFailure(:final error):
-        completer.future.ignore();
-        completer.completeError(StateError('fetch failed: ${error.code}'));
-        _sourceFilesCache.invalidate(cacheKey);
-        return PubDevFailure(
-          error.code == DomainErrors.packageNotFound ? _packageNotFoundError(name) : error,
-        );
-    }
-  }
+  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(String name, String version) =>
+      _sourceFiles.resolve((name: name, version: version));
 
   // ─── AST parsing & caching ─────────────────────────────────────────────────
 
-  /// Returns the parsed AST for [filePath], computing and caching on first call.
-  ///
-  /// Uses `throwIfDiagnostics: false` to tolerate malformed or partial Dart
-  /// files without throwing.
+  /// Returns the parsed AST for [filePath], resolving through the shared `ast`
+  /// facade so the same file is never parsed twice across a single agent turn.
   Future<ParseStringResult> _getOrParseAst(
     String package,
     String version,
     String filePath,
     String content,
   ) async {
-    final cacheKey = '$kAstSnapshotCachePrefix:$package:$version:$filePath';
-
-    final cached = _astCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'get_source_slice: AST cache hit key=$cacheKey');
-      return cached;
-    }
-
-    _log(LoggingLevel.debug, 'get_source_slice: parsing $filePath');
-    final result = parseString(content: content, path: filePath, throwIfDiagnostics: false);
-    _astCache.set(cacheKey, Future.value(result), kAstSnapshotTtl);
-    return result;
+    final result = await _ast.resolve((
+      name: package,
+      version: version,
+      path: filePath,
+      content: content,
+    ));
+    return switch (result) {
+      PubDevSuccess(:final value) => value,
+      // The `ast` facade's fetch closure always returns PubDevSuccess — see
+      // CacheRegistry.ast.
+      PubDevFailure(:final error) => throw StateError('unexpected AST parse failure: $error'),
+    };
   }
 
   // ─── Utility helpers ───────────────────────────────────────────────────────
@@ -554,12 +510,6 @@ final class GetSourceSliceHandler {
   }
 
   // ─── Result / error builders ───────────────────────────────────────────────
-
-  static DomainError _packageNotFoundError(String name) => DomainError(
-    code: DomainErrors.packageNotFound,
-    message: 'Package "$name" not found on pub.dev.',
-    suggestion: 'Verify the package name and try again.',
-  );
 
   static CallToolResult _success({
     required String resolvedVersion,

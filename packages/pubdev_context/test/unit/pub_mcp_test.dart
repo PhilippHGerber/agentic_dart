@@ -2,16 +2,22 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dart_mcp/client.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:http/http.dart' as http;
+import 'package:mocktail/mocktail.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/config/config.dart';
-import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/resources/package_resources.dart';
 import 'package:pubdev_context/src/server.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:test/test.dart';
+
+// ─── Mocks ────────────────────────────────────────────────────────────────────
+
+class _MockHttpClient extends Mock implements http.Client {}
 
 // ─── In-memory channel pair ───────────────────────────────────────────────────
 
@@ -41,21 +47,15 @@ base class TestMcpClient extends MCPClient {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) => PubMcpServer(
-  channel,
-  config: config ?? const PubMcpConfig(),
-  client: PubDevClient(),
-  searchCache: ResponseCache<List<PackageSummary>>(),
-  packageCache: ResponseCache<PackageDetail>(),
-  packageVersionsCache: ResponseCache<List<PackageVersion>>(),
-  changelogCache: ResponseCache<List<ChangelogEntry>>(),
-  changelogRawCache: ResponseCache<String>(),
-  apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
-  readmeCache: ResponseCache<String>(),
-  symbolDocCache: ResponseCache<String>(),
-  sourceFilesCache: ResponseCache<Map<String, String>>(),
-  metaCache: ResponseCache<String>(),
-);
+PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) {
+  final client = PubDevClient();
+  return PubMcpServer(
+    channel,
+    config: config ?? const PubMcpConfig(),
+    client: client,
+    cacheRegistry: CacheRegistry(client: client),
+  );
+}
 
 /// Builds a [PubMcpServer] that shuts down cleanly at end of test without a
 /// client handshake.
@@ -447,4 +447,108 @@ void main() {
       });
     });
   });
+
+  // ─── handleComplete against warm facades ────────────────────────────────────
+  //
+  // The cold-cache handleComplete tests above run against `buildServer`'s real
+  // (unmocked) PubDevClient. These warm the `searchResults` and `versionList`
+  // facades via real tool calls against a fake `http.Client`, then assert the
+  // completion reads the warm entry and issues no further pub.dev call.
+
+  group('handleComplete against warm facades', () {
+    late _MockHttpClient mockHttp;
+    late TestMcpClient testClient;
+    late PubMcpServer server;
+    late ServerConnection serverConnection;
+
+    setUp(() async {
+      mockHttp = _MockHttpClient();
+      registerFallbackValue(Uri.parse('https://pub.dev'));
+      final client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
+      final (clientChannel, serverChannel) = inProcessChannels();
+      testClient = TestMcpClient();
+      server = PubMcpServer(
+        serverChannel,
+        config: const PubMcpConfig(),
+        client: client,
+        cacheRegistry: CacheRegistry(client: client),
+      );
+      serverConnection = testClient.connectServer(clientChannel);
+      await serverConnection.initialize(
+        InitializeRequest(
+          protocolVersion: ProtocolVersion.latestSupported,
+          capabilities: testClient.capabilities,
+          clientInfo: testClient.implementation,
+        ),
+      );
+      serverConnection.notifyInitialized(InitializedNotification());
+      await server.initialized;
+    });
+
+    tearDown(() async {
+      await testClient.shutdown();
+      await server.shutdown();
+    });
+
+    test('{name} completion returns names from a warm search cache, no pub.dev call', () async {
+      _stubUrl(mockHttp, '/api/search', _jsonFixture('search_result.json'));
+      _stubUrl(mockHttp, '/api/packages/', _jsonFixture('package_info.json'));
+      _stubUrl(mockHttp, '/score', _jsonFixture('package_score.json'));
+
+      await serverConnection.callTool(
+        CallToolRequest(name: 'search_packages', arguments: {'query': 'http'}),
+      );
+      clearInteractions(mockHttp);
+
+      final result = await serverConnection.requestCompletions(
+        CompleteRequest(
+          ref: ResourceTemplateReference(uri: kReadmeUriTemplate),
+          argument: CompletionArgument(name: 'name', value: 'ht'),
+        ),
+      );
+
+      expect(result.completion.values, contains('http'));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test(
+      '{version} completion returns versions from a warm version list, no pub.dev call',
+      () async {
+        _stubUrl(mockHttp, '/api/packages/http', _jsonFixture('package_versions.json'));
+
+        await serverConnection.callTool(
+          CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+        );
+        clearInteractions(mockHttp);
+
+        final result = await serverConnection.requestCompletions(
+          CompleteRequest(
+            ref: ResourceTemplateReference(uri: kReadmeUriTemplate),
+            argument: CompletionArgument(name: 'version', value: '1.2'),
+            context: CompletionContext(arguments: {'name': 'http'}),
+          ),
+        );
+
+        expect(result.completion.values, contains('1.2.0'));
+        verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      },
+    );
+  });
+}
+
+// ─── Fixture helpers for the warm-facade completion tests ──────────────────
+
+String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
+
+http.Response _jsonFixture(String name) => http.Response(_readFixture(name), 200);
+
+RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
+
+void _stubUrl(_MockHttpClient mock, String urlFragment, http.Response response) {
+  when(
+    () => mock.get(
+      any(that: predicate<Uri>((u) => u.toString().contains(urlFragment))),
+      headers: any(named: 'headers'),
+    ),
+  ).thenAnswer((_) async => response);
 }

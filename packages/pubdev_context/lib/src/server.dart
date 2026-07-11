@@ -4,21 +4,18 @@
 /// [ResourcesSupport], [CompletionsSupport], and [LoggingSupport]. All
 /// capabilities are registered inside [PubMcpServer.initialize].
 ///
-/// [PubDevClient], the search [ResponseCache], and the package [ResponseCache]
-/// are injected as constructor dependencies. The active log level is set from
-/// the [PubMcpConfig] supplied at construction time.
+/// [PubDevClient] and the [CacheRegistry] are injected as constructor
+/// dependencies. The active log level is set from the [PubMcpConfig] supplied
+/// at construction time.
 library;
 
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:analyzer/dart/analysis/results.dart';
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 
-import 'cache/memory_cache.dart';
+import 'cache/cache_registry.dart';
 import 'config/config.dart';
-import 'data/models.dart';
 import 'data/pub_client.dart';
 import 'resources/meta_resources.dart';
 import 'resources/package_resources.dart';
@@ -49,17 +46,22 @@ base class PubMcpServer extends MCPServer
   /// Creates a [PubMcpServer] connected to [channel].
   ///
   /// [config] controls the initial log level and other server-wide settings.
-  /// [client] is the pub.dev HTTP gateway. [searchCache] is the shared TTL
-  /// store for search results, [packageCache] for individual package lookups
-  /// (shared by `get_package` and `compare_packages`), [changelogCache] for
-  /// parsed changelog entry lists, [changelogRawCache] for raw changelog
-  /// markdown text served by the `pub://package/{name}@{version}/changelog` resource,
-  /// [apiIndexCache] for dartdoc symbol indexes (shared by `browse_api_symbols`
-  /// and the package resource handler), [readmeCache] for full package README
-  /// strings, [symbolDocCache] for individual symbol documentation pages, and
-  /// [metaCache] for the `pub://meta/` resource responses; callers own their
-  /// lifecycles. An optional [metaHttpClient] may be supplied to override the
-  /// HTTP client used by the meta resource handler (useful in tests).
+  /// [client] is the pub.dev HTTP gateway. [cacheRegistry] constructs and owns
+  /// every handler-layer `KeyedCache` facade — `packageDetail` (shared by
+  /// `get_package` and `compare_packages`), `apiIndex` (shared by
+  /// `browse_api_symbols`, `find_symbols`, `get_api_diff`, the symbol-
+  /// documentation handler, `get_throw_statements`, and the package resource
+  /// handler's `api` resource), `sourceFiles` (shared by
+  /// `list_package_source_files`, `get_source_slice`, `get_throw_statements`,
+  /// and the `pubspec` package resource), `ast` (shared by `get_source_slice`
+  /// and `get_throw_statements`), `searchResults` (shared by `search_packages`
+  /// and the `{name}` autocomplete handler), `versionList` (shared by
+  /// `list_package_versions` and the `{version}` autocomplete handler),
+  /// `changelog` (`get_changelog`), `readme` (the package resource handler's
+  /// `readme`, `example`, and `changelog` resources), `symbolDoc` (the
+  /// symbol-documentation handler), and `meta` (the `pub://meta/` resource
+  /// handler). This is the server's sole cache dependency — every
+  /// handler-layer store flows through the registry.
   ///
   /// When an enabled [trace] is supplied, every tool call and resource-template
   /// read is wrapped by a central LLM-boundary tracer that assigns a Correlation
@@ -70,35 +72,11 @@ base class PubMcpServer extends MCPServer
     super.channel, {
     required PubMcpConfig config,
     required PubDevClient client,
-    required ResponseCache<List<PackageSummary>> searchCache,
-    required ResponseCache<PackageDetail> packageCache,
-    required ResponseCache<List<PackageVersion>> packageVersionsCache,
-    required ResponseCache<List<ChangelogEntry>> changelogCache,
-    required ResponseCache<String> changelogRawCache,
-    required ResponseCache<List<DartdocSymbol>> apiIndexCache,
-    required ResponseCache<String> readmeCache,
-    required ResponseCache<String> symbolDocCache,
-    required ResponseCache<Map<String, String>> sourceFilesCache,
-    required ResponseCache<String> metaCache,
-    http.Client? metaHttpClient,
+    required CacheRegistry cacheRegistry,
     WireTrace? trace,
-  }) : _tracer = trace != null && trace.isEnabled
-           ? LlmBoundaryTracer(trace)
-           : null,
-       _trace = trace != null && trace.isEnabled ? trace : null,
+  }) : _tracer = trace != null && trace.isEnabled ? LlmBoundaryTracer(trace) : null,
        _client = client,
-       _searchCache = searchCache,
-       _packageCache = packageCache,
-       _packageVersionsCache = packageVersionsCache,
-       _changelogCache = changelogCache,
-       _changelogRawCache = changelogRawCache,
-       _apiIndexCache = apiIndexCache,
-       _readmeCache = readmeCache,
-       _symbolDocCache = symbolDocCache,
-       _sourceFilesCache = sourceFilesCache,
-       _metaCache = metaCache,
-       _metaHttp = metaHttpClient ?? http.Client(),
-       _metaHttpOwned = metaHttpClient == null,
+       _cacheRegistry = cacheRegistry,
        super.fromStreamChannel(
          implementation: Implementation(
            name: 'dart_pubdev',
@@ -111,26 +89,8 @@ base class PubMcpServer extends MCPServer
 
   /// The central LLM-boundary tracer, or `null` when tracing is disabled.
   final LlmBoundaryTracer? _tracer;
-
-  /// The Wire Trace itself, or `null` when tracing is disabled. Retained so the
-  /// caches this server owns internally (the shared AST cache) can be traced the
-  /// same way as the injected ones.
-  final WireTrace? _trace;
   final PubDevClient _client;
-  final ResponseCache<List<PackageSummary>> _searchCache;
-  final ResponseCache<PackageDetail> _packageCache;
-  final ResponseCache<List<PackageVersion>> _packageVersionsCache;
-  final ResponseCache<List<ChangelogEntry>> _changelogCache;
-  final ResponseCache<String> _changelogRawCache;
-  final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
-  final ResponseCache<String> _readmeCache;
-  final ResponseCache<String> _symbolDocCache;
-  final ResponseCache<Map<String, String>> _sourceFilesCache;
-  final ResponseCache<String> _metaCache;
-  final http.Client _metaHttp;
-
-  /// Whether [_metaHttp] was created internally and must be closed on shutdown.
-  final bool _metaHttpOwned;
+  final CacheRegistry _cacheRegistry;
 
   @override
   FutureOr<InitializeResult> initialize(InitializeRequest request) async {
@@ -143,7 +103,7 @@ base class PubMcpServer extends MCPServer
 
   @override
   Future<void> shutdown() async {
-    if (_metaHttpOwned) _metaHttp.close();
+    _cacheRegistry.dispose();
     await super.shutdown();
   }
 
@@ -190,7 +150,7 @@ base class PubMcpServer extends MCPServer
     final names = <String>{};
 
     // Collect package names from every cached search result — no HTTP calls.
-    for (final future in _searchCache.entries.values) {
+    for (final future in _cacheRegistry.searchResults.entries.values) {
       final results = await future;
       names.addAll(results.map((s) => s.name));
     }
@@ -212,7 +172,7 @@ base class PubMcpServer extends MCPServer
     final candidates = <String>[kLatestVersionAlias];
     final name = request.context?.arguments?['name'];
     if (name != null && name.isNotEmpty) {
-      final cached = _packageVersionsCache.get('$kVersionsCachePrefix:$name');
+      final cached = _cacheRegistry.versionList.peek((name: name));
       if (cached != null) {
         candidates.addAll((await cached).map((v) => v.version));
       }
@@ -254,8 +214,7 @@ base class PubMcpServer extends MCPServer
 
   void _registerTools() {
     final searchHandler = SearchPackagesHandler(
-      client: _client,
-      cache: _searchCache,
+      searchResults: _cacheRegistry.searchResults,
       log: log,
     );
     _registerTracedTool(searchPackagesTool, searchHandler.call);
@@ -263,7 +222,7 @@ base class PubMcpServer extends MCPServer
 
     final getPackageHandler = GetPackageHandler(
       client: _client,
-      cache: _packageCache,
+      packageDetail: _cacheRegistry.packageDetail,
       log: log,
     );
     _registerTracedTool(getPackageTool, getPackageHandler.call);
@@ -271,7 +230,7 @@ base class PubMcpServer extends MCPServer
 
     final getChangelogHandler = GetChangelogHandler(
       client: _client,
-      cache: _changelogCache,
+      changelog: _cacheRegistry.changelog,
       log: log,
     );
     _registerTracedTool(getChangelogTool, getChangelogHandler.call);
@@ -279,15 +238,14 @@ base class PubMcpServer extends MCPServer
 
     final comparePackagesHandler = ComparePackagesHandler(
       client: _client,
-      cache: _packageCache,
+      packageDetail: _cacheRegistry.packageDetail,
       log: log,
     );
     _registerTracedTool(comparePackagesTool, comparePackagesHandler.call);
     log(LoggingLevel.debug, 'registered tool: compare_packages');
 
     final listPackageVersionsHandler = ListPackageVersionsHandler(
-      client: _client,
-      cache: _packageVersionsCache,
+      versionList: _cacheRegistry.versionList,
       log: log,
     );
     _registerTracedTool(listPackageVersionsTool, listPackageVersionsHandler.call);
@@ -295,7 +253,7 @@ base class PubMcpServer extends MCPServer
 
     final browseApiSymbolsHandler = BrowseApiSymbolsHandler(
       client: _client,
-      cache: _apiIndexCache,
+      apiIndex: _cacheRegistry.apiIndex,
       log: log,
     );
     _registerTracedTool(browseApiSymbolsTool, browseApiSymbolsHandler.call);
@@ -303,15 +261,14 @@ base class PubMcpServer extends MCPServer
 
     final findSymbolsHandler = FindSymbolsHandler(
       client: _client,
-      cache: _apiIndexCache,
+      apiIndex: _cacheRegistry.apiIndex,
       log: log,
     );
     _registerTracedTool(findSymbolsTool, findSymbolsHandler.call);
     log(LoggingLevel.debug, 'registered tool: find_symbols');
 
     final getApiDiffHandler = GetApiDiffHandler(
-      client: _client,
-      cache: _apiIndexCache,
+      apiIndex: _cacheRegistry.apiIndex,
       log: log,
     );
     _registerTracedTool(getApiDiffTool, getApiDiffHandler.call);
@@ -319,8 +276,8 @@ base class PubMcpServer extends MCPServer
 
     final getSymbolDocHandler = GetSymbolDocumentationHandler(
       client: _client,
-      cache: _symbolDocCache,
-      apiIndexCache: _apiIndexCache,
+      apiIndex: _cacheRegistry.apiIndex,
+      symbolDoc: _cacheRegistry.symbolDoc,
       log: log,
     );
     _registerTracedTool(getSymbolDocumentationTool, getSymbolDocHandler.call);
@@ -328,31 +285,27 @@ base class PubMcpServer extends MCPServer
 
     final listSourceFilesHandler = ListPackageSourceFilesHandler(
       client: _client,
-      cache: _sourceFilesCache,
+      sourceFiles: _cacheRegistry.sourceFiles,
       log: log,
     );
     _registerTracedTool(listPackageSourceFilesTool, listSourceFilesHandler.call);
     log(LoggingLevel.debug, 'registered tool: list_package_source_files');
 
-    // Shared AST snapshot cache — reused by get_source_slice and get_throw_statements
-    // so the same source file is never parsed twice in a single agent turn.
-    final sharedAstCache = ResponseCache<ParseStringResult>(trace: _trace);
-
     final getSourceSliceHandler = GetSourceSliceHandler(
       client: _client,
-      sourceFilesCache: _sourceFilesCache,
+      sourceFiles: _cacheRegistry.sourceFiles,
+      ast: _cacheRegistry.ast,
       log: log,
-      astCache: sharedAstCache,
     );
     _registerTracedTool(getSourceSliceTool, getSourceSliceHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_source_slice');
 
     final getThrowStatementsHandler = GetThrowStatementsHandler(
       client: _client,
-      sourceFilesCache: _sourceFilesCache,
-      apiIndexCache: _apiIndexCache,
+      sourceFiles: _cacheRegistry.sourceFiles,
+      ast: _cacheRegistry.ast,
+      apiIndex: _cacheRegistry.apiIndex,
       log: log,
-      astCache: sharedAstCache,
     );
     _registerTracedTool(getThrowStatementsTool, getThrowStatementsHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_throw_statements');
@@ -360,9 +313,7 @@ base class PubMcpServer extends MCPServer
 
   void _registerResources() {
     final metaHandler = MetaResourcesHandler(
-      httpClient: _metaHttp,
-      cache: _metaCache,
-      log: log,
+      meta: _cacheRegistry.meta,
       resourcesManifest: _buildResourcesManifest(),
     );
     addResource(kScoringResource, metaHandler.handleScoring);
@@ -376,25 +327,32 @@ base class PubMcpServer extends MCPServer
 
     final handler = PackageResourcesHandler(
       client: _client,
-      readmeCache: _readmeCache,
-      changelogCache: _changelogRawCache,
-      apiIndexCache: _apiIndexCache,
-      sourceFilesCache: _sourceFilesCache,
-      log: log,
+      readme: _cacheRegistry.readme,
+      apiIndex: _cacheRegistry.apiIndex,
+      sourceFiles: _cacheRegistry.sourceFiles,
     );
     _addTracedResourceTemplate(PackageResourcesHandler.kReadmeTemplate, handler.handleReadResource);
     log(LoggingLevel.debug, 'registered resource template: $kReadmeUriTemplate');
 
-    _addTracedResourceTemplate(PackageResourcesHandler.kExampleTemplate, handler.handleReadResource);
+    _addTracedResourceTemplate(
+      PackageResourcesHandler.kExampleTemplate,
+      handler.handleReadResource,
+    );
     log(LoggingLevel.debug, 'registered resource template: $kExampleUriTemplate');
 
-    _addTracedResourceTemplate(PackageResourcesHandler.kChangelogTemplate, handler.handleReadResource);
+    _addTracedResourceTemplate(
+      PackageResourcesHandler.kChangelogTemplate,
+      handler.handleReadResource,
+    );
     log(LoggingLevel.debug, 'registered resource template: $kChangelogUriTemplate');
 
     _addTracedResourceTemplate(PackageResourcesHandler.kApiTemplate, handler.handleReadResource);
     log(LoggingLevel.debug, 'registered resource template: $kApiUriTemplate');
 
-    _addTracedResourceTemplate(PackageResourcesHandler.kPubspecTemplate, handler.handleReadResource);
+    _addTracedResourceTemplate(
+      PackageResourcesHandler.kPubspecTemplate,
+      handler.handleReadResource,
+    );
     log(LoggingLevel.debug, 'registered resource template: $kPubspecUriTemplate');
   }
 

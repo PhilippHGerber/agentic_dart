@@ -8,11 +8,13 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
+import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/compare_packages.dart';
+import 'package:pubdev_context/src/tools/get_package.dart';
 import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -147,14 +149,14 @@ Map<String, Object?> _matrixOf(CallToolResult result) =>
 void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
-  late ResponseCache<PackageDetail> cache;
+  late KeyedCache<PackageDetailId, PackageDetail> packageDetail;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   ComparePackagesHandler buildHandler({
     void Function(LoggingLevel, Object)? log,
   }) => ComparePackagesHandler(
     client: client,
-    cache: cache,
+    packageDetail: packageDetail,
     log: log ?? (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -162,7 +164,7 @@ void main() {
     mockHttp = _MockHttpClient();
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    cache = ResponseCache();
+    packageDetail = CacheRegistry(client: client).packageDetail;
     loggedMessages.clear();
   });
 
@@ -542,33 +544,27 @@ void main() {
       ).called(1);
     });
 
-    test('logs a cache hit message for a package served from cache', () async {
+    test('reuses a package cached by a prior get_package call', () async {
+      // A prior get_package call for 'http' warms the shared packageDetail
+      // facade; compare_packages must reuse that entry rather than re-fetch,
+      // exercising the same (name, version)-anchored cache both handlers share.
       _stubSuccess(mockHttp, 'http');
       _stubSuccess(mockHttp, 'dio');
-      final handler = buildHandler();
 
-      await handler.call(_request(['http', 'dio']));
-      loggedMessages.clear();
-      await handler.call(_request(['http', 'dio']));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
-
-    test('reuses a package cached by a prior get_package call', () async {
-      _stubSuccess(mockHttp, 'dio');
-
-      final detail = PackageDetail.fromPackageAndScore(
-        jsonDecode(_packageInfoJson('http')) as Map<String, Object?>,
-        jsonDecode(_packageScoreJson()) as Map<String, Object?>,
+      final getPackageHandler = GetPackageHandler(
+        client: client,
+        packageDetail: packageDetail,
+        log: (level, data) {},
       );
-      cache.set('package:http:', Future.value(detail), kPackageMetadataTtl);
+      await getPackageHandler.call(
+        CallToolRequest(name: 'get_package', arguments: {'name': 'http'}),
+      );
 
       await buildHandler().call(_request(['http', 'dio']));
 
-      verifyNever(
+      // Exactly one score fetch for 'http' — from the prior get_package call —
+      // proves compare_packages did not re-fetch it.
+      verify(
         () => mockHttp.get(
           any(
             that: predicate<Uri>(
@@ -577,7 +573,7 @@ void main() {
           ),
           headers: any(named: 'headers'),
         ),
-      );
+      ).called(1);
     });
   });
 

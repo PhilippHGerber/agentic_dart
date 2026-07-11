@@ -11,12 +11,12 @@ import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/resources/package_resources.dart';
-import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
 import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -233,13 +233,6 @@ const _kPubspecYaml =
     'environment:\n'
     "  sdk: '>=3.0.0 <4.0.0'\n";
 
-/// Parses the dartdoc fixture symbols from disk — mirrors what [BrowseApiSymbolsHandler]
-/// stores in cache after a successful HTTP response.
-List<DartdocSymbol> _fixtureSymbols() {
-  final json = jsonDecode(_readFixture('index_json.json')) as List<Object?>;
-  return json.whereType<Map<String, Object?>>().map(DartdocSymbol.fromJson).toList();
-}
-
 // ─── Request helpers ──────────────────────────────────────────────────────────
 
 ReadResourceRequest _readmeRequest(String packageName, {String version = '1.6.0'}) =>
@@ -287,19 +280,13 @@ void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
   late DateTime fakeNow;
-  late ResponseCache<String> readmeCache;
-  late ResponseCache<String> changelogCache;
-  late ResponseCache<List<DartdocSymbol>> apiCache;
-  late ResponseCache<Map<String, String>> sourceFilesCache;
-  final loggedMessages = <(LoggingLevel, Object)>[];
+  late CacheRegistry registry;
 
   PackageResourcesHandler buildHandler() => PackageResourcesHandler(
     client: client,
-    readmeCache: readmeCache,
-    changelogCache: changelogCache,
-    apiIndexCache: apiCache,
-    sourceFilesCache: sourceFilesCache,
-    log: (level, data) => loggedMessages.add((level, data)),
+    readme: registry.readme,
+    apiIndex: registry.apiIndex,
+    sourceFiles: registry.sourceFiles,
   );
 
   setUp(() {
@@ -308,11 +295,7 @@ void main() {
     registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    readmeCache = ResponseCache(clock: () => fakeNow);
-    changelogCache = ResponseCache(clock: () => fakeNow);
-    apiCache = ResponseCache(clock: () => fakeNow);
-    sourceFilesCache = ResponseCache(clock: () => fakeNow);
-    loggedMessages.clear();
+    registry = CacheRegistry(client: client, clock: () => fakeNow);
   });
 
   tearDown(() => client.close());
@@ -604,23 +587,6 @@ void main() {
       expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/readme'));
     });
 
-    test('logs an info message containing the package name', () async {
-      _stubDocsPage(mockHttp);
-      await buildHandler().handleReadResource(_readmeRequest('http'));
-      final infoLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.info)
-          .map((m) => m.$2.toString());
-      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
-    });
-
-    test('logs a debug cache-miss message', () async {
-      _stubDocsPage(mockHttp);
-      await buildHandler().handleReadResource(_readmeRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
   });
 
   // ─── Example resource: cache miss ────────────────────────────────────────────
@@ -650,14 +616,6 @@ void main() {
       expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/example'));
     });
 
-    test('logs an info message containing the package name', () async {
-      _stubExamplePage(mockHttp);
-      await buildHandler().handleReadResource(_exampleRequest('http'));
-      final infoLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.info)
-          .map((m) => m.$2.toString());
-      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
-    });
   });
 
   // ─── Example resource: cache hit ─────────────────────────────────────────────
@@ -679,16 +637,29 @@ void main() {
       ).called(1);
     });
 
-    test('makes zero HTTP calls when the example cache is pre-populated', () async {
-      readmeCache.set('example:http', Future.value('Pre-loaded example text.'), kReadmeTtl);
+    test('makes no additional HTTP call when the example cache is already warm', () async {
+      _stubExamplePage(mockHttp);
+      await registry.readme.resolve((name: 'http', kind: ReadmeKind.example));
+
       await buildHandler().handleReadResource(_exampleRequest('http'));
-      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+
+      // Only the warm-up fetch above ran — the handler call itself was a hit.
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>((u) => u.toString().contains('/packages/http/example')),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
     });
 
-    test('returns the pre-populated cache content', () async {
-      readmeCache.set('example:http', Future.value('Pre-loaded example text.'), kReadmeTtl);
+    test('returns the pre-warmed cache content', () async {
+      _stubExamplePage(mockHttp);
+      await registry.readme.resolve((name: 'http', kind: ReadmeKind.example));
+
       final result = await buildHandler().handleReadResource(_exampleRequest('http'));
-      expect(_body(result!), equals('Pre-loaded example text.'));
+      expect(_body(result!), contains("main() { print('example'); }"));
     });
   });
 
@@ -729,29 +700,33 @@ void main() {
       ).called(1);
     });
 
-    test('logs a debug cache-hit message on the second call', () async {
+    test('makes no additional HTTP call when the readme cache is already warm', () async {
       _stubDocsPage(mockHttp);
-      final handler = buildHandler();
-      await handler.handleReadResource(_readmeRequest('http'));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 30));
-      await handler.handleReadResource(_readmeRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
+      await registry.readme.resolve((name: 'http', kind: ReadmeKind.readme));
 
-    test('makes zero HTTP calls when the readme cache is pre-populated', () async {
-      readmeCache.set('readme:http', Future.value('Pre-loaded README text.'), kReadmeTtl);
       await buildHandler().handleReadResource(_readmeRequest('http'));
-      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+
+      // Only the warm-up fetch above ran — the handler call itself was a hit.
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) =>
+                  u.toString().contains('/documentation/http/latest/') &&
+                  !u.toString().contains('index.json'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
     });
 
-    test('returns the pre-populated cache content', () async {
-      readmeCache.set('readme:http', Future.value('Pre-loaded README text.'), kReadmeTtl);
+    test('returns the pre-warmed cache content', () async {
+      _stubDocsPage(mockHttp);
+      await registry.readme.resolve((name: 'http', kind: ReadmeKind.readme));
+
       final result = await buildHandler().handleReadResource(_readmeRequest('http'));
-      expect(_body(result!), equals('Pre-loaded README text.'));
+      expect(_body(result!), contains('composable'));
     });
   });
 
@@ -804,23 +779,6 @@ void main() {
       expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/changelog'));
     });
 
-    test('logs an info message containing the package name', () async {
-      _stubChangelogPage(mockHttp);
-      await buildHandler().handleReadResource(_changelogRequest('http'));
-      final infoLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.info)
-          .map((m) => m.$2.toString());
-      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
-    });
-
-    test('logs a debug cache-miss message', () async {
-      _stubChangelogPage(mockHttp);
-      await buildHandler().handleReadResource(_changelogRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
   });
 
   // ─── Changelog resource: cache hit ───────────────────────────────────────────
@@ -842,43 +800,29 @@ void main() {
       ).called(1);
     });
 
-    test('logs a debug cache-hit message on the second call', () async {
+    test('makes no additional HTTP call when the changelog cache is already warm', () async {
       _stubChangelogPage(mockHttp);
-      final handler = buildHandler();
-      await handler.handleReadResource(_changelogRequest('http'));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 30));
-      await handler.handleReadResource(_changelogRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
+      await registry.readme.resolve((name: 'http', kind: ReadmeKind.changelog));
 
-    test('makes zero HTTP calls when the changelog cache is pre-populated', () async {
-      changelogCache.set(
-        'changelog:http',
-        Future.value('# Pre-loaded changelog'),
-        kChangelogRawTtl,
-      );
       await buildHandler().handleReadResource(_changelogRequest('http'));
-      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+
+      // Only the warm-up fetch above ran — the handler call itself was a hit.
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>((u) => u.toString().contains('/packages/http/changelog')),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
     });
 
-    test('returns the pre-populated cache content', () async {
-      changelogCache.set(
-        'changelog:http',
-        Future.value('# Pre-loaded changelog'),
-        kChangelogRawTtl,
-      );
+    test('returns the pre-warmed cache content', () async {
+      _stubChangelogPage(mockHttp);
+      await registry.readme.resolve((name: 'http', kind: ReadmeKind.changelog));
+
       final result = await buildHandler().handleReadResource(_changelogRequest('http'));
-      expect(_body(result!), equals('# Pre-loaded changelog'));
-    });
-
-    test('changelog cache uses the changelog:<name> cache key prefix', () async {
-      _stubChangelogPage(mockHttp);
-      await buildHandler().handleReadResource(_changelogRequest('http'));
-      expect(changelogCache.get('changelog:http'), isNotNull);
+      expect(_body(result!), contains('1.0.0'));
     });
   });
 
@@ -951,15 +895,6 @@ void main() {
       expect(result!.contents.first.uri, equals('pub://package/http@latest/api'));
     });
 
-    test('logs a debug cache-miss message', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
-      await buildHandler().handleReadResource(_apiRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
   });
 
   // ─── API resource: cache hit ──────────────────────────────────────────────────
@@ -984,30 +919,20 @@ void main() {
       ).called(1);
     });
 
-    test('logs a debug cache-hit message on the second call', () async {
+    test('makes no index HTTP call when the api index cache is already warm', () async {
       _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
-      final handler = buildHandler();
-      await handler.handleReadResource(_apiRequest('http'));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 30));
-      await handler.handleReadResource(_apiRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
+      await registry.apiIndex.resolve((name: 'http', version: '1.6.0'));
 
-    test('makes no index HTTP call when the api index cache is pre-populated', () async {
-      _stubPackageInfo(mockHttp);
-      apiCache.set('api_index:http:1.6.0', Future.value(_fixtureSymbols()), kApiDocsTtl);
       await buildHandler().handleReadResource(_apiRequest('http'));
-      verifyNever(
+
+      // Only the warm-up fetch above ran — the handler call itself was a hit.
+      verify(
         () => mockHttp.get(
           any(that: predicate<Uri>((u) => u.toString().contains('/index.json'))),
           headers: any(named: 'headers'),
         ),
-      );
+      ).called(1);
     });
   });
 
@@ -1084,7 +1009,7 @@ void main() {
       expect(_errorPayload(first!)['code'], equals(DomainErrors.serviceUnavailable));
 
       // The failure must NOT have been cached — the index cache stays cold.
-      expect(apiCache.get('api_index:http:1.6.0'), isNull);
+      expect(await registry.apiIndex.peek((name: 'http', version: '1.6.0')), isNull);
 
       // The outage clears; the second read retries the fetch and succeeds.
       indexHealthy = true;
@@ -1117,7 +1042,7 @@ void main() {
       expect(_errorPayload(first!)['code'], equals(DomainErrors.rateLimited));
 
       // The failure must NOT have been cached — the index cache stays cold.
-      expect(apiCache.get('api_index:http:1.6.0'), isNull);
+      expect(await registry.apiIndex.peek((name: 'http', version: '1.6.0')), isNull);
 
       // The rate limit clears; the second read retries the fetch and succeeds.
       indexHealthy = true;
@@ -1152,24 +1077,6 @@ void main() {
       _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
       final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
       expect(result!.contents.first.uri, equals('pub://package/http@1.6.0/pubspec'));
-    });
-
-    test('logs an info tarball message containing the package name', () async {
-      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
-      await buildHandler().handleReadResource(_pubspecRequest('http'));
-      final infoLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.info)
-          .map((m) => m.$2.toString());
-      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
-    });
-
-    test('logs a debug cache-miss message', () async {
-      _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
-      await buildHandler().handleReadResource(_pubspecRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
     });
   });
 
@@ -1217,43 +1124,28 @@ void main() {
       verify(() => mockHttp.send(any())).called(1);
     });
 
-    test('logs a debug cache-hit message on the second call', () async {
+    test('makes no additional tarball download when the source cache is already warm', () async {
       _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
-      final handler = buildHandler();
-      await handler.handleReadResource(_pubspecRequest('http'));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 30));
-      await handler.handleReadResource(_pubspecRequest('http'));
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
+      await registry.sourceFiles.resolve((name: 'http', version: '1.6.0'));
 
-    test('makes zero tarball downloads when the source cache is pre-populated', () async {
-      sourceFilesCache.set(
-        'source:http:1.6.0',
-        Future.value({kPubspecFileName: _kPubspecYaml}),
-        kSourceFileTtl,
-      );
       await buildHandler().handleReadResource(_pubspecRequest('http'));
-      verifyNever(() => mockHttp.send(any()));
+
+      // Only the warm-up fetch above ran — the handler call itself was a hit.
+      verify(() => mockHttp.send(any())).called(1);
     });
 
-    test('returns the pre-populated source cache content', () async {
-      sourceFilesCache.set(
-        'source:http:1.6.0',
-        Future.value({kPubspecFileName: 'name: from_cache\n'}),
-        kSourceFileTtl,
-      );
+    test('returns the pre-warmed source cache content', () async {
+      _stubTarball(mockHttp, {kPubspecFileName: 'name: from_cache\n'});
+      await registry.sourceFiles.resolve((name: 'http', version: '1.6.0'));
+
       final result = await buildHandler().handleReadResource(_pubspecRequest('http'));
       expect(_body(result!), equals('name: from_cache\n'));
     });
 
-    test('uses the source:<name>:<version> cache key prefix', () async {
+    test('warms the sourceFiles facade entry for (name, resolvedVersion)', () async {
       _stubTarball(mockHttp, {kPubspecFileName: _kPubspecYaml});
       await buildHandler().handleReadResource(_pubspecRequest('http'));
-      expect(sourceFilesCache.get('source:http:1.6.0'), isNotNull);
+      expect(await registry.sourceFiles.peek((name: 'http', version: '1.6.0')), isNotNull);
     });
   });
 
@@ -1293,92 +1185,24 @@ void main() {
     });
   });
 
-  // ─── Shared cache key ─────────────────────────────────────────────────────────
+  // ─── Facade warm-up ───────────────────────────────────────────────────────────
 
-  group('shared cache key between PackageResourcesHandler and BrowseApiSymbolsHandler', () {
-    test(
-      'api resource makes zero HTTP calls when BrowseApiSymbolsHandler has warmed the cache',
-      () async {
-        // Both handlers call resolveLatestStable, so stub the package-info endpoint.
-        _stubPackageInfo(mockHttp);
-        // Warm the cache via BrowseApiSymbolsHandler (issue 09).
-        _stubIndexJson(mockHttp);
-        final symbolsHandler = BrowseApiSymbolsHandler(
-          client: client,
-          cache: apiCache,
-          log: (_, _) {},
-        );
-        await symbolsHandler.call(
-          CallToolRequest(
-            name: 'browse_api_symbols',
-            arguments: {'package': 'http', 'query': ''},
-          ),
-        );
-
-        // Now read the API resource — should use the warm cache (no index fetch).
-        await buildHandler().handleReadResource(_apiRequest('http'));
-
-        // Only one index HTTP request was made in total (from BrowseApiSymbolsHandler).
-        verify(
-          () => mockHttp.get(
-            any(
-              that: predicate<Uri>(
-                (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
-              ),
-            ),
-            headers: any(named: 'headers'),
-          ),
-        ).called(1);
-      },
-    );
-
-    test(
-      'BrowseApiSymbolsHandler makes zero HTTP calls when PackageResourcesHandler has warmed the cache',
-      () async {
-        // Both handlers call resolveLatestStable, so stub the package-info endpoint.
-        _stubPackageInfo(mockHttp);
-        // Warm the cache via PackageResourcesHandler.
-        _stubIndexJson(mockHttp);
-        await buildHandler().handleReadResource(_apiRequest('http'));
-
-        // Now call BrowseApiSymbolsHandler — should use the warm cache (no index fetch).
-        final symbolsHandler = BrowseApiSymbolsHandler(
-          client: client,
-          cache: apiCache,
-          log: (_, _) {},
-        );
-        await symbolsHandler.call(
-          CallToolRequest(
-            name: 'browse_api_symbols',
-            arguments: {'package': 'http', 'query': 'client'},
-          ),
-        );
-
-        // Only one index HTTP request was made in total (from PackageResourcesHandler).
-        verify(
-          () => mockHttp.get(
-            any(
-              that: predicate<Uri>(
-                (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
-              ),
-            ),
-            headers: any(named: 'headers'),
-          ),
-        ).called(1);
-      },
-    );
-
-    test('api resource uses the api_index:<name>:<version> cache key format', () async {
+  // The `api` resource and `BrowseApiSymbolsHandler` (and its three siblings)
+  // resolve the dartdoc index through the same `CacheRegistry`-owned `apiIndex`
+  // facade, so the two warm each other's cache. See
+  // issues/keyed-cache/06-remaining-single-owner-caches.md.
+  group('facade warm-up', () {
+    test('api resource warms the apiIndex facade entry for (name, resolvedVersion)', () async {
       _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       await buildHandler().handleReadResource(_apiRequest('http'));
-      expect(apiCache.get('api_index:http:1.6.0'), isNotNull);
+      expect(await registry.apiIndex.peek((name: 'http', version: '1.6.0')), isNotNull);
     });
 
-    test('readme resource uses the readme:<name> cache key prefix', () async {
+    test('readme resource warms the readme facade entry for (name, kind)', () async {
       _stubDocsPage(mockHttp);
       await buildHandler().handleReadResource(_readmeRequest('http'));
-      expect(readmeCache.get('readme:http'), isNotNull);
+      expect(await registry.readme.peek((name: 'http', kind: ReadmeKind.readme)), isNotNull);
     });
   });
 
@@ -1457,7 +1281,10 @@ void main() {
   // ─── Completions ─────────────────────────────────────────────────────────────
   //
   // CompletionsSupport for {name} lives in the server (PubMcpServer.handleComplete),
-  // but the underlying search-cache scan is tested here against a bare ResponseCache.
+  // reading through the searchResults KeyedCache facade (see pub_mcp_test.dart's
+  // "handleComplete against warm facades" group). KeyedCache.entries delegates
+  // straight to the underlying ResponseCache.entries this scan builds on, which
+  // is what's tested here in isolation.
 
   group('ResponseCache.entries for completions', () {
     late ResponseCache<List<PackageSummary>> searchCache;

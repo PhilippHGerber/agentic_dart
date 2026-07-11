@@ -3,16 +3,17 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
-import 'package:analyzer/dart/analysis/results.dart';
+import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
-import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
+import 'package:pubdev_context/src/tools/get_source_slice.dart';
 import 'package:pubdev_context/src/tools/get_throw_statements.dart';
 import 'package:test/test.dart';
 
@@ -233,12 +234,83 @@ void _stubPackageInfo(
   );
 }
 
+Uint8List _buildTarGz(Map<String, String> files) {
+  final archive = Archive();
+  for (final entry in files.entries) {
+    archive.addFile(ArchiveFile.string(entry.key, entry.value));
+  }
+  final tar = TarEncoder().encodeBytes(archive);
+  return const GZipEncoder().encodeBytes(tar);
+}
+
+/// Stubs the tarball download so the `sourceFiles` facade resolves [files] on
+/// a cache miss for `(name, version)`.
+void _stubTarball(
+  _MockHttpClient mock,
+  Map<String, String> files, {
+  String name = 'foo',
+  String version = '1.0.0',
+}) {
+  when(
+    () => mock.send(
+      any(
+        that: predicate<http.BaseRequest>(
+          (r) => r.url.toString().contains(
+            '/api/packages/$name/versions/$version/archive.tar.gz',
+          ),
+        ),
+      ),
+    ),
+  ).thenAnswer((_) async => http.StreamedResponse(Stream.value(_buildTarGz(files)), 200));
+}
+
 DartdocSymbol _sym({
   required String name,
   required String qualifiedName,
   required String href,
   String type = 'function',
 }) => DartdocSymbol(name: name, qualifiedName: qualifiedName, href: href, type: type, desc: '');
+
+/// Maps a [DartdocSymbol.type] string back to its raw dartdoc `kind` int —
+/// the inverse of [DartdocSymbol.fromJson]'s kind→type mapping — so tests can
+/// serialise a hand-built symbol list into a synthetic `index.json` HTTP stub
+/// body instead of pre-seeding the (now-private) apiIndex cache store.
+int _kindFor(String type) => switch (type) {
+  'class' => 3,
+  'function' => 8,
+  _ => throw ArgumentError('Add a case to _kindFor for type "$type".'),
+};
+
+/// Serialises [symbols] into a raw `index.json` HTTP response body.
+String _indexJsonBody(List<DartdocSymbol> symbols) => jsonEncode([
+  for (final s in symbols)
+    {
+      'name': s.name,
+      'qualifiedName': s.qualifiedName,
+      'href': s.href,
+      'kind': _kindFor(s.type),
+      'desc': s.desc,
+    },
+]);
+
+/// Stubs `GET /documentation/<package>/<version>/index.json`.
+void _stubIndexJson(
+  _MockHttpClient mock, {
+  required List<DartdocSymbol> symbols,
+  String packageName = 'foo',
+  String version = '1.0.0',
+}) {
+  when(
+    () => mock.get(
+      any(
+        that: predicate<Uri>(
+          (u) => u.toString().contains('/documentation/$packageName/$version/index.json'),
+        ),
+      ),
+      headers: any(named: 'headers'),
+    ),
+  ).thenAnswer((_) async => http.Response(_indexJsonBody(symbols), 200));
+}
 
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_throw_statements', arguments: args);
@@ -277,13 +349,13 @@ int _lineCount(String text) => '\n'.allMatches(text).length + 1;
 void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
-  late ResponseCache<Map<String, String>> sourceFilesCache;
-  late ResponseCache<List<DartdocSymbol>> apiIndexCache;
+  late CacheRegistry registry;
 
   GetThrowStatementsHandler buildHandler() => GetThrowStatementsHandler(
     client: client,
-    sourceFilesCache: sourceFilesCache,
-    apiIndexCache: apiIndexCache,
+    sourceFiles: registry.sourceFiles,
+    ast: registry.ast,
+    apiIndex: registry.apiIndex,
     log: (_, _) {},
   );
 
@@ -292,8 +364,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    sourceFilesCache = ResponseCache();
-    apiIndexCache = ResponseCache();
+    registry = CacheRegistry(client: client);
   });
 
   tearDown(() => client.close());
@@ -329,11 +400,7 @@ void main() {
 
   group('class-only — entire class scan', () {
     setUp(() {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns non-empty array for class with throws', () async {
@@ -398,11 +465,7 @@ void main() {
     });
 
     test('returns empty array for class with no throws', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/calc.dart': _noThrowSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/calc.dart': _noThrowSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Calculator', 'version': '1.0.0'}),
@@ -423,11 +486,7 @@ void main() {
     });
 
     test('collects throws from mixin', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/mixin.dart': _mixinSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/mixin.dart': _mixinSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Validator', 'version': '1.0.0'}),
@@ -440,11 +499,7 @@ void main() {
     });
 
     test('collects throws from enum method', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/status.dart': _enumSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/status.dart': _enumSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Status', 'version': '1.0.0'}),
@@ -462,11 +517,7 @@ void main() {
 
   group('class + method — single method scan', () {
     setUp(() {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns only throws from the specified method', () async {
@@ -546,11 +597,7 @@ void main() {
     });
 
     test('collects throws inside try/catch block', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/parser.dart': _tryCatchSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/parser.dart': _tryCatchSource});
 
       final result = await buildHandler().call(
         _request({
@@ -568,11 +615,7 @@ void main() {
     });
 
     test('excludes throws inside closures within the method', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/processor.dart': _closureSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/processor.dart': _closureSource});
 
       final result = await buildHandler().call(
         _request({
@@ -591,11 +634,7 @@ void main() {
     });
 
     test('collects throw from constructor when method is "new"', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/config.dart': _constructorThrowSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/config.dart': _constructorThrowSource});
 
       final result = await buildHandler().call(
         _request({
@@ -615,11 +654,7 @@ void main() {
     test(
       'collects throws from both getter and setter when they share the requested name',
       () async {
-        sourceFilesCache.set(
-          'source:foo:1.0.0',
-          Future.value({'lib/settings.dart': _accessorThrowSource}),
-          kSourceFileTtl,
-        );
+        _stubTarball(mockHttp, {'lib/settings.dart': _accessorThrowSource});
 
         final result = await buildHandler().call(
           _request({
@@ -644,11 +679,7 @@ void main() {
 
   group('class_not_found', () {
     setUp(() {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns class_not_found for class-only scan of unknown class', () async {
@@ -688,11 +719,7 @@ void main() {
 
   group('method_not_found', () {
     setUp(() {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns method_not_found when method absent from class', () async {
@@ -728,18 +755,13 @@ void main() {
 
   group('top-level function — single match', () {
     setUp(() {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(name: 'processData', qualifiedName: 'foo.processData', href: 'foo/processData.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/foo.dart': _utilsSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/foo.dart': _utilsSource});
     });
 
     test('returns throws array for top-level function', () async {
@@ -780,18 +802,14 @@ void main() {
     });
 
     test('function with no throws returns empty array', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:bar:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        packageName: 'bar',
+        symbols: [
           _sym(name: 'noThrow', qualifiedName: 'bar.noThrow', href: 'bar/noThrow.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
-      sourceFilesCache.set(
-        'source:bar:1.0.0',
-        Future.value({'lib/bar.dart': 'String noThrow() => "hello";'}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/bar.dart': 'String noThrow() => "hello";'}, name: 'bar');
 
       final result = await buildHandler().call(
         _request({'package': 'bar', 'method': 'noThrow', 'version': '1.0.0'}),
@@ -806,18 +824,14 @@ void main() {
 
   group('top-level function — explicit version', () {
     test('uses explicit version in API index cache key', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:2.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        version: '2.0.0',
+        symbols: [
           _sym(name: 'processData', qualifiedName: 'foo.processData', href: 'foo/processData.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
-      sourceFilesCache.set(
-        'source:foo:2.0.0',
-        Future.value({'lib/foo.dart': _utilsSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/foo.dart': _utilsSource}, version: '2.0.0');
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'processData', 'version': '2.0.0'}),
@@ -832,13 +846,12 @@ void main() {
 
   group('ambiguous_symbol', () {
     test('returns ambiguous_symbol when multiple functions match', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
           _sym(name: 'log', qualifiedName: 'bar.log', href: 'bar/log.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
 
       final result = await buildHandler().call(
@@ -850,13 +863,12 @@ void main() {
     });
 
     test('ambiguous_symbol payload includes candidates list in details', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
           _sym(name: 'log', qualifiedName: 'bar.log', href: 'bar/log.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
 
       final result = await buildHandler().call(
@@ -869,22 +881,17 @@ void main() {
     });
 
     test('qualified retry resolves to correct function', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
           _sym(name: 'log', qualifiedName: 'bar.log', href: 'bar/log.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/foo.dart': r'void log(String msg) { throw StateError("foo: $msg"); }',
           'lib/bar.dart': 'void log(String msg) { throw ArgumentError(msg); }',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'foo.log', 'version': '1.0.0'}),
@@ -900,12 +907,11 @@ void main() {
 
   group('top-level function — method_not_found', () {
     test('returns method_not_found when function absent from API index', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(name: 'other', qualifiedName: 'foo.other', href: 'foo/other.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
 
       final result = await buildHandler().call(
@@ -917,17 +923,16 @@ void main() {
     });
 
     test('non-function symbols excluded from top-level function search', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(
             name: 'processData',
             qualifiedName: 'foo.processData',
             href: 'foo/processData.html',
             type: 'class',
           ),
-        ]),
-        kApiDocsTtl,
+        ],
       );
 
       final result = await buildHandler().call(
@@ -963,11 +968,7 @@ void main() {
 
   group('response structure', () {
     setUp(() {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('file field contains the relative source path', () async {
@@ -1022,11 +1023,7 @@ void main() {
 
   group('resolvedVersion — all three scan shapes', () {
     test('class-only (entire class) scan echoes the supplied version', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
@@ -1037,11 +1034,7 @@ void main() {
     });
 
     test('class + method scan echoes the supplied version', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final result = await buildHandler().call(
         _request({
@@ -1057,18 +1050,13 @@ void main() {
     });
 
     test('top-level function scan echoes the supplied version', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(name: 'processData', qualifiedName: 'foo.processData', href: 'foo/processData.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/foo.dart': _utilsSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/foo.dart': _utilsSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
@@ -1091,11 +1079,7 @@ void main() {
       _stubPackageInfo(mockHttp);
       // Source cache is keyed by the RESOLVED version, proving the handler
       // threads the resolved version through to source loading.
-      sourceFilesCache.set(
-        'source:foo:2.5.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService'}),
@@ -1108,11 +1092,7 @@ void main() {
 
     test('class + method scan resolves version and echoes it in resolvedVersion', () async {
       _stubPackageInfo(mockHttp);
-      sourceFilesCache.set(
-        'source:foo:2.5.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'method': 'getUser'}),
@@ -1132,14 +1112,10 @@ void main() {
 
   group('multi-file package', () {
     test('searches lib/ files before other directories', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'test/service_test.dart': '// not a lib file',
           'lib/service.dart': _serviceSource,
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
@@ -1149,14 +1125,10 @@ void main() {
     });
 
     test('finds class declared in a non-first file', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/utils.dart': _utilsSource,
           'lib/service.dart': _serviceSource,
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
@@ -1168,30 +1140,32 @@ void main() {
   });
 
   // ─── AST cache behavior ──────────────────────────────────────────────────
+  //
+  // KeyedCache itself is exhaustively tested for "a repeat resolve does not
+  // run the fetch" (test/unit/cache/keyed_cache_test.dart) — these tests
+  // assert the handler-visible consequence: the `ast` facade entry is warm
+  // after a call, and repeated calls for the same file issue no further
+  // tarball fetch.
 
   group('AST cache', () {
-    test('reuses parsed AST on repeated calls for the same file', () async {
-      final loggedMessages = <String>[];
-      final handler = GetThrowStatementsHandler(
-        client: client,
-        sourceFilesCache: sourceFilesCache,
-        apiIndexCache: apiIndexCache,
-        log: (_, msg) => loggedMessages.add(msg.toString()),
-      );
+    test('caches the parsed AST for reuse across repeated calls for the same file', () async {
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      final handler = buildHandler();
 
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
-
-      // First call — parses the AST.
       await handler.call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
       );
-      final countBefore = loggedMessages.where((m) => m.contains('parsing')).length;
 
-      // Second call — should hit the AST cache.
+      expect(
+        await registry.ast.peek((
+          name: 'foo',
+          version: '1.0.0',
+          path: 'lib/service.dart',
+          content: _serviceSource,
+        )),
+        isNotNull,
+      );
+
       await handler.call(
         _request({
           'package': 'foo',
@@ -1200,57 +1174,69 @@ void main() {
           'version': '1.0.0',
         }),
       );
-      final countAfter = loggedMessages.where((m) => m.contains('parsing')).length;
 
-      // The file should only have been parsed once in total.
-      expect(countBefore, equals(1));
-      expect(countAfter, equals(1));
+      verify(
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
+        ),
+      ).called(1);
     });
 
-    test('AST cache is shared when same cache instance is injected', () async {
-      // Verify that a shared cache pre-populated by one handler is used by another
-      // handler (simulating server-level sharing).
-      final sharedAstCache = ResponseCache<ParseStringResult>();
-      final loggedMessages = <String>[];
+    test('reuses the source file and AST warmed by get_source_slice', () async {
+      // Simulates server-level sharing: both handlers are constructed from the
+      // same CacheRegistry, so a get_source_slice call must warm the caches
+      // get_throw_statements reads from.
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
-      final handler = GetThrowStatementsHandler(
+      final sourceSliceHandler = GetSourceSliceHandler(
         client: client,
-        sourceFilesCache: sourceFilesCache,
-        apiIndexCache: apiIndexCache,
-        log: (_, msg) => loggedMessages.add(msg.toString()),
-        astCache: sharedAstCache,
+        sourceFiles: registry.sourceFiles,
+        ast: registry.ast,
+        log: (_, _) {},
       );
-
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
-      );
-
-      await handler.call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
-      );
-
-      expect(loggedMessages.any((m) => m.contains('parsing')), isTrue);
-    });
-  });
-
-  // ─── source cache sharing ─────────────────────────────────────────────────
-
-  group('source files cache sharing', () {
-    test('uses source:<package>:<version> cache key format', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/service.dart': _serviceSource}),
-        kSourceFileTtl,
+      await sourceSliceHandler.call(
+        CallToolRequest(
+          name: 'get_source_slice',
+          arguments: {
+            'package': 'foo',
+            'version': '1.0.0',
+            'file': 'lib/service.dart',
+            'symbolName': 'UserService',
+          },
+        ),
       );
 
       await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
       );
 
-      // No HTTP calls — uses pre-populated cache.
-      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      verify(
+        () => mockHttp.send(
+          any(
+            that: predicate<http.BaseRequest>(
+              (r) => r.url.toString().contains('/archive.tar.gz'),
+            ),
+          ),
+        ),
+      ).called(1);
+    });
+  });
+
+  // ─── source cache sharing ─────────────────────────────────────────────────
+
+  group('source files cache sharing', () {
+    test('warms the sourceFiles facade entry for (package, version)', () async {
+      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+
+      await buildHandler().call(
+        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+      );
+
+      expect(await registry.sourceFiles.peek((name: 'foo', version: '1.0.0')), isNotNull);
     });
   });
 
@@ -1258,13 +1244,9 @@ void main() {
 
   group('thrown type extraction', () {
     test('extracts type from implicit new syntax: throw SomeError(...)', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/foo.dart': 'class Foo { void m() { throw StateError("x"); } }',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1274,13 +1256,9 @@ void main() {
     });
 
     test('extracts type from named factory: throw ArgumentError.value(...)', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/foo.dart': "class Foo { void m() { throw ArgumentError.value(0, 'x'); } }",
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1290,13 +1268,9 @@ void main() {
     });
 
     test('extracts type from explicit new: throw new FormatException(...)', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/foo.dart': "class Foo { void m() { throw new FormatException('bad'); } }",
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1306,13 +1280,9 @@ void main() {
     });
 
     test('extracts type from variable: throw someError', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/foo.dart': 'class Foo { void m(Exception e) { throw e; } }',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1326,9 +1296,7 @@ void main() {
 
   group('context extraction', () {
     test('context for throw inside if contains the if statement', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/foo.dart': '''
 class Foo {
   void m(String x) {
@@ -1338,9 +1306,7 @@ class Foo {
   }
 }
 ''',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1353,13 +1319,9 @@ class Foo {
     });
 
     test('context for simple throw statement contains the throw', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/foo.dart': 'class Foo { void m() { throw UnimplementedError(); } }',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1370,11 +1332,7 @@ class Foo {
     });
 
     test('context is bounded to a small line window around a direct throw', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/worker.dart': _wideTryContextSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/worker.dart': _wideTryContextSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Worker', 'method': 'run', 'version': '1.0.0'}),
@@ -1391,11 +1349,7 @@ class Foo {
 
   group('field initializer throw (Fix 4)', () {
     test('field initializer throw is excluded from class-wide scan results', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/config.dart': _fieldThrowSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/config.dart': _fieldThrowSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Config', 'version': '1.0.0'}),
@@ -1408,18 +1362,14 @@ class Foo {
     });
 
     test('getter method is still included when field initializer throw is present', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/config.dart': '''
 class Config {
   static final bad = throw UnsupportedError("bad");
   void doWork() { throw StateError("not implemented"); }
 }
 ''',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Config', 'version': '1.0.0'}),
@@ -1438,11 +1388,7 @@ class Config {
 
   group('rethrow handling (Fix 3)', () {
     setUp(() {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({'lib/wrapper.dart': _rethrowSource}),
-        kSourceFileTtl,
-      );
+      _stubTarball(mockHttp, {'lib/wrapper.dart': _rethrowSource});
     });
 
     test('rethrow inside catch is included in results', () async {
@@ -1495,9 +1441,7 @@ class Config {
     });
 
     test('explicit throw and rethrow in same method both appear in results', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/svc.dart': '''
 class Svc {
   void run() {
@@ -1509,9 +1453,7 @@ class Svc {
   }
 }
 ''',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({
@@ -1534,14 +1476,10 @@ class Svc {
     test(
       'finds method in second file when first file has same-named class without that method',
       () async {
-        sourceFilesCache.set(
-          'source:foo:1.0.0',
-          Future.value({
+        _stubTarball(mockHttp, {
             'lib/a.dart': _repoASource,
             'lib/b.dart': _repoBSource,
-          }),
-          kSourceFileTtl,
-        );
+          });
 
         final result = await buildHandler().call(
           _request({
@@ -1562,14 +1500,10 @@ class Svc {
     test(
       'returns method_not_found when method is absent from ALL homonymous classes',
       () async {
-        sourceFilesCache.set(
-          'source:foo:1.0.0',
-          Future.value({
+        _stubTarball(mockHttp, {
             'lib/a.dart': _repoASource, // has connect(), not disconnect()
             'lib/b.dart': _repoASource, // also has connect(), not disconnect()
-          }),
-          kSourceFileTtl,
-        );
+          });
 
         final result = await buildHandler().call(
           _request({
@@ -1588,13 +1522,9 @@ class Svc {
     test(
       'returns class_not_found when class is absent from all files (not method_not_found)',
       () async {
-        sourceFilesCache.set(
-          'source:foo:1.0.0',
-          Future.value({
+        _stubTarball(mockHttp, {
             'lib/a.dart': 'class Other { void m() {} }',
-          }),
-          kSourceFileTtl,
-        );
+          });
 
         final result = await buildHandler().call(
           _request({
@@ -1613,14 +1543,10 @@ class Svc {
 
   group('homonymous class — class-wide scan (Fix 2)', () {
     test('aggregates throws from both files when class name appears in two files', () async {
-      sourceFilesCache.set(
-        'source:foo:1.0.0',
-        Future.value({
+      _stubTarball(mockHttp, {
           'lib/a.dart': 'class Repo { void connect() { throw StateError("a"); } }',
           'lib/b.dart': 'class Repo { void disconnect() { throw ArgumentError("b"); } }',
-        }),
-        kSourceFileTtl,
-      );
+        });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Repo', 'version': '1.0.0'}),
@@ -1681,12 +1607,11 @@ class Svc {
     test(
       'two concurrent calls that share a cold source-file key both receive the error',
       () async {
-        apiIndexCache.set(
-          '$kApiIndexCachePrefix:foo:1.0.0',
-          Future.value([
+        _stubIndexJson(
+          mockHttp,
+          symbols: [
             _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
-          ]),
-          kApiDocsTtl,
+          ],
         );
 
         final completer = Completer<http.StreamedResponse>();
@@ -1722,7 +1647,12 @@ class Svc {
   // ─── API index transport errors ──────────────────────────────────────────
 
   group('top-level function — API index transport failure', () {
-    test('404 from API index returns package_not_found', () async {
+    // The shared `apiIndex` facade remaps a `package_not_found` index failure
+    // into a cached empty-list success (see CacheRegistry.apiIndex) — a package
+    // permanently missing dartdoc output is itself a stable, cacheable fact.
+    // The empty symbol list then falls through to `no_documentation`, matching
+    // every other `apiIndex` consumer (`browse_api_symbols`, `find_symbols`, …).
+    test('404 from API index returns no_documentation', () async {
       when(
         () => mockHttp.get(
           any(
@@ -1739,7 +1669,7 @@ class Svc {
       );
 
       expect(result.isError, isTrue);
-      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
 
     test('rate_limited from API index returns rate_limited, not no_documentation', () async {
@@ -1791,12 +1721,11 @@ class Svc {
 
   group('_loadSourceFiles — transient error propagation', () {
     setUp(() {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:foo:1.0.0',
-        Future.value([
+      _stubIndexJson(
+        mockHttp,
+        symbols: [
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
-        ]),
-        kApiDocsTtl,
+        ],
       );
     });
 
@@ -1857,7 +1786,7 @@ class Svc {
       expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
 
-    test('transient tarball failure does not leave stale entry in sourceFilesCache', () async {
+    test('transient tarball failure does not leave a stale sourceFiles entry', () async {
       when(
         () => mockHttp.send(
           any(
@@ -1872,7 +1801,7 @@ class Svc {
         _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
       );
 
-      expect(sourceFilesCache.get('source:foo:1.0.0'), isNull);
+      expect(await registry.sourceFiles.peek((name: 'foo', version: '1.0.0')), isNull);
     });
   });
 }

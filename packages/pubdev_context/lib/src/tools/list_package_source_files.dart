@@ -1,32 +1,37 @@
 /// Handler for the `list_package_source_files` MCP tool.
 ///
 /// Returns the list of file paths available in a pub.dev package tarball.
-/// Shares the `source:<name>:<version>` cache entry with
-/// `GetPackageSourceFileHandler` — once the tarball is warm, listing is free.
+/// Shares the `sourceFiles` [KeyedCache] facade (from `CacheRegistry`) with
+/// `get_source_slice`, `get_throw_statements`, and the `pubspec` package
+/// resource — once the tarball is warm, listing is free.
 library;
 
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/pub_client.dart';
 
 /// Handles calls to the `list_package_source_files` MCP tool.
 final class ListPackageSourceFilesHandler {
   /// Creates a [ListPackageSourceFilesHandler].
+  ///
+  /// [sourceFiles] is the shared [KeyedCache] facade (from `CacheRegistry`) —
+  /// pass the same instance used by `GetSourceSliceHandler` and
+  /// `GetThrowStatementsHandler` so all three share the tarball download.
   const ListPackageSourceFilesHandler({
     required PubDevClient client,
-    required ResponseCache<Map<String, String>> cache,
+    required KeyedCache<SourceFilesId, Map<String, String>> sourceFiles,
     required void Function(LoggingLevel, Object) log,
   }) : _client = client,
-       _cache = cache,
+       _sourceFiles = sourceFiles,
        _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<Map<String, String>> _cache;
+  final KeyedCache<SourceFilesId, Map<String, String>> _sourceFiles;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `list_package_source_files`.
@@ -64,7 +69,7 @@ final class ListPackageSourceFilesHandler {
     );
 
     final Map<String, String> files;
-    switch (await _loadSourceFiles(name, resolvedVersion)) {
+    switch (await _sourceFiles.resolve((name: name, version: resolvedVersion))) {
       case PubDevFailure(:final error):
         return _domainError(error);
       case PubDevSuccess(:final value):
@@ -93,55 +98,6 @@ final class ListPackageSourceFilesHandler {
         ),
       ],
     );
-  }
-
-  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(
-    String name,
-    String version,
-  ) async {
-    final cacheKey = 'source:$name:$version';
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'list_package_source_files: cache hit key=$cacheKey');
-      try {
-        return PubDevSuccess(await cached);
-      } on Object {
-        // The in-flight request that was sharing this future failed; fall
-        // through to issue an independent request.
-      }
-    }
-
-    _log(LoggingLevel.debug, 'list_package_source_files: cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'list_package_source_files: HTTP tarball request name=$name');
-
-    // Store the in-flight future before awaiting so that concurrent callers for
-    // the same key share this single download instead of issuing duplicates
-    // (cache-stampede prevention, as required by ResponseCache's contract).
-    final completer = Completer<Map<String, String>>();
-    _cache.set(cacheKey, completer.future, kSourceFileTtl);
-
-    switch (await _client.getPackageSourceFiles(name, version)) {
-      case PubDevSuccess(:final value):
-        completer.complete(value);
-        return PubDevSuccess(value);
-      case PubDevFailure(:final error):
-        // Unblock any concurrent waiters with an error, then evict the entry so
-        // the next independent request gets a clean miss.
-        // `ignore()` registers a no-op error handler so Dart does not report an
-        // unhandled Future error when no concurrent caller is actually waiting.
-        completer.future.ignore();
-        completer.completeError(StateError('fetch failed: ${error.code}'));
-        _cache.invalidate(cacheKey);
-        return PubDevFailure(
-          error.code == DomainErrors.packageNotFound
-              ? DomainError(
-                  code: DomainErrors.packageNotFound,
-                  message: 'Package "$name" not found on pub.dev.',
-                  suggestion: 'Verify the package name and try again.',
-                )
-              : error,
-        );
-    }
   }
 
   static String? _normalizeDirectory(String? raw) {

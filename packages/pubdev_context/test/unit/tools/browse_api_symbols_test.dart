@@ -7,11 +7,15 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
+import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
+import 'package:pubdev_context/src/tools/find_symbols.dart';
+import 'package:pubdev_context/src/tools/get_api_diff.dart';
+import 'package:pubdev_context/src/tools/get_symbol_documentation.dart';
 import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -80,13 +84,6 @@ void _stubIndexJson(
   );
 }
 
-/// Returns symbols parsed from the index fixture, mirroring what the handler
-/// stores in cache after a successful HTTP call.
-List<DartdocSymbol> _fixtureSymbols() {
-  final json = jsonDecode(_readFixture('index_json.json')) as List<Object?>;
-  return json.whereType<Map<String, Object?>>().map(DartdocSymbol.fromJson).toList();
-}
-
 /// Creates a [CallToolRequest] for `browse_api_symbols` with the given [args].
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'browse_api_symbols', arguments: args);
@@ -120,12 +117,12 @@ void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
   late DateTime fakeNow;
-  late ResponseCache<List<DartdocSymbol>> cache;
+  late KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   BrowseApiSymbolsHandler buildHandler() => BrowseApiSymbolsHandler(
     client: client,
-    cache: cache,
+    apiIndex: apiIndex,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -134,7 +131,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    cache = ResponseCache(clock: () => fakeNow);
+    apiIndex = CacheRegistry(client: client, clock: () => fakeNow).apiIndex;
     loggedMessages.clear();
   });
 
@@ -199,56 +196,31 @@ void main() {
       ).called(1);
     });
 
-    test('logs a debug cache-hit message on the second call', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
-      final handler = buildHandler();
-
-      await handler.call(_request({'package': 'http', 'query': 'client'}));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 30));
-      await handler.call(_request({'package': 'http', 'query': 'client'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
   });
 
   // ─── Warm cache (pre-primed) ────────────────────────────────────────────────
 
   group('warm cache', () {
-    test('makes no index HTTP request when the cache is pre-populated', () async {
+    test('makes no index HTTP request when the cache is already warm', () async {
       _stubPackageInfo(mockHttp);
-      cache.set('$kApiIndexCachePrefix:http:1.6.0', Future.value(_fixtureSymbols()), kApiDocsTtl);
+      _stubIndexJson(mockHttp);
+      await apiIndex.resolve((name: 'http', version: '1.6.0'));
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
 
-      verifyNever(
+      // Only the warm-up fetch above ran — the handler call itself was a hit.
+      verify(
         () => mockHttp.get(
           any(that: predicate<Uri>((u) => u.toString().contains('index.json'))),
           headers: any(named: 'headers'),
         ),
-      );
+      ).called(1);
     });
   });
 
   // ─── Cache miss ─────────────────────────────────────────────────────────────
 
   group('cache miss', () {
-    test('logs a debug cache-miss message', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
-
-      await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
-
     test('logs an info message containing the package name', () async {
       _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
@@ -522,21 +494,6 @@ void main() {
       expect(_errorPayload(result), contains('suggestion'));
     });
 
-    test('returns no_documentation when the cached index is empty', () async {
-      _stubPackageInfo(mockHttp);
-      cache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value(<DartdocSymbol>[]),
-        kApiDocsTtl,
-      );
-
-      final result = await buildHandler().call(
-        _request({'package': 'http', 'query': 'client'}),
-      );
-
-      expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
-    });
-
     test('returns no_documentation when the index is an empty array from the server', () async {
       _stubPackageInfo(mockHttp);
       when(
@@ -625,19 +582,18 @@ void main() {
 
   // ─── Cache key ───────────────────────────────────────────────────────────────
 
-  group('cache key', () {
-    test('uses api_index:<package>:<version> as the cache key format', () async {
+  group('cache identity', () {
+    test('a call populates the apiIndex entry for that (package, version)', () async {
       _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
 
-      // The key must include the resolved version so pinned-version requests
-      // never reuse docs cached for a different version.
-      final cachedEntry = cache.get('$kApiIndexCachePrefix:http:1.6.0');
-      expect(cachedEntry, isNotNull);
+      // The identity must include the resolved version so pinned-version
+      // requests never reuse docs cached for a different version.
+      expect(await apiIndex.peek((name: 'http', version: '1.6.0')), isNotNull);
     });
 
-    test('different packages use different cache keys', () async {
+    test('different packages populate independent apiIndex entries', () async {
       _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);
       _stubPackageInfo(mockHttp, packageName: 'dio');
@@ -647,9 +603,92 @@ void main() {
       await handler.call(_request({'package': 'http', 'query': 'client'}));
       await handler.call(_request({'package': 'dio', 'query': 'client'}));
 
-      // Both cache entries should exist independently
-      expect(cache.get('$kApiIndexCachePrefix:http:1.6.0'), isNotNull);
-      expect(cache.get('$kApiIndexCachePrefix:dio:1.6.0'), isNotNull);
+      // Both entries should exist independently.
+      expect(await apiIndex.peek((name: 'http', version: '1.6.0')), isNotNull);
+      expect(await apiIndex.peek((name: 'dio', version: '1.6.0')), isNotNull);
+    });
+  });
+
+  // ─── Shared across the four api-index tools ────────────────────────────────
+  //
+  // browse_api_symbols, find_symbols, get_api_diff, and get_symbol_documentation
+  // all resolve the dartdoc index through the same CacheRegistry-owned apiIndex
+  // facade. A second call for the same (package, version) from any of the four
+  // tools must be a hit — see issues/keyed-cache/03-api-index-cache.md.
+
+  group('apiIndex shared across the four api-index tools', () {
+    test('find_symbols reuses the index warmed by browse_api_symbols', () async {
+      _stubPackageInfo(mockHttp);
+      _stubIndexJson(mockHttp);
+
+      await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
+      await FindSymbolsHandler(
+        client: client,
+        apiIndex: apiIndex,
+        log: (_, _) {},
+      ).call(CallToolRequest(name: 'find_symbols', arguments: {'package': 'http', 'query': 'client'}));
+
+      verify(
+        () => mockHttp.get(
+          any(that: predicate<Uri>((u) => u.toString().contains('index.json'))),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
+    });
+
+    test('get_api_diff reuses the index warmed by browse_api_symbols', () async {
+      _stubPackageInfo(mockHttp);
+      _stubIndexJson(mockHttp);
+
+      await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
+      await GetApiDiffHandler(apiIndex: apiIndex, log: (_, _) {}).call(
+        CallToolRequest(
+          name: 'get_api_diff',
+          arguments: {'package': 'http', 'fromVersion': '1.6.0', 'toVersion': '1.6.0'},
+        ),
+      );
+
+      verify(
+        () => mockHttp.get(
+          any(that: predicate<Uri>((u) => u.toString().contains('index.json'))),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
+    });
+
+    test('get_symbol_documentation reuses the index warmed by browse_api_symbols', () async {
+      _stubPackageInfo(mockHttp);
+      _stubIndexJson(mockHttp);
+      when(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/documentation/http/1.6.0/browser_client/'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).thenAnswer((_) async => _ok(_readFixture('symbol_doc.html')));
+
+      await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
+      await GetSymbolDocumentationHandler(
+        client: client,
+        apiIndex: apiIndex,
+        symbolDoc: CacheRegistry(client: client, clock: () => fakeNow).symbolDoc,
+        log: (_, _) {},
+      ).call(
+        CallToolRequest(
+          name: 'get_symbol_documentation',
+          arguments: {'package': 'http', 'symbol': 'BrowserClient'},
+        ),
+      );
+
+      verify(
+        () => mockHttp.get(
+          any(that: predicate<Uri>((u) => u.toString().contains('index.json'))),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
     });
   });
 }

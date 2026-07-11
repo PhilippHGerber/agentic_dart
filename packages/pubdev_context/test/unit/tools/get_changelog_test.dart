@@ -7,9 +7,8 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
-import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_changelog.dart';
 import 'package:test/test.dart';
@@ -115,12 +114,12 @@ void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
   late DateTime fakeNow;
-  late ResponseCache<List<ChangelogEntry>> cache;
+  late CacheRegistry registry;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetChangelogHandler buildHandler() => GetChangelogHandler(
     client: client,
-    cache: cache,
+    changelog: registry.changelog,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -129,7 +128,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2026, 5, 12);
-    cache = ResponseCache(clock: () => fakeNow);
+    registry = CacheRegistry(client: client, clock: () => fakeNow);
     loggedMessages.clear();
   });
 
@@ -466,21 +465,6 @@ void main() {
       ).called(1);
     });
 
-    test('logs a debug cache-hit message on the second call', () async {
-      _stubSuccess(mockHttp);
-      final handler = buildHandler();
-
-      await handler.call(_request({'name': 'http'}));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 14));
-      await handler.call(_request({'name': 'http'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache hit')), isTrue);
-    });
-
     test('cache hit applies from_version filter to cached entries', () async {
       _stubSuccess(mockHttp);
       final handler = buildHandler();
@@ -522,17 +506,6 @@ void main() {
   // ─── Cache miss ───────────────────────────────────────────────────────────────
 
   group('cache miss', () {
-    test('logs a debug cache-miss message on first call', () async {
-      _stubSuccess(mockHttp);
-
-      await buildHandler().call(_request({'name': 'http'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('cache miss')), isTrue);
-    });
-
     test('logs an info HTTP-request message containing the package name', () async {
       _stubSuccess(mockHttp);
 

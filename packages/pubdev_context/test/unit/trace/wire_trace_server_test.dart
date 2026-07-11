@@ -13,9 +13,8 @@ import 'dart:io';
 import 'package:dart_mcp/client.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/config/config.dart';
-import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/server.dart';
 import 'package:pubdev_context/src/trace/wire_trace.dart';
@@ -104,20 +103,12 @@ void main() {
           )
         : null;
     final (clientChannel, serverChannel) = _inProcessChannels();
+    final client = PubDevClient(httpClient: mock, retryPolicy: _instant);
     server = PubMcpServer(
       serverChannel,
       config: const PubMcpConfig(),
-      client: PubDevClient(httpClient: mock, retryPolicy: _instant),
-      searchCache: ResponseCache<List<PackageSummary>>(),
-      packageCache: ResponseCache<PackageDetail>(),
-      packageVersionsCache: ResponseCache<List<PackageVersion>>(),
-      changelogCache: ResponseCache<List<ChangelogEntry>>(),
-      changelogRawCache: ResponseCache<String>(),
-      apiIndexCache: ResponseCache<List<DartdocSymbol>>(),
-      readmeCache: ResponseCache<String>(),
-      symbolDocCache: ResponseCache<String>(),
-      sourceFilesCache: ResponseCache<Map<String, String>>(),
-      metaCache: ResponseCache<String>(),
+      client: client,
+      cacheRegistry: CacheRegistry(client: client),
       trace: trace,
     );
     serverConnection = testClient.connectServer(clientChannel);

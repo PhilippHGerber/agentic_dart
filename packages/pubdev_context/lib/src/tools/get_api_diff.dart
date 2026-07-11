@@ -20,9 +20,9 @@
 /// `suggestedNextStep` pointing the LLM at `browse_api_symbols` for the
 /// offending version as a manual workaround.
 ///
-/// Both indexes are cached under the shared [kApiIndexCachePrefix] key with a
-/// [kApiDocsTtl] TTL, so this tool warms — and is warmed by — the
-/// `browse_api_symbols` and package-resource caches.
+/// Both indexes are resolved through the shared `apiIndex` [KeyedCache]
+/// facade, so this tool warms — and is warmed by — `browse_api_symbols`,
+/// `find_symbols`, and the symbol-documentation handler.
 ///
 /// See `issues/pubdev-context-v1/08-get-api-diff.md` (S9).
 library;
@@ -31,42 +31,38 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
-import 'browse_api_symbols.dart' show kApiIndexCachePrefix;
 
 /// Handles calls to the `get_api_diff` MCP tool.
 ///
-/// Consults `cache` before issuing HTTP requests and stores each version's
-/// symbol index with [kApiDocsTtl]. Logs cache hits at [LoggingLevel.debug]
-/// and HTTP requests at [LoggingLevel.info] via `log`.
+/// Resolves each version's dartdoc symbol index through `apiIndex` before
+/// issuing any HTTP request. Logs at [LoggingLevel.info] via `log`.
 final class GetApiDiffHandler {
   /// Creates a [GetApiDiffHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [cache] is the shared dartdoc
-  /// symbol-index store; pass the same instance used by
-  /// `browse_api_symbols` so both modules warm each other's cache. [log]
-  /// receives structured log events at the appropriate [LoggingLevel].
+  /// [apiIndex] is the shared [KeyedCache] facade (from `CacheRegistry`) that
+  /// resolves and caches the dartdoc symbol index by [ApiIndexId]; pass the
+  /// same instance used by `browse_api_symbols` so both modules warm each
+  /// other's cache. [log] receives structured log events at the appropriate
+  /// [LoggingLevel].
   const GetApiDiffHandler({
-    required PubDevClient client,
-    required ResponseCache<List<DartdocSymbol>> cache,
+    required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
-       _cache = cache,
+  }) : _apiIndex = apiIndex,
        _log = log;
 
-  final PubDevClient _client;
-  final ResponseCache<List<DartdocSymbol>> _cache;
+  final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `get_api_diff`.
   ///
   /// Validates that `package`, `fromVersion`, and `toVersion` are all present,
-  /// loads both dartdoc indexes (concurrently, via the shared cache), and
-  /// serialises the added/removed symbol sets. Returns [CallToolResult.isError]
-  /// `true` with a structured JSON payload on any domain failure.
+  /// loads both dartdoc indexes (concurrently, via `apiIndex`), and serialises
+  /// the added/removed symbol sets. Returns [CallToolResult.isError] `true`
+  /// with a structured JSON payload on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
 
@@ -91,11 +87,11 @@ final class GetApiDiffHandler {
       'get_api_diff: package=$package fromVersion=$fromVersion toVersion=$toVersion',
     );
 
-    // ── Load both indexes (concurrently via the shared cache) ───────────────────
+    // ── Load both indexes (concurrently, via the shared apiIndex facade) ────────
 
     final results = await Future.wait([
-      _loadIndex(package, fromVersion),
-      _loadIndex(package, toVersion),
+      _apiIndex.resolve((name: package, version: fromVersion)),
+      _apiIndex.resolve((name: package, version: toVersion)),
     ]);
     final fromResult = results[0];
     final toResult = results[1];
@@ -112,51 +108,6 @@ final class GetApiDiffHandler {
     if (toSymbols.isEmpty) return _documentationNotFound(package, toVersion);
 
     return _buildResponse(package, fromVersion, toVersion, fromSymbols, toSymbols);
-  }
-
-  /// Loads the dartdoc symbol index for [package] at [version].
-  ///
-  /// Consults [_cache] first (key `$kApiIndexCachePrefix:$package:$version`);
-  /// on a miss it fetches via [PubDevClient.getApiIndex] and caches the
-  /// resulting list with [kApiDocsTtl].
-  ///
-  /// A [DomainErrors.packageNotFound] failure is folded into an empty-list
-  /// success so the caller treats it as a missing-docs case; all other
-  /// failures are returned as [PubDevFailure] for the caller to propagate.
-  Future<PubDevResult<List<DartdocSymbol>>> _loadIndex(String package, String version) async {
-    final cacheKey = '$kApiIndexCachePrefix:$package:$version';
-
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'get_api_diff: cache hit key=$cacheKey');
-      return PubDevSuccess(await cached);
-    }
-
-    _log(LoggingLevel.debug, 'get_api_diff: cache miss key=$cacheKey');
-
-    final future = _client.getApiIndex(package, version: version);
-
-    _cache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => <DartdocSymbol>[],
-        },
-      ),
-      kApiDocsTtl,
-    );
-
-    _log(LoggingLevel.info, 'get_api_diff: HTTP request package=$package version=$version');
-
-    final result = await future;
-
-    return switch (result) {
-      PubDevSuccess(:final value) => PubDevSuccess(value),
-      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
-        const PubDevSuccess(<DartdocSymbol>[]),
-      PubDevFailure(:final error) => PubDevFailure(error),
-    };
   }
 
   /// Diffs [fromSymbols] against [toSymbols] and serialises the result.

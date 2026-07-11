@@ -11,18 +11,13 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 
 // ─── Regex patterns ───────────────────────────────────────────────────────────
-
-/// Matches a Keep-a-Changelog version heading at the start of a line.
-///
-/// Handles both `## 1.2.3` and `## [1.2.3]` formats; the first capture group
-/// contains the version string (without surrounding brackets when present).
-final _kHeadingPattern = RegExp(r'^## \[?(\d+\.\d+\.\d+[^\]]*)\]?');
 
 /// Strips non-numeric suffixes from a single version component.
 ///
@@ -51,35 +46,37 @@ const _invalidInput = DomainError(
 
 /// Handles calls to the `get_changelog` MCP tool.
 ///
-/// Consults the cache before issuing HTTP requests; stores the full parsed entry
-/// list with [kChangelogTtl] so the same data can be reused across calls with
-/// different `fromVersion` and `versionLimit` values. HTTP failures are not
-/// cached so transient errors can be retried.
+/// Resolves the full parsed entry list through the shared `changelog`
+/// [KeyedCache] facade (from `CacheRegistry`), keyed by package `name`, so the
+/// same data is reused across calls with different `fromVersion` and
+/// `versionLimit` values. HTTP failures are not cached so transient errors can
+/// be retried.
 final class GetChangelogHandler {
   /// Creates a [GetChangelogHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [cache] holds the full unfiltered
-  /// entry list keyed by package name. [log] receives structured log events at
-  /// the appropriate [LoggingLevel].
+  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
+  /// [changelog] is the shared [KeyedCache] facade (from `CacheRegistry`) that
+  /// resolves and caches the full parsed entry list by [ChangelogEntriesId].
+  /// [log] receives structured log events at the appropriate [LoggingLevel].
   const GetChangelogHandler({
     required PubDevClient client,
-    required ResponseCache<List<ChangelogEntry>> cache,
+    required KeyedCache<ChangelogEntriesId, List<ChangelogEntry>> changelog,
     required void Function(LoggingLevel, Object) log,
   }) : _client = client,
-       _cache = cache,
+       _changelog = changelog,
        _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<List<ChangelogEntry>> _cache;
+  final KeyedCache<ChangelogEntriesId, List<ChangelogEntry>> _changelog;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `get_changelog`.
   ///
   /// Resolves the latest stable version via [PubDevClient.resolveLatestStable]
-  /// to include `resolvedVersion` in the success response. Looks up the full
-  /// [ChangelogEntry] list in cache, or fetches and parses it from pub.dev.
-  /// Applies the `fromVersion` boundary and `versionLimit` cap on each call.
-  /// Returns [CallToolResult.isError] `true` on any domain failure.
+  /// to include `resolvedVersion` in the success response. Resolves the full
+  /// [ChangelogEntry] list through `changelog`. Applies the `fromVersion`
+  /// boundary and `versionLimit` cap on each call. Returns
+  /// [CallToolResult.isError] `true` on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final name = (args['name'] as String?) ?? '';
@@ -96,7 +93,7 @@ final class GetChangelogHandler {
     // changelog cache hit. This costs one lightweight JSON GET but keeps the
     // `resolvedVersion` field correct and the control flow simple. Deriving the
     // version from the changelog instead would be unsound — the newest heading
-    // may be a pre-release, not the latest stable (see plan W4).
+    // may be a pre-release, not the latest stable.
     // Resolve the latest stable version for the `resolvedVersion` field.
     _log(LoggingLevel.info, 'get_changelog: resolving latest stable version for $name');
     final String resolvedVersion;
@@ -108,33 +105,17 @@ final class GetChangelogHandler {
     }
     _log(LoggingLevel.debug, 'get_changelog: resolved version=$resolvedVersion');
 
-    // The changelog cache key is intentionally package-scoped (no version
-    // segment): the full changelog text covers every released version, so one
-    // cached parse serves all `fromVersion`/`versionLimit` queries.
-    // `resolvedVersion` only labels the response and must not narrow this key.
-    final cacheKey = 'changelog:$name';
-
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'get_changelog: cache hit key=$cacheKey');
-      final entries = await cached;
-      if (entries.isEmpty) return _domainError(_noDocumentation);
-      return _applyFilters(entries, versionLimit, fromVersion, resolvedVersion);
-    }
-
-    _log(LoggingLevel.debug, 'get_changelog: cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'get_changelog: HTTP request name=$name');
-
-    final String rawText;
-    switch (await _client.getChangelog(name)) {
+    // `changelog` is keyed by package name only (no version segment): the full
+    // changelog text covers every released version, so one cached parse serves
+    // all `fromVersion`/`versionLimit` queries. `resolvedVersion` only labels
+    // the response and must not narrow the identity.
+    final List<ChangelogEntry> entries;
+    switch (await _changelog.resolve((name: name))) {
       case PubDevFailure(:final error):
         return _domainError(error);
       case PubDevSuccess(:final value):
-        rawText = value;
+        entries = value;
     }
-    final entries = _parseChangelog(rawText);
-
-    _cache.set(cacheKey, Future.value(entries), kChangelogTtl);
 
     if (entries.isEmpty) return _domainError(_noDocumentation);
     return _applyFilters(entries, versionLimit, fromVersion, resolvedVersion);
@@ -175,56 +156,6 @@ final class GetChangelogHandler {
     return _success(
       entries.sublist(0, boundaryIdx).take(versionLimit).toList(),
       resolvedVersion,
-    );
-  }
-
-  // ── Parsing ────────────────────────────────────────────────────────────────
-
-  /// Parses [text] into a newest-first list of [ChangelogEntry] values.
-  ///
-  /// Splits [text] line-by-line on headings matching [_kHeadingPattern]. The
-  /// text between consecutive headings becomes the [ChangelogEntry.changes] for
-  /// that version. Returns an empty list when no version headings are found.
-  static List<ChangelogEntry> _parseChangelog(String text) {
-    final lines = text.split('\n');
-    final entries = <ChangelogEntry>[];
-    String? currentVersion;
-    final currentChanges = StringBuffer();
-
-    for (final line in lines) {
-      final match = _kHeadingPattern.firstMatch(line);
-      final version = match?.group(1)?.trim();
-      if (version != null && version.isNotEmpty) {
-        if (currentVersion != null) {
-          _flushEntry(entries, currentVersion, currentChanges);
-          currentChanges.clear();
-        }
-        currentVersion = version;
-      } else if (currentVersion != null) {
-        currentChanges.writeln(line);
-      }
-    }
-
-    if (currentVersion != null) {
-      _flushEntry(entries, currentVersion, currentChanges);
-    }
-
-    return entries;
-  }
-
-  static void _flushEntry(
-    List<ChangelogEntry> entries,
-    String version,
-    StringBuffer changesBuffer,
-  ) {
-    final changes = changesBuffer.toString().trim();
-    entries.add(
-      ChangelogEntry(
-        version: version,
-        date: null,
-        changes: changes,
-        breaking: changes.toLowerCase().contains('breaking'),
-      ),
     );
   }
 

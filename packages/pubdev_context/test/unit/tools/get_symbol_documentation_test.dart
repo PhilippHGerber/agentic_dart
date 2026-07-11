@@ -7,11 +7,10 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
-import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
 import 'package:pubdev_context/src/tools/get_symbol_documentation.dart';
 import 'package:test/test.dart';
 
@@ -110,6 +109,30 @@ void _stubSymbolDoc(
   );
 }
 
+/// Maps a [DartdocSymbol.type] string back to its raw dartdoc `kind` int — the
+/// inverse of [DartdocSymbol.fromJson]'s kind→type mapping — so tests can
+/// serialise a hand-built symbol list into a synthetic `index.json` HTTP stub
+/// body instead of pre-seeding the (now-private) apiIndex cache store.
+int _kindFor(String type) => switch (type) {
+  'class' => 3,
+  'constructor' => 2,
+  'library' => 9,
+  'method' => 10,
+  _ => throw ArgumentError('Add a case to _kindFor for type "$type".'),
+};
+
+/// Serialises [symbols] into a raw `index.json` HTTP response body.
+String _indexJsonBody(List<DartdocSymbol> symbols) => jsonEncode([
+  for (final s in symbols)
+    {
+      'name': s.name,
+      'qualifiedName': s.qualifiedName,
+      'href': s.href,
+      'kind': _kindFor(s.type),
+      'desc': s.desc,
+    },
+]);
+
 // ─── Test symbol helpers ───────────────────────────────────────────────────────
 
 /// Creates a minimal [DartdocSymbol] for test use.
@@ -186,14 +209,13 @@ void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
   late DateTime fakeNow;
-  late ResponseCache<String> symbolDocCache;
-  late ResponseCache<List<DartdocSymbol>> apiIndexCache;
+  late CacheRegistry registry;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetSymbolDocumentationHandler buildHandler() => GetSymbolDocumentationHandler(
     client: client,
-    cache: symbolDocCache,
-    apiIndexCache: apiIndexCache,
+    apiIndex: registry.apiIndex,
+    symbolDoc: registry.symbolDoc,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -202,8 +224,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    symbolDocCache = ResponseCache(clock: () => fakeNow);
-    apiIndexCache = ResponseCache(clock: () => fakeNow);
+    registry = CacheRegistry(client: client, clock: () => fakeNow);
     loggedMessages.clear();
   });
 
@@ -214,11 +235,7 @@ void main() {
   group('pass 1 — exact name match', () {
     test('resolves a single exact name match and returns documentation', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -231,11 +248,7 @@ void main() {
 
     test('returns non-empty plain-text content on a pass 1 hit', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -247,11 +260,7 @@ void main() {
 
     test('makes exactly one HTTP request for the symbol doc on a pass 1 hit', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       await buildHandler().call(_request({'package': 'http', 'symbol': 'Client'}));
@@ -274,11 +283,7 @@ void main() {
   group('pass 2 — qualifiedName suffix match', () {
     test('resolves "Client.send" via suffix match to the method href', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass, _clientSend]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass, _clientSend]));
       _stubSymbolDoc(mockHttp, href: 'http/Client/send.html');
 
       final result = await buildHandler().call(
@@ -306,11 +311,7 @@ void main() {
         href: 'http/',
         type: 'library',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([library, _clientSend]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([library, _clientSend]));
       _stubSymbolDoc(mockHttp, href: 'http/Client/send.html');
 
       final result = await buildHandler().call(
@@ -339,11 +340,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([classA, classB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       // First call returns ambiguous_symbol; simulated retry passes the
@@ -379,11 +376,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([classA, classB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
       _stubSymbolDoc(mockHttp, href: 'browser_client/Client-class.html');
 
       final result = await buildHandler().call(
@@ -419,11 +412,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([classA, classB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       // 'http.Client' has an exact qualifiedName match — must resolve without
@@ -450,11 +439,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([classA, classB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final handler = buildHandler();
 
@@ -490,11 +475,7 @@ void main() {
         href: 'http/Client/Client.html',
         type: 'constructor',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass, closeMethod]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass, closeMethod]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -528,11 +509,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([classA, classB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -556,11 +533,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([classA, classB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -583,11 +556,7 @@ void main() {
         qualifiedName: 'browser_client.BrowserClient.close',
         href: 'browser_client/BrowserClient/close.html',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([methodA, methodB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([methodA, methodB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'close'}),
@@ -611,11 +580,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([classA, classB]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -631,11 +596,7 @@ void main() {
   group('symbol_not_found', () {
     test('returns symbol_not_found when symbol is absent from the index', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'NonExistentSymbol'}),
@@ -647,11 +608,7 @@ void main() {
 
     test('returns symbol_not_found when the resolved href returns HTTP 404', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 404, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -664,11 +621,7 @@ void main() {
 
     test('symbol_not_found payload contains message and suggestion', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 404, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -685,11 +638,7 @@ void main() {
   group('no_documentation', () {
     test('returns no_documentation when the API index is empty', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value(<DartdocSymbol>[]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody(const <DartdocSymbol>[]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -765,72 +714,26 @@ void main() {
   // ─── Index cache behavior ───────────────────────────────────────────────────
 
   group('API index cache', () {
-    test('uses index cache hit without issuing an HTTP request for the index', () async {
+    test('a second call is an index cache hit issuing no further HTTP request', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
+      final handler = buildHandler();
 
-      await buildHandler().call(_request({'package': 'http', 'symbol': 'Client'}));
+      await handler.call(_request({'package': 'http', 'symbol': 'Client'}));
+      fakeNow = fakeNow.add(const Duration(minutes: 30));
+      await handler.call(_request({'package': 'http', 'symbol': 'Client'}));
 
-      verifyNever(
+      verify(
         () => mockHttp.get(
-          any(that: predicate<Uri>((u) => u.toString().contains('index.json'))),
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
+            ),
+          ),
           headers: any(named: 'headers'),
         ),
-      );
-    });
-
-    test(
-      'shares the API index cache key with browse_api_symbols (api_index:<package>:<version>)',
-      () async {
-        _stubPackageInfo(mockHttp);
-        _stubIndexJson(mockHttp);
-        _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html');
-
-        await buildHandler().call(
-          _request({'package': 'http', 'symbol': 'BrowserClient'}),
-        );
-
-        // The api_index cache should now be warmed under the versioned key.
-        final cached = apiIndexCache.get('$kApiIndexCachePrefix:http:1.6.0');
-        expect(cached, isNotNull);
-      },
-    );
-
-    test('logs a debug cache-hit message when the index is warm', () async {
-      _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
-      _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
-
-      await buildHandler().call(_request({'package': 'http', 'symbol': 'Client'}));
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('index cache hit')), isTrue);
-    });
-
-    test('logs a debug cache-miss message on an index fetch', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
-      _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html');
-
-      await buildHandler().call(
-        _request({'package': 'http', 'symbol': 'BrowserClient'}),
-      );
-
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('index cache miss')), isTrue);
+      ).called(1);
     });
   });
 
@@ -839,11 +742,7 @@ void main() {
   group('symbol doc cache', () {
     test('issues only one doc HTTP request for two calls resolving to the same href', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
       final handler = buildHandler();
 
@@ -863,66 +762,21 @@ void main() {
       ).called(1);
     });
 
-    test('logs a doc cache-hit message on the second call', () async {
+    test('warms the symbolDoc facade entry for (package, version, href)', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
-      final handler = buildHandler();
 
-      await handler.call(_request({'package': 'http', 'symbol': 'Client'}));
-      loggedMessages.clear();
-      fakeNow = fakeNow.add(const Duration(minutes: 30));
-      await handler.call(_request({'package': 'http', 'symbol': 'Client'}));
+      await buildHandler().call(_request({'package': 'http', 'symbol': 'Client'}));
 
-      final debugLogs = loggedMessages
-          .where((m) => m.$1 == LoggingLevel.debug)
-          .map((m) => m.$2.toString());
-      expect(debugLogs.any((m) => m.contains('doc cache hit')), isTrue);
-    });
-
-    test(
-      'symbol doc cache key uses symbol_doc:<package>:<version>:<href> format',
-      () async {
-        _stubPackageInfo(mockHttp);
-        apiIndexCache.set(
-          '$kApiIndexCachePrefix:http:1.6.0',
-          Future.value([_clientClass]),
-          kApiDocsTtl,
-        );
-        _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
-
-        await buildHandler().call(_request({'package': 'http', 'symbol': 'Client'}));
-
-        final cacheEntry = symbolDocCache.get(
-          '$kSymbolDocCachePrefix:http:1.6.0:http/Client-class.html',
-        );
-        expect(cacheEntry, isNotNull);
-      },
-    );
-
-    test('returns symbol_not_found when the cached symbol doc entry is empty', () async {
-      _stubPackageInfo(mockHttp);
-      symbolDocCache.set(
-        '$kSymbolDocCachePrefix:http:1.6.0:http/Client-class.html',
-        Future.value(''),
-        kSymbolDocTtl,
+      expect(
+        await registry.symbolDoc.peek((
+          package: 'http',
+          version: '1.6.0',
+          href: 'http/Client-class.html',
+        )),
+        isNotNull,
       );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
-
-      final result = await buildHandler().call(
-        _request({'package': 'http', 'symbol': 'Client'}),
-      );
-
-      expect(result.isError, isTrue);
-      expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
   });
 
@@ -931,9 +785,8 @@ void main() {
   group('symbol doc cache — version isolation', () {
     test('pinned-version request populates a separate cache entry from resolved', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache
-        ..set('$kApiIndexCachePrefix:http:1.6.0', Future.value([_clientClass]), kApiDocsTtl)
-        ..set('$kApiIndexCachePrefix:http:1.0.0', Future.value([_clientClass]), kApiDocsTtl);
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      _stubIndexJson(mockHttp, version: '1.0.0', body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html', version: '1.0.0');
       final handler = buildHandler();
@@ -944,20 +797,27 @@ void main() {
       );
 
       expect(
-        symbolDocCache.get('$kSymbolDocCachePrefix:http:1.6.0:http/Client-class.html'),
+        await registry.symbolDoc.peek((
+          package: 'http',
+          version: '1.6.0',
+          href: 'http/Client-class.html',
+        )),
         isNotNull,
       );
       expect(
-        symbolDocCache.get('$kSymbolDocCachePrefix:http:1.0.0:http/Client-class.html'),
+        await registry.symbolDoc.peek((
+          package: 'http',
+          version: '1.0.0',
+          href: 'http/Client-class.html',
+        )),
         isNotNull,
       );
     });
 
     test('different versions issue separate HTTP doc requests', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache
-        ..set('$kApiIndexCachePrefix:http:1.6.0', Future.value([_clientClass]), kApiDocsTtl)
-        ..set('$kApiIndexCachePrefix:http:1.0.0', Future.value([_clientClass]), kApiDocsTtl);
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      _stubIndexJson(mockHttp, version: '1.0.0', body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html', version: '1.0.0');
       final handler = buildHandler();
@@ -990,27 +850,6 @@ void main() {
       ).called(1);
     });
 
-    test('a cached 404 from one version does not block a valid request for another', () async {
-      // Pre-populate a symbol_not_found sentinel for version '3.0.0'.
-      symbolDocCache.set(
-        '$kSymbolDocCachePrefix:http:3.0.0:http/Client-class.html',
-        Future.value(''), // empty sentinel = symbol_not_found
-        kSymbolDocTtl,
-      );
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:2.0.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
-      _stubSymbolDoc(mockHttp, href: 'http/Client-class.html', version: '2.0.0');
-
-      // A request for '2.0.0' must not be blocked by the '3.0.0' sentinel.
-      final result = await buildHandler().call(
-        _request({'package': 'http', 'symbol': 'Client', 'version': '2.0.0'}),
-      );
-
-      expect(result.isError, isNull);
-    });
   });
 
   // ─── Cache poisoning on transient failure (P0.4) ────────────────────────────
@@ -1048,10 +887,8 @@ void main() {
       expect(first.isError, isTrue);
       expect(_errorPayload(first)['code'], equals(DomainErrors.serviceUnavailable));
 
-      // The failure must NOT have been cached — the index cache stays cold.
-      expect(apiIndexCache.get('$kApiIndexCachePrefix:http:1.6.0'), isNull);
-
-      // The outage clears; the second call retries the fetch and succeeds.
+      // The outage clears; the second call retries the fetch and succeeds —
+      // proving the failure was not cached.
       indexHealthy = true;
       final second = await handler.call(
         _request({'package': 'http', 'symbol': 'BrowserClient'}),
@@ -1088,10 +925,8 @@ void main() {
       expect(first.isError, isTrue);
       expect(_errorPayload(first)['code'], equals(DomainErrors.rateLimited));
 
-      // The failure must NOT have been cached — the index cache stays cold.
-      expect(apiIndexCache.get('$kApiIndexCachePrefix:http:1.6.0'), isNull);
-
-      // The rate limit clears; the second call retries the fetch and succeeds.
+      // The rate limit clears; the second call retries the fetch and succeeds —
+      // proving the failure was not cached.
       indexHealthy = true;
       final second = await handler.call(
         _request({'package': 'http', 'symbol': 'BrowserClient'}),
@@ -1101,11 +936,7 @@ void main() {
 
     test('a transient doc 503 is not cached — a second call retries and succeeds', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       // The symbol-doc endpoint fails with 503 during the first handler call,
       // then recovers for the second call.
       var docHealthy = false;
@@ -1132,7 +963,11 @@ void main() {
 
       // The failure must NOT have populated the symbol-doc cache.
       expect(
-        symbolDocCache.get('$kSymbolDocCachePrefix:http:1.6.0:http/Client-class.html'),
+        await registry.symbolDoc.peek((
+          package: 'http',
+          version: '1.6.0',
+          href: 'http/Client-class.html',
+        )),
         isNull,
       );
 
@@ -1145,11 +980,7 @@ void main() {
 
     test('a transient doc 429 is not cached — a second call retries and succeeds', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       // The symbol-doc endpoint is rate-limited (429) during the first handler
       // call, then recovers for the second call.
       var docHealthy = false;
@@ -1176,7 +1007,11 @@ void main() {
 
       // The failure must NOT have populated the symbol-doc cache.
       expect(
-        symbolDocCache.get('$kSymbolDocCachePrefix:http:1.6.0:http/Client-class.html'),
+        await registry.symbolDoc.peek((
+          package: 'http',
+          version: '1.6.0',
+          href: 'http/Client-class.html',
+        )),
         isNull,
       );
 
@@ -1193,11 +1028,7 @@ void main() {
   group('client failure (doc fetch)', () {
     test('propagates rate_limited when the symbol doc page returns HTTP 429', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 429, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1210,11 +1041,7 @@ void main() {
 
     test('propagates service_unavailable when the symbol doc page returns HTTP 503', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 503, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1227,11 +1054,7 @@ void main() {
 
     test('error payload always contains message and suggestion fields', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 503, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1288,16 +1111,41 @@ void main() {
       ).called(greaterThanOrEqualTo(1));
     });
 
-    test('uses a separate index cache key for a pinned version', () async {
+    test('a pinned version does not reuse the resolved-latest index cache entry', () async {
+      _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp, version: '1.2.0');
+      _stubIndexJson(mockHttp);
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html', version: '1.2.0');
+      _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html');
+      final handler = buildHandler();
 
-      await buildHandler().call(
+      await handler.call(
         _request({'package': 'http', 'symbol': 'BrowserClient', 'version': '1.2.0'}),
       );
+      await handler.call(_request({'package': 'http', 'symbol': 'BrowserClient'}));
 
-      expect(apiIndexCache.get('$kApiIndexCachePrefix:http:1.2.0'), isNotNull);
-      expect(apiIndexCache.get('$kApiIndexCachePrefix:http'), isNull);
+      // Both the pinned 1.2.0 index and the resolved-latest 1.6.0 index were
+      // fetched independently — a pinned version never reuses the latest entry.
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/documentation/http/1.2.0/index.json'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
+      verify(
+        () => mockHttp.get(
+          any(
+            that: predicate<Uri>(
+              (u) => u.toString().contains('/documentation/http/1.6.0/index.json'),
+            ),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
     });
 
     test('omitting version resolves to latest stable version', () async {
@@ -1327,11 +1175,7 @@ void main() {
   group('resolvedVersion', () {
     test('equals the resolved latest stable version when version is omitted', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1342,11 +1186,7 @@ void main() {
     });
 
     test('echoes the supplied version on a pinned request', () async {
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.2.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, version: '1.2.0', body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html', version: '1.2.0');
 
       final result = await buildHandler().call(
@@ -1362,11 +1202,7 @@ void main() {
   group('HTML processing', () {
     test('strips HTML tags from the returned content', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1379,11 +1215,7 @@ void main() {
 
     test('decodes HTML entities in the returned content', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1397,11 +1229,7 @@ void main() {
 
     test('result contains recognisable symbol content from the fixture', () async {
       _stubPackageInfo(mockHttp);
-      apiIndexCache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value([_clientClass]),
-        kApiDocsTtl,
-      );
+      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(

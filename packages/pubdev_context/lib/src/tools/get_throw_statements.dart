@@ -46,15 +46,20 @@
 ///
 /// ## Caches
 ///
-/// Source files: `source:<name>:<version>` — shared with
-/// `get_source_slice` and `list_package_source_files`.
+/// Source files are resolved through the shared `sourceFiles` [KeyedCache]
+/// facade (from `CacheRegistry`), keyed by `(package, resolvedVersion)`. That
+/// facade is also shared by `get_source_slice`, `list_package_source_files`,
+/// and the `pubspec` package resource.
 ///
-/// API index: `api_index:<package>:<resolvedVersion>` — shared with
-/// `browse_api_symbols` and `get_symbol_documentation`.
+/// AST snapshots are resolved through the shared `ast` [KeyedCache] facade,
+/// keyed by the file coordinate `(package, resolvedVersion, filepath)`.
+/// That facade is shared with `get_source_slice`.
 ///
-/// AST snapshots: `ast:<name>:<version>:<filepath>` — shared with
-/// `get_source_slice` when the same `astCache` instance is injected into both
-/// handlers.
+/// The dartdoc symbol index is resolved through the shared `apiIndex`
+/// [KeyedCache] facade, keyed by `(package, resolvedVersion)` — the same
+/// facade used by `browse_api_symbols`, `find_symbols`, `get_api_diff`, and
+/// `get_symbol_documentation`, and the package resource handler's `api`
+/// resource.
 ///
 /// ## Domain errors
 ///
@@ -67,17 +72,15 @@ library;
 import 'dart:convert';
 
 import 'package:analyzer/dart/analysis/results.dart';
-import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/source/line_info.dart';
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
-import 'browse_api_symbols.dart';
-import 'get_source_slice.dart';
 
 // ─── Private types ────────────────────────────────────────────────────────────
 
@@ -95,35 +98,30 @@ typedef _MethodScanResult = ({CallToolResult? result, bool classFound});
 
 /// Handles calls to the `get_throw_statements` MCP tool.
 ///
-/// Source-file loading is shared via `sourceFilesCache` with
-/// `GetSourceSliceHandler` and `ListPackageSourceFilesHandler`. The API index
-/// cache `apiIndexCache` is shared with `BrowseApiSymbolsHandler` and
-/// `GetSymbolDocumentationHandler`. The AST snapshot cache `astCache` is
-/// shared with `GetSourceSliceHandler` when the same instance is injected.
-///
-/// Pass a `clock` override in tests to control cache TTL expiry without
-/// sleeping. Pass an explicit `astCache` to share parsed AST results with
-/// another handler.
+/// Source-file loading and AST parsing are resolved through the shared
+/// `sourceFiles` and `ast` [KeyedCache] facades — pass the same instances used
+/// by `GetSourceSliceHandler` so the two handlers share both caches. The
+/// dartdoc symbol index is resolved through the shared `apiIndex` facade — pass
+/// the same instance used by `browse_api_symbols` and its siblings.
 final class GetThrowStatementsHandler {
   /// Creates a [GetThrowStatementsHandler].
   GetThrowStatementsHandler({
     required PubDevClient client,
-    required ResponseCache<Map<String, String>> sourceFilesCache,
-    required ResponseCache<List<DartdocSymbol>> apiIndexCache,
+    required KeyedCache<SourceFilesId, Map<String, String>> sourceFiles,
+    required KeyedCache<AstSnapshotId, ParseStringResult> ast,
+    required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required void Function(LoggingLevel, Object) log,
-    ResponseCache<ParseStringResult>? astCache,
-    Clock? clock,
   }) : _client = client,
-       _sourceFilesCache = sourceFilesCache,
-       _apiIndexCache = apiIndexCache,
-       _log = log,
-       _astCache = astCache ?? ResponseCache(clock: clock ?? DateTime.now);
+       _sourceFiles = sourceFiles,
+       _ast = ast,
+       _apiIndex = apiIndex,
+       _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<Map<String, String>> _sourceFilesCache;
-  final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
+  final KeyedCache<SourceFilesId, Map<String, String>> _sourceFiles;
+  final KeyedCache<AstSnapshotId, ParseStringResult> _ast;
+  final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final void Function(LoggingLevel, Object) _log;
-  final ResponseCache<ParseStringResult> _astCache;
 
   /// Handles a [CallToolRequest] for `get_throw_statements`.
   ///
@@ -373,26 +371,16 @@ final class GetThrowStatementsHandler {
     String resolvedVersion,
     String method,
   ) async {
-    // Step 1: load API index to locate the function by qualifiedName suffix.
-    // The index cache key always uses the resolved (concrete) version so that a
-    // "latest" lookup and an explicit version lookup share the same cache entry.
-    final indexCacheKey = '$kApiIndexCachePrefix:$package:$resolvedVersion';
-
-    List<DartdocSymbol> symbols;
-    final cachedIndex = _apiIndexCache.get(indexCacheKey);
-    if (cachedIndex != null) {
-      _log(LoggingLevel.debug, 'get_throw_statements: index cache hit key=$indexCacheKey');
-      symbols = await cachedIndex;
-    } else {
-      _log(LoggingLevel.debug, 'get_throw_statements: index cache miss key=$indexCacheKey');
-      _log(LoggingLevel.info, 'get_throw_statements: index HTTP request package=$package');
-      switch (await _client.getApiIndex(package, version: resolvedVersion)) {
-        case PubDevFailure(:final error):
-          return _domainError(error);
-        case PubDevSuccess(:final value):
-          symbols = value;
-      }
-      _apiIndexCache.set(indexCacheKey, Future.value(symbols), kApiDocsTtl);
+    // Step 1: resolve the API index to locate the function by qualifiedName
+    // suffix. The identity always carries the resolved (concrete) version so
+    // that a "latest" lookup and an explicit version lookup share the same
+    // facade entry.
+    final List<DartdocSymbol> symbols;
+    switch (await _apiIndex.resolve((name: package, version: resolvedVersion))) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        symbols = value;
     }
 
     if (symbols.isEmpty) return _domainError(_kNoDocumentation);
@@ -496,61 +484,31 @@ final class GetThrowStatementsHandler {
 
   // ─── Source file loading ───────────────────────────────────────────────────
 
-  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(
-    String package,
-    String version,
-  ) async {
-    final cacheKey = 'source:$package:$version';
-    final cached = _sourceFilesCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'get_throw_statements: source cache hit key=$cacheKey');
-      return PubDevSuccess(await cached);
-    }
-
-    _log(LoggingLevel.debug, 'get_throw_statements: source cache miss key=$cacheKey');
-    _log(
-      LoggingLevel.info,
-      'get_throw_statements: HTTP tarball request package=$package',
-    );
-
-    switch (await _client.getPackageSourceFiles(package, version)) {
-      case PubDevSuccess(:final value):
-        _sourceFilesCache.set(cacheKey, Future.value(value), kSourceFileTtl);
-        return PubDevSuccess(value);
-      case PubDevFailure(:final error):
-        return PubDevFailure(
-          error.code == DomainErrors.packageNotFound ? _packageNotFoundError(package) : error,
-        );
-    }
-  }
+  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(String package, String version) =>
+      _sourceFiles.resolve((name: package, version: version));
 
   // ─── AST parsing & caching ─────────────────────────────────────────────────
 
-  /// Returns the parsed AST for [filePath], computing and caching on first call.
+  /// Returns the parsed AST for [filePath], resolving through the shared `ast`
+  /// facade so the same file is never parsed twice across a single agent turn.
   Future<ParseStringResult> _getOrParseAst(
     String package,
     String version,
     String filePath,
     String content,
   ) async {
-    final cacheKey = '$kAstSnapshotCachePrefix:$package:$version:$filePath';
-
-    final cached = _astCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'get_throw_statements: AST cache hit key=$cacheKey');
-      return cached;
-    }
-
-    _log(LoggingLevel.debug, 'get_throw_statements: parsing $filePath');
-
-    final result = parseString(
-      content: content,
+    final result = await _ast.resolve((
+      name: package,
+      version: version,
       path: filePath,
-      throwIfDiagnostics: false,
-    );
-
-    _astCache.set(cacheKey, Future.value(result), kAstSnapshotTtl);
-    return result;
+      content: content,
+    ));
+    return switch (result) {
+      PubDevSuccess(:final value) => value,
+      // The `ast` facade's fetch closure always returns PubDevSuccess — see
+      // CacheRegistry.ast.
+      PubDevFailure(:final error) => throw StateError('unexpected AST parse failure: $error'),
+    };
   }
 
   // ─── AST traversal helpers ────────────────────────────────────────────────
@@ -839,12 +797,6 @@ final class GetThrowStatementsHandler {
     suggestion:
         'Verify the class name is spelled correctly. '
         'Use browse_api_symbols with type=class to discover class names.',
-  );
-
-  static DomainError _packageNotFoundError(String package) => DomainError(
-    code: DomainErrors.packageNotFound,
-    message: 'Package "$package" not found on pub.dev.',
-    suggestion: 'Verify the package name and try again.',
   );
 
   static CallToolResult _successJson(

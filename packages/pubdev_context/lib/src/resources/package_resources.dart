@@ -17,14 +17,23 @@
 /// header line so the LLM is grounded on the concrete version for follow-up
 /// calls.
 ///
-/// The `api` resource shares its cache key format with [BrowseApiSymbolsHandler]
-/// (`api_index:<name>:<resolvedVersion>`) so that a warm symbol-search cache
-/// also satisfies this resource and vice versa.
+/// The `readme`, `example`, and `changelog` resources resolve their raw
+/// markdown body through the shared `readme` [KeyedCache] facade (from
+/// `CacheRegistry`), keyed by `(name, kind)` — the three kinds are single-owner
+/// (this handler is the only reader) and share a TTL, so one facade serves all
+/// three.
 ///
-/// The `pubspec` resource shares its source-file cache key format
-/// (`source:<name>:<resolvedVersion>`) with `get_source_slice`,
-/// `list_package_source_files`, and `get_throw_statements`, so a single tarball
-/// download warms every source-backed reader for that package version.
+/// The `api` resource resolves the dartdoc symbol index through the shared
+/// `apiIndex` [KeyedCache] facade, keyed by `(name, resolvedVersion)` — the
+/// same facade used by [BrowseApiSymbolsHandler] and its siblings, so a warm
+/// symbol-search cache also satisfies this resource and vice versa.
+///
+/// The `pubspec` resource resolves the extracted source-file map through the
+/// shared `sourceFiles` [KeyedCache] facade, keyed by `(name, resolvedVersion)`.
+/// That facade is also shared by `get_source_slice` and `get_throw_statements`,
+/// so a single tarball download warms every migrated source-backed reader for
+/// that package version. `list_package_source_files` is not yet migrated onto
+/// it — see `issues/keyed-cache/04-source-and-ast-cache.md`.
 ///
 /// [CompletionsSupport] for the `{name}` and `{version}` parameters is handled
 /// in the server layer ([PubMcpServer.handleComplete]) using the search and
@@ -33,32 +42,17 @@
 /// See issue #11.
 library;
 
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 import '../server.dart' show PubMcpServer;
 import '../tools/browse_api_symbols.dart';
-
-/// Cache-key prefix for README entries.
-///
-/// Full key format: `$kReadmeCachePrefix:<packageName>`.
-const kReadmeCachePrefix = 'readme';
-
-/// Cache-key prefix for example entries.
-///
-/// Full key format: `$kExampleCachePrefix:<packageName>`.
-const kExampleCachePrefix = 'example';
-
-/// Cache-key prefix for raw changelog text entries.
-///
-/// Full key format: `$kChangelogCachePrefix:<packageName>`.
-const kChangelogCachePrefix = 'changelog';
 
 /// URI template string for the package README resource.
 const kReadmeUriTemplate = 'pub://package/{name}@{version}/readme';
@@ -77,13 +71,6 @@ const kPubspecUriTemplate = 'pub://package/{name}@{version}/pubspec';
 
 /// The `{version}` alias that resolves to the Latest Stable Version.
 const kLatestVersionAlias = 'latest';
-
-/// Cache-key prefix for extracted package source-file maps.
-///
-/// Full key format: `$kSourceFilesCachePrefix:<name>:<resolvedVersion>`. Shared
-/// with `get_source_slice`, `list_package_source_files`, and
-/// `get_throw_statements` so one tarball download warms every source reader.
-const kSourceFilesCachePrefix = 'source';
 
 /// The tarball path of the pubspec manifest, relative to the package root.
 const kPubspecFileName = 'pubspec.yaml';
@@ -138,59 +125,51 @@ const _kPubspecNotFound = DomainError(
 /// );
 /// ```
 ///
-/// The `readme` resource fetches `GET /documentation/{name}/latest/` via
-/// [PubDevClient.getFullReadme] and caches the result with [kReadmeTtl].
+/// The `readme`, `example`, and `changelog` resources each resolve their raw
+/// markdown body through the shared `readme` [KeyedCache] facade, keyed by
+/// `(name, kind)` — `ReadmeKind.readme` fetches via [PubDevClient.getFullReadme],
+/// `ReadmeKind.example` via [PubDevClient.getExample], and `ReadmeKind.changelog`
+/// via [PubDevClient.getChangelog]. This `changelog` kind is a distinct facade
+/// entry from the parsed `ChangelogEntry` list cached by `GetChangelogHandler`.
 ///
-/// The `changelog` resource fetches `GET /packages/{name}/changelog` via
-/// [PubDevClient.getChangelog] and caches the raw markdown text with
-/// [kChangelogRawTtl] under key `changelog:<name>`. This is separate from the
-/// parsed `ChangelogEntry` list cached by `GetChangelogHandler`.
+/// The `api` resource resolves the dartdoc symbol index through the shared
+/// `apiIndex` [KeyedCache] facade, keyed by `(name, resolvedVersion)` — the
+/// same facade used by [BrowseApiSymbolsHandler] and its siblings, so both warm
+/// each other's cache.
 ///
-/// The `api` resource reads the dartdoc symbol index via [PubDevClient.getApiIndex]
-/// and caches it under the same key used by [BrowseApiSymbolsHandler]
-/// (`api_index:<name>:<resolvedVersion>`), so both modules warm each other's cache.
-///
-/// The `pubspec` resource extracts `pubspec.yaml` from the version tarball via
-/// [PubDevClient.getPackageSourceFiles] and shares the resulting source-file map
-/// under the key `source:<name>:<resolvedVersion>` with `get_source_slice` and
-/// `list_package_source_files`, so a single tarball download warms all three.
+/// The `pubspec` resource extracts `pubspec.yaml` from the version tarball
+/// through the shared `sourceFiles` [KeyedCache] facade, keyed by `(name,
+/// resolvedVersion)`. That facade is also shared by `get_source_slice` and
+/// `get_throw_statements`, so a single tarball download warms every migrated
+/// source-backed reader.
 ///
 /// All resources return a [ReadResourceResult] whose content uses a structured
 /// JSON [DomainError] payload for `package_not_found` and other failure cases.
 final class PackageResourcesHandler {
   /// Creates a [PackageResourcesHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [readmeCache] is the shared TTL store
-  /// for full README and example strings cached with [kReadmeTtl].
-  /// [changelogCache] is a dedicated store for raw changelog markdown strings
-  /// cached with [kChangelogRawTtl] — it is separate from the parsed
-  /// `ChangelogEntry` cache used by `GetChangelogHandler`. [apiIndexCache] must
-  /// be the same instance used by [BrowseApiSymbolsHandler] to enable shared
-  /// cache warm-up — both modules use the key prefix [kApiIndexCachePrefix].
-  /// [sourceFilesCache] must be the same instance used by `get_source_slice`
-  /// and `list_package_source_files` so a single tarball download warms every
-  /// source-backed reader — all use the key prefix [kSourceFilesCachePrefix].
-  /// [log] receives structured events at the appropriate [LoggingLevel].
+  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
+  /// [readme] is the shared [KeyedCache] facade (from `CacheRegistry`) that
+  /// resolves and caches the `readme`, `example`, and `changelog` resource
+  /// bodies by [ReadmeId]. [apiIndex] is the shared facade used by
+  /// [BrowseApiSymbolsHandler] and its siblings — pass the same instance to
+  /// enable shared cache warm-up. [sourceFiles] is the shared facade — pass the
+  /// same instance used by `get_source_slice` and `get_throw_statements` so a
+  /// single tarball download warms every migrated source-backed reader.
   const PackageResourcesHandler({
     required PubDevClient client,
-    required ResponseCache<String> readmeCache,
-    required ResponseCache<String> changelogCache,
-    required ResponseCache<List<DartdocSymbol>> apiIndexCache,
-    required ResponseCache<Map<String, String>> sourceFilesCache,
-    required void Function(LoggingLevel, Object) log,
+    required KeyedCache<ReadmeId, String> readme,
+    required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
+    required KeyedCache<SourceFilesId, Map<String, String>> sourceFiles,
   }) : _client = client,
-       _readmeCache = readmeCache,
-       _changelogCache = changelogCache,
-       _apiIndexCache = apiIndexCache,
-       _sourceFilesCache = sourceFilesCache,
-       _log = log;
+       _readme = readme,
+       _apiIndex = apiIndex,
+       _sourceFiles = sourceFiles;
 
   final PubDevClient _client;
-  final ResponseCache<String> _readmeCache;
-  final ResponseCache<String> _changelogCache;
-  final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
-  final ResponseCache<Map<String, String>> _sourceFilesCache;
-  final void Function(LoggingLevel, Object) _log;
+  final KeyedCache<ReadmeId, String> _readme;
+  final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
+  final KeyedCache<SourceFilesId, Map<String, String>> _sourceFiles;
 
   // ── Resource template descriptors ──────────────────────────────────────────
 
@@ -222,9 +201,8 @@ final class PackageResourcesHandler {
   /// [ResourceTemplate] descriptor for the `pub://package/{name}@{version}/changelog` resource.
   ///
   /// Register this with addResourceTemplate alongside [handleReadResource].
-  /// The cached entry stores raw changelog markdown text under `changelog:<name>`
-  /// and is separate from the parsed `ChangelogEntry` cache used by
-  /// `GetChangelogHandler`.
+  /// The raw changelog markdown text is a distinct `readme` facade entry from
+  /// the parsed `ChangelogEntry` cache used by `GetChangelogHandler`.
   static final kChangelogTemplate = ResourceTemplate(
     uriTemplate: kChangelogUriTemplate,
     name: 'Package changelog',
@@ -238,9 +216,8 @@ final class PackageResourcesHandler {
   /// [ResourceTemplate] descriptor for the `pub://package/{name}@{version}/api` resource.
   ///
   /// Register this with addResourceTemplate alongside [handleReadResource].
-  /// The cache key for this resource is `api_index:<name>:<resolvedVersion>`,
-  /// identical to the one used by [BrowseApiSymbolsHandler], so both modules warm
-  /// each other's cache.
+  /// Resolves through the same `apiIndex` facade entry as [BrowseApiSymbolsHandler],
+  /// so both modules warm each other's cache.
   static final kApiTemplate = ResourceTemplate(
     uriTemplate: kApiUriTemplate,
     name: 'Package API index',
@@ -307,112 +284,36 @@ final class PackageResourcesHandler {
     return Future.value(PubDevSuccess(version));
   }
 
-  // ── Private: README ────────────────────────────────────────────────────────
+  // ── Private: README / example / changelog ──────────────────────────────────
 
   Future<ReadResourceResult> _handleReadme(
     ReadResourceRequest request,
     String name,
     String version,
-  ) async {
-    final String resolvedVersion;
-    switch (await _resolveVersion(name, version)) {
-      case PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound:
-        return _domainErrorResult(request.uri, _kPackageNotFound);
-      case PubDevFailure(:final error):
-        return _domainErrorResult(request.uri, error);
-      case PubDevSuccess(:final value):
-        resolvedVersion = value;
-    }
-
-    final cacheKey = '$kReadmeCachePrefix:$name';
-
-    final cached = _readmeCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'readme resource: cache hit key=$cacheKey');
-      return _textResult(request.uri, resolvedVersion, await cached);
-    }
-
-    _log(LoggingLevel.debug, 'readme resource: cache miss key=$cacheKey');
-
-    final future = _client.getFullReadme(name);
-    _readmeCache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => '',
-        },
-      ),
-      kReadmeTtl,
-    );
-
-    _log(LoggingLevel.info, 'readme resource: HTTP request name=$name');
-
-    final result = await future;
-    return switch (result) {
-      PubDevSuccess(:final value) => _textResult(request.uri, resolvedVersion, value),
-      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
-        _domainErrorResult(request.uri, _kPackageNotFound),
-      PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
-    };
-  }
-
-  // ── Private: example ──────────────────────────────────────────────────────
+  ) => _resolveMarkdown(request, name, version, ReadmeKind.readme);
 
   Future<ReadResourceResult> _handleExample(
     ReadResourceRequest request,
     String name,
     String version,
-  ) async {
-    final String resolvedVersion;
-    switch (await _resolveVersion(name, version)) {
-      case PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound:
-        return _domainErrorResult(request.uri, _kPackageNotFound);
-      case PubDevFailure(:final error):
-        return _domainErrorResult(request.uri, error);
-      case PubDevSuccess(:final value):
-        resolvedVersion = value;
-    }
-
-    final cacheKey = '$kExampleCachePrefix:$name';
-
-    final cached = _readmeCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'example resource: cache hit key=$cacheKey');
-      return _textResult(request.uri, resolvedVersion, await cached);
-    }
-
-    _log(LoggingLevel.debug, 'example resource: cache miss key=$cacheKey');
-
-    final future = _client.getExample(name);
-    _readmeCache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => '',
-        },
-      ),
-      kReadmeTtl,
-    );
-
-    _log(LoggingLevel.info, 'example resource: HTTP request name=$name');
-
-    final result = await future;
-    return switch (result) {
-      PubDevSuccess(:final value) => _textResult(request.uri, resolvedVersion, value),
-      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
-        _domainErrorResult(request.uri, _kPackageNotFound),
-      PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
-    };
-  }
-
-  // ── Private: changelog ────────────────────────────────────────────────────
+  ) => _resolveMarkdown(request, name, version, ReadmeKind.example);
 
   Future<ReadResourceResult> _handleChangelog(
     ReadResourceRequest request,
     String name,
     String version,
+  ) => _resolveMarkdown(request, name, version, ReadmeKind.changelog);
+
+  /// Resolves [version], then the raw markdown body of [kind] for [name]
+  /// through the shared `readme` facade.
+  ///
+  /// Shared by [_handleReadme], [_handleExample], and [_handleChangelog] — the
+  /// three differ only in which [ReadmeKind] they resolve.
+  Future<ReadResourceResult> _resolveMarkdown(
+    ReadResourceRequest request,
+    String name,
+    String version,
+    ReadmeKind kind,
   ) async {
     final String resolvedVersion;
     switch (await _resolveVersion(name, version)) {
@@ -424,31 +325,7 @@ final class PackageResourcesHandler {
         resolvedVersion = value;
     }
 
-    final cacheKey = '$kChangelogCachePrefix:$name';
-
-    final cached = _changelogCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'changelog resource: cache hit key=$cacheKey');
-      return _textResult(request.uri, resolvedVersion, await cached);
-    }
-
-    _log(LoggingLevel.debug, 'changelog resource: cache miss key=$cacheKey');
-
-    final future = _client.getChangelog(name);
-    _changelogCache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => '',
-        },
-      ),
-      kChangelogRawTtl,
-    );
-
-    _log(LoggingLevel.info, 'changelog resource: HTTP request name=$name');
-
-    final result = await future;
+    final result = await _readme.resolve((name: name, kind: kind));
     return switch (result) {
       PubDevSuccess(:final value) => _textResult(request.uri, resolvedVersion, value),
       PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound =>
@@ -465,9 +342,9 @@ final class PackageResourcesHandler {
     String version,
   ) async {
     // Resolve `latest` to a concrete version (an explicit version is echoed
-    // without an HTTP call) so the cache key is always version-qualified (never
-    // bare `api_index:<name>`), matching the key format used by
-    // [BrowseApiSymbolsHandler] for shared cache warm-up.
+    // without an HTTP call) so the identity passed to `apiIndex` is always
+    // version-anchored, matching [BrowseApiSymbolsHandler] for shared cache
+    // warm-up.
     final String resolvedVersion;
     switch (await _resolveVersion(name, version)) {
       case PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound:
@@ -478,31 +355,14 @@ final class PackageResourcesHandler {
         resolvedVersion = value;
     }
 
-    final cacheKey = '$kApiIndexCachePrefix:$name:$resolvedVersion';
-
-    final cached = _apiIndexCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'api resource: cache hit key=$cacheKey');
-      return _apiResult(request.uri, resolvedVersion, await cached);
-    }
-
-    _log(LoggingLevel.debug, 'api resource: cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'api resource: HTTP request name=$name');
-
-    final result = await _client.getApiIndex(name, version: resolvedVersion);
-    switch (result) {
-      case PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound:
-        return _domainErrorResult(request.uri, _kPackageNotFound);
-      case PubDevFailure(:final error):
-        return _domainErrorResult(request.uri, error);
-      case PubDevSuccess(:final value):
-        // Cache only after a successful fetch. Storing a failure-mapped empty
-        // list would poison the cache: every subsequent read within the TTL
-        // window would return an empty index without retrying, letting a
-        // single transient error (429/503/network) outlive the outage itself.
-        _apiIndexCache.set(cacheKey, Future.value(value), kApiDocsTtl);
-        return _apiResult(request.uri, resolvedVersion, value);
-    }
+    // `apiIndex`'s fetch closure remaps a `package_not_found` index failure into
+    // a cached empty-list success — see CacheRegistry.apiIndex — so only a
+    // genuine transient failure reaches this switch.
+    final result = await _apiIndex.resolve((name: name, version: resolvedVersion));
+    return switch (result) {
+      PubDevSuccess(:final value) => _apiResult(request.uri, resolvedVersion, value),
+      PubDevFailure(:final error) => _domainErrorResult(request.uri, error),
+    };
   }
 
   // ── Private: pubspec ───────────────────────────────────────────────────────
@@ -540,45 +400,10 @@ final class PackageResourcesHandler {
 
   /// Loads the extracted source-file map for [name] at the concrete [version].
   ///
-  /// Shares the `source:<name>:<version>` cache entry with `get_source_slice`
-  /// and `list_package_source_files`, so a single tarball download serves every
-  /// source reader. Stores the in-flight future before awaiting so concurrent
-  /// callers share one download (cache-stampede prevention); a failed fetch is
-  /// evicted so the next request retries cleanly rather than caching the error.
-  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(
-    String name,
-    String version,
-  ) async {
-    final cacheKey = '$kSourceFilesCachePrefix:$name:$version';
-
-    final cached = _sourceFilesCache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'pubspec resource: source cache hit key=$cacheKey');
-      try {
-        return PubDevSuccess(await cached);
-      } on Object {
-        // The in-flight request sharing this future failed; fall through to
-        // issue an independent request.
-      }
-    }
-
-    _log(LoggingLevel.debug, 'pubspec resource: source cache miss key=$cacheKey');
-    _log(LoggingLevel.info, 'pubspec resource: HTTP tarball request name=$name');
-
-    final completer = Completer<Map<String, String>>();
-    _sourceFilesCache.set(cacheKey, completer.future, kSourceFileTtl);
-
-    switch (await _client.getPackageSourceFiles(name, version)) {
-      case PubDevSuccess(:final value):
-        completer.complete(value);
-        return PubDevSuccess(value);
-      case PubDevFailure(:final error):
-        completer.future.ignore();
-        completer.completeError(StateError('fetch failed: ${error.code}'));
-        _sourceFilesCache.invalidate(cacheKey);
-        return PubDevFailure(error);
-    }
-  }
+  /// Resolves through the shared `sourceFiles` facade, so a single tarball
+  /// download serves every migrated source reader.
+  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(String name, String version) =>
+      _sourceFiles.resolve((name: name, version: version));
 
   // ── Private: helpers ───────────────────────────────────────────────────────
 

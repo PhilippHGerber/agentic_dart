@@ -9,10 +9,11 @@
 /// via [PubDevClient.resolveLatestStable]. Every success response includes
 /// `resolvedVersion` as its first JSON key.
 ///
-/// Cache key format: `api_index:<package>:<resolvedVersion>`.
-/// The API index is cached with a [kApiDocsTtl] TTL and the cache key is
-/// intentionally shared with the symbol-documentation handler so that both
-/// modules warm each other's cache. Cache hits are logged at [LoggingLevel.debug].
+/// The dartdoc symbol index is resolved through the shared `apiIndex`
+/// [KeyedCache] facade (built by `CacheRegistry`), keyed by `(package,
+/// resolvedVersion)`. That facade is shared with `find_symbols`,
+/// `get_api_diff`, and the symbol-documentation handler, so a warm entry
+/// serves all four without a second pub.dev fetch.
 ///
 /// Domain errors:
 /// - `NO_DOCUMENTATION`: `index.json` is missing or empty for the package.
@@ -26,49 +27,43 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
 
-/// Cache-key prefix used by both [BrowseApiSymbolsHandler] and the symbol-
-/// documentation handler to share the dartdoc symbol index cache.
-///
-/// Full key format: `$kApiIndexCachePrefix:<packageName>:<version>`.
-const kApiIndexCachePrefix = 'api_index';
-
 /// Handles calls to the `browse_api_symbols` MCP tool.
 ///
-/// Consults `cache` before issuing HTTP requests; stores results with
-/// [kApiDocsTtl]. Logs cache hits at [LoggingLevel.debug] and HTTP requests
-/// at [LoggingLevel.info] via `log`.
+/// Resolves the dartdoc symbol index through `apiIndex` before issuing any
+/// HTTP request. Logs at [LoggingLevel.info] via `log`.
 final class BrowseApiSymbolsHandler {
   /// Creates a [BrowseApiSymbolsHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway. [cache] is the shared TTL store
-  /// for dartdoc symbol indexes; pass the same instance to the symbol-
-  /// documentation handler so both modules warm each other's cache.
-  /// [log] receives structured log events at the appropriate [LoggingLevel].
+  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
+  /// [apiIndex] is the shared [KeyedCache] facade (from `CacheRegistry`) that
+  /// resolves and caches the dartdoc symbol index by [ApiIndexId]. [log]
+  /// receives structured log events at the appropriate [LoggingLevel].
   const BrowseApiSymbolsHandler({
     required PubDevClient client,
-    required ResponseCache<List<DartdocSymbol>> cache,
+    required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required void Function(LoggingLevel, Object) log,
   }) : _client = client,
-       _cache = cache,
+       _apiIndex = apiIndex,
        _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<List<DartdocSymbol>> _cache;
+  final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `browse_api_symbols`.
   ///
   /// Resolves the version (via [PubDevClient.resolveLatestStable] when absent),
-  /// validates `limit` against the 25-result cap, consults the cache, and
-  /// delegates to [PubDevClient.getApiIndex]. Exact [DartdocSymbol.name]
-  /// matches are ranked before [DartdocSymbol.desc]-only matches; the optional
-  /// `type` filter is applied after ranking. Returns [CallToolResult.isError]
-  /// `true` with a structured JSON payload on any domain failure.
+  /// validates `limit` against the 25-result cap, and resolves the dartdoc
+  /// symbol index through `apiIndex`. Exact [DartdocSymbol.name] matches are
+  /// ranked before [DartdocSymbol.desc]-only matches; the optional `type`
+  /// filter is applied after ranking. Returns [CallToolResult.isError] `true`
+  /// with a structured JSON payload on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
 
@@ -107,41 +102,12 @@ final class BrowseApiSymbolsHandler {
       _log(LoggingLevel.debug, 'browse_api_symbols: resolved version=$resolvedVersion');
     }
 
-    // ── Cache lookup ───────────────────────────────────────────────────────────
+    // ── Resolve the API index ───────────────────────────────────────────────────
 
-    final cacheKey = '$kApiIndexCachePrefix:$package:$resolvedVersion';
-
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'browse_api_symbols: cache hit key=$cacheKey');
-      final symbols = await cached;
-      return _buildResponse(symbols, query, type, limit, resolvedVersion);
-    }
-
-    _log(LoggingLevel.debug, 'browse_api_symbols: cache miss key=$cacheKey');
-
-    final future = _client.getApiIndex(package, version: resolvedVersion);
-
-    _cache.set(
-      cacheKey,
-      future.then(
-        (r) => switch (r) {
-          PubDevSuccess(:final value) => value,
-          PubDevFailure() => <DartdocSymbol>[],
-        },
-      ),
-      kApiDocsTtl,
-    );
-
-    _log(LoggingLevel.info, 'browse_api_symbols: HTTP request package=$package');
-
-    final result = await future;
+    final result = await _apiIndex.resolve((name: package, version: resolvedVersion));
 
     return switch (result) {
       PubDevSuccess(:final value) => _buildResponse(value, query, type, limit, resolvedVersion),
-      PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound => _domainError(
-        _kNoDocumentation,
-      ),
       PubDevFailure(:final error) => _domainError(error),
     };
   }

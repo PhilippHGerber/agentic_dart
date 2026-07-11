@@ -7,11 +7,11 @@ import 'dart:io';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/memory_cache.dart';
+import 'package:pubdev_context/src/cache/cache_registry.dart';
+import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
-import 'package:pubdev_context/src/tools/browse_api_symbols.dart' show kApiIndexCachePrefix;
 import 'package:pubdev_context/src/tools/find_symbols.dart';
 import 'package:test/test.dart';
 
@@ -117,12 +117,12 @@ void main() {
   late _MockHttpClient mockHttp;
   late PubDevClient client;
   late DateTime fakeNow;
-  late ResponseCache<List<DartdocSymbol>> cache;
+  late KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   FindSymbolsHandler buildHandler() => FindSymbolsHandler(
     client: client,
-    cache: cache,
+    apiIndex: apiIndex,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -131,7 +131,7 @@ void main() {
     registerFallbackValue(Uri.parse('https://pub.dev'));
     client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    cache = ResponseCache(clock: () => fakeNow);
+    apiIndex = CacheRegistry(client: client, clock: () => fakeNow).apiIndex;
     loggedMessages.clear();
   });
 
@@ -321,28 +321,7 @@ void main() {
 
   // ─── Shared cache ─────────────────────────────────────────────────────────────
 
-  group('shared apiIndexCache', () {
-    test('makes no index HTTP request when the cache is pre-populated', () async {
-      _stubPackageInfo(mockHttp);
-      final symbols = jsonDecode(_readFixture('index_json.json')) as List<Object?>;
-      cache.set(
-        '$kApiIndexCachePrefix:http:1.6.0',
-        Future.value(
-          symbols.whereType<Map<String, Object?>>().map(DartdocSymbol.fromJson).toList(),
-        ),
-        kApiDocsTtl,
-      );
-
-      await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
-
-      verifyNever(
-        () => mockHttp.get(
-          any(that: predicate<Uri>((u) => u.toString().contains('index.json'))),
-          headers: any(named: 'headers'),
-        ),
-      );
-    });
-
+  group('apiIndex facade', () {
     test('issues only one index request across two calls to the same package', () async {
       _stubPackageInfo(mockHttp);
       _stubIndexJson(mockHttp);

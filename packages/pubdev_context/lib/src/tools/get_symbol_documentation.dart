@@ -29,15 +29,17 @@
 /// error is returned with `error.details.candidates` listing `qualifiedName`
 /// values.
 ///
-/// ## Cache keys
+/// ## Caching
 ///
-/// API index: `api_index:<package>:<resolvedVersion>` — the version segment is
-/// always a concrete semver (latest-stable is resolved before the key is built),
-/// shared with `browse_api_symbols` (see [kApiIndexCachePrefix]).
+/// The dartdoc symbol index is resolved through the shared `apiIndex`
+/// [KeyedCache] facade (built by `CacheRegistry`), keyed by `(package,
+/// resolvedVersion)` — shared with `browse_api_symbols`, `find_symbols`, and
+/// `get_api_diff`, so a warm entry serves all four.
 ///
-/// Symbol doc: `symbol_doc:<package>:<version>:<href>` (see [kSymbolDocCachePrefix]).
-/// Results are cached with a [kSymbolDocTtl] TTL. The version segment prevents
-/// a cached response for one version from being silently served for another.
+/// The symbol doc page is resolved through the shared `symbolDoc` [KeyedCache]
+/// facade (built by `CacheRegistry`), keyed by `(package, resolvedVersion,
+/// href)`. The version segment prevents a cached response for one version from
+/// being silently served for another.
 ///
 /// ## Domain errors
 ///
@@ -54,19 +56,11 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
-import '../cache/memory_cache.dart';
+import '../cache/cache_registry.dart';
+import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
-import 'browse_api_symbols.dart';
-
-/// Cache-key prefix for symbol documentation entries.
-///
-/// Full key format: `$kSymbolDocCachePrefix:<package>:<version>:<href>`.
-/// The version segment is always a concrete semver (e.g. `"1.2.0"`) — the
-/// latest-stable version is resolved before the key is built — so requests for
-/// different versions never reuse each other's cached docs.
-const kSymbolDocCachePrefix = 'symbol_doc';
 
 // ─── Internal resolution result types ─────────────────────────────────────────
 
@@ -88,30 +82,32 @@ final class _NoMatch extends _SymbolMatch {}
 
 /// Handles calls to the `get_symbol_documentation` MCP tool.
 ///
-/// Consults `apiIndexCache` and `cache` before issuing HTTP requests. Logs
-/// cache hits at [LoggingLevel.debug] and HTTP requests at [LoggingLevel.info]
-/// via `log`.
+/// Resolves the dartdoc symbol index through `apiIndex` and the symbol doc page
+/// itself through `symbolDoc` before issuing any HTTP request. Logs at
+/// [LoggingLevel.info] via `log`.
 final class GetSymbolDocumentationHandler {
   /// Creates a [GetSymbolDocumentationHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway.
-  /// [cache] is the TTL store for symbol documentation pages.
-  /// [apiIndexCache] is the shared TTL store for dartdoc symbol indexes — pass
-  /// the same instance as [BrowseApiSymbolsHandler] to share warm index data.
-  /// [log] receives structured log events at the appropriate [LoggingLevel].
+  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
+  /// [apiIndex] is the shared [KeyedCache] facade (from `CacheRegistry`) that
+  /// resolves and caches the dartdoc symbol index by [ApiIndexId] — pass the
+  /// same instance used by `browse_api_symbols` to share warm index data.
+  /// [symbolDoc] is the shared [KeyedCache] facade that resolves and caches
+  /// individual symbol documentation pages by [SymbolDocId]. [log] receives
+  /// structured log events at the appropriate [LoggingLevel].
   const GetSymbolDocumentationHandler({
     required PubDevClient client,
-    required ResponseCache<String> cache,
-    required ResponseCache<List<DartdocSymbol>> apiIndexCache,
+    required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
+    required KeyedCache<SymbolDocId, String> symbolDoc,
     required void Function(LoggingLevel, Object) log,
   }) : _client = client,
-       _cache = cache,
-       _apiIndexCache = apiIndexCache,
+       _apiIndex = apiIndex,
+       _symbolDoc = symbolDoc,
        _log = log;
 
   final PubDevClient _client;
-  final ResponseCache<String> _cache;
-  final ResponseCache<List<DartdocSymbol>> _apiIndexCache;
+  final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
+  final KeyedCache<SymbolDocId, String> _symbolDoc;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `get_symbol_documentation`.
@@ -153,35 +149,14 @@ final class GetSymbolDocumentationHandler {
       _log(LoggingLevel.debug, 'get_symbol_documentation: resolved version=$resolvedVersion');
     }
 
-    // ── Step 2: fetch (or warm) the API index ─────────────────────────────────
+    // ── Step 2: resolve the API index ─────────────────────────────────────────
 
-    final indexCacheKey = '$kApiIndexCachePrefix:$package:$resolvedVersion';
-
-    List<DartdocSymbol> symbols;
-
-    final cachedIndex = _apiIndexCache.get(indexCacheKey);
-    if (cachedIndex != null) {
-      _log(LoggingLevel.debug, 'get_symbol_documentation: index cache hit key=$indexCacheKey');
-      symbols = await cachedIndex;
-    } else {
-      _log(LoggingLevel.debug, 'get_symbol_documentation: index cache miss key=$indexCacheKey');
-      _log(LoggingLevel.info, 'get_symbol_documentation: index HTTP request package=$package');
-
-      switch (await _client.getApiIndex(package, version: resolvedVersion)) {
-        case PubDevFailure(:final error) when error.code == DomainErrors.packageNotFound:
-          return _domainError(_kNoDocumentation);
-        case PubDevFailure(:final error):
-          return _domainError(error);
-        case PubDevSuccess(:final value):
-          symbols = value;
-      }
-
-      // Populate the cache only after a successful fetch. Storing a
-      // failure-mapped empty list would poison the cache: every subsequent
-      // call within the TTL window would return `no_documentation` without
-      // retrying, letting a single transient error (429/503/network) outlive
-      // the outage itself.
-      _apiIndexCache.set(indexCacheKey, Future.value(symbols), kApiDocsTtl);
+    final List<DartdocSymbol> symbols;
+    switch (await _apiIndex.resolve((name: package, version: resolvedVersion))) {
+      case PubDevFailure(:final error):
+        return _domainError(error);
+      case PubDevSuccess(:final value):
+        symbols = value;
     }
 
     if (symbols.isEmpty) return _domainError(_kNoDocumentation);
@@ -269,44 +244,14 @@ final class GetSymbolDocumentationHandler {
   // ── Symbol doc fetch ───────────────────────────────────────────────────────
 
   Future<CallToolResult> _fetchDoc(String package, String href, String resolvedVersion) async {
-    final cacheKey = '$kSymbolDocCachePrefix:$package:$resolvedVersion:$href';
-
-    final cached = _cache.get(cacheKey);
-    if (cached != null) {
-      _log(LoggingLevel.debug, 'get_symbol_documentation: doc cache hit key=$cacheKey');
-      final text = await cached;
-      if (text.isEmpty) return _domainError(_kSymbolNotFound);
-      return _successResult(text, resolvedVersion);
-    }
-
-    _log(LoggingLevel.debug, 'get_symbol_documentation: doc cache miss key=$cacheKey');
-    _log(
-      LoggingLevel.info,
-      'get_symbol_documentation: doc HTTP request package=$package href=$href',
-    );
-
-    final String text;
-    switch (await _client.getSymbolDoc(package, href, version: resolvedVersion)) {
-      case PubDevFailure(:final error):
-        return _domainError(error);
-      case PubDevSuccess(:final value):
-        text = value;
-    }
-    // Cache only after a successful fetch. Storing a failure-mapped empty
-    // string would poison the cache: every subsequent call within the TTL
-    // window would return `symbol_not_found` without retrying, letting a
-    // single transient error (429/503/network) outlive the outage itself.
-    _cache.set(cacheKey, Future.value(text), kSymbolDocTtl);
-    return _successResult(text, resolvedVersion);
+    final result = await _symbolDoc.resolve((package: package, version: resolvedVersion, href: href));
+    return switch (result) {
+      PubDevSuccess(:final value) => _successResult(value, resolvedVersion),
+      PubDevFailure(:final error) => _domainError(error),
+    };
   }
 
   // ── Static helpers ─────────────────────────────────────────────────────────
-
-  static const _kSymbolNotFound = DomainError(
-    code: DomainErrors.symbolNotFound,
-    message: 'Symbol documentation page not found.',
-    suggestion: 'Verify the symbol name is correct and the package has dartdoc output.',
-  );
 
   static const _kNoDocumentation = DomainError(
     code: DomainErrors.noDocumentation,
