@@ -3,6 +3,12 @@
 All notable changes to `pubdev_context` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0-rc.6]
+
+### Fixed
+
+- `--version` now reports the correct package version instead of a stale one.
+
 ## [0.4.0-rc.5]
 
 ### Changed
