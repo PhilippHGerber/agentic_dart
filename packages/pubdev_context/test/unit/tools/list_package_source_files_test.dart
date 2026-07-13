@@ -3,9 +3,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
@@ -16,89 +14,9 @@ import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-Uint8List _buildTarGz(Map<String, String> files) {
-  final archive = Archive();
-  for (final entry in files.entries) {
-    archive.addFile(ArchiveFile.string(entry.key, entry.value));
-  }
-  final tar = TarEncoder().encodeBytes(archive);
-  return const GZipEncoder().encodeBytes(tar);
-}
-
-void _stubTarball(
-  MockHttpClient mock,
-  Map<String, String> files, {
-  String name = 'foo',
-  String version = '1.0.0',
-}) {
-  when(
-    () => mock.send(
-      any(
-        that: predicate<http.BaseRequest>(
-          (r) => r.url.toString().contains(
-            '/api/packages/$name/versions/$version/archive.tar.gz',
-          ),
-        ),
-      ),
-    ),
-  ).thenAnswer((_) async => http.StreamedResponse(Stream.value(_buildTarGz(files)), 200));
-}
-
-void _stubPackageInfo(MockHttpClient mock, {String name = 'foo', String version = '1.0.0'}) {
-  final body = jsonEncode({
-    'name': name,
-    'latest': {
-      'version': version,
-      'pubspec': {'name': name, 'version': version},
-      'published': '2024-01-01T00:00:00Z',
-    },
-    'versions': [
-      {
-        'version': version,
-        'pubspec': {'name': name, 'version': version},
-        'published': '2024-01-01T00:00:00Z',
-      },
-    ],
-  });
-  final scoreBody = jsonEncode({
-    'likeCount': 0,
-    'popularityScore': 0.5,
-    'grantedPoints': 100,
-    'maxPoints': 130,
-  });
-
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains('/api/packages/$name/score'))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => ok(scoreBody));
-
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) =>
-              u.toString().contains('/api/packages/$name') &&
-              !u.toString().contains('score') &&
-              !u.toString().contains('versions') &&
-              !u.toString().contains('archive'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => ok(body));
-
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains('/documentation/$name/'))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => notFound());
-}
 
 const _defaultFiles = {
   'lib/src/foo.dart': 'void foo() {}',
@@ -151,7 +69,7 @@ void main() {
 
   group('successful listing', () {
     test('returns all file paths when no filters are supplied', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0'}),
@@ -162,7 +80,7 @@ void main() {
     });
 
     test('response includes name and resolvedVersion fields', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0'}),
@@ -174,7 +92,7 @@ void main() {
     });
 
     test('file paths are sorted alphabetically', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0'}),
@@ -189,7 +107,7 @@ void main() {
 
   group('directory filter', () {
     test('returns only files under the given directory', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0', 'directory': 'lib/src/'}),
@@ -201,7 +119,7 @@ void main() {
     });
 
     test('normalises directory without trailing slash', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0', 'directory': 'lib/src'}),
@@ -211,7 +129,7 @@ void main() {
     });
 
     test('filters to subdirectory', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0', 'directory': 'lib/src/server/'}),
@@ -225,7 +143,7 @@ void main() {
 
   group('fileExtension filter', () {
     test('returns only files with the given extension', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
@@ -237,7 +155,7 @@ void main() {
     });
 
     test('extension filter excludes .md files', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
         _request({'name': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
@@ -251,7 +169,7 @@ void main() {
 
   group('combined filters', () {
     test('applies both directory and fileExtension filters', () async {
-      _stubTarball(mockHttp, {
+      stubTarball(mockHttp, {
         'lib/src/foo.dart': '',
         'lib/src/foo_test.md': '',
         'test/foo_test.dart': '',
@@ -274,8 +192,8 @@ void main() {
 
   group('version resolution', () {
     test('resolves latest version when version is omitted', () async {
-      _stubPackageInfo(mockHttp, version: '2.0.0');
-      _stubTarball(mockHttp, _defaultFiles, version: '2.0.0');
+      stubPackageInfo(mockHttp, packageName: 'foo', version: '2.0.0');
+      stubTarball(mockHttp, _defaultFiles, version: '2.0.0');
 
       final result = await buildHandler().call(
         _request({'name': 'foo'}),
@@ -387,7 +305,7 @@ void main() {
 
   group('cache hit', () {
     test('does not issue a second tarball request within the TTL window', () async {
-      _stubTarball(mockHttp, _defaultFiles);
+      stubTarball(mockHttp, _defaultFiles);
       final handler = buildHandler();
 
       await handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
@@ -430,7 +348,7 @@ void main() {
       // Deliver the response now that both calls are suspended on the shared
       // future.
       responseCompleter.complete(
-        http.StreamedResponse(Stream.value(_buildTarGz(_defaultFiles)), 200),
+        http.StreamedResponse(Stream.value(buildTarGz(_defaultFiles)), 200),
       );
 
       await Future.wait([f1, f2]);

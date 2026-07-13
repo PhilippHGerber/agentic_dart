@@ -4,71 +4,19 @@ library;
 import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/find_symbols.dart';
 import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
-/// returns [resolvedVersion].
-void _stubPackageInfo(
-  MockHttpClient mock, {
-  String packageName = 'http',
-  String resolvedVersion = '1.6.0',
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) =>
-              u.toString().contains('/api/packages/$packageName') &&
-              !u.toString().contains('/score') &&
-              !u.toString().contains('/versions/'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async => ok(
-      '{"versions":[{"version":"$resolvedVersion"}],'
-      '"latest":{"version":"$resolvedVersion"}}',
-    ),
-  );
-}
-
-/// Stubs `GET /documentation/{packageName}/{version}/index.json`.
-void _stubIndexJson(
-  MockHttpClient mock, {
-  int statusCode = 200,
-  String packageName = 'http',
-  String version = '1.6.0',
-  String? body,
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) => u.toString().contains('/documentation/$packageName/$version/index.json'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async => statusCode == 200
-        ? ok(body ?? readFixture('index_json.json'))
-        : http.Response('Not Found', statusCode),
-  );
-}
 
 /// Creates a [CallToolRequest] for `find_symbols` with the given [args].
 CallToolRequest _request(Map<String, Object?> args) =>
@@ -166,8 +114,8 @@ void main() {
 
   group('found symbols', () {
     test('returns a non-error result for a query with known matches', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -178,30 +126,33 @@ void main() {
     });
 
     test('each entry carries the full result shape', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'BrowserClient'}),
       );
 
       final match = _symbols(result).firstWhere((s) => s['name'] == 'BrowserClient');
-      expect(match.keys, containsAll(<String>[
-        'name',
-        'qualifiedName',
-        'kind',
-        'library',
-        'enclosedBy',
-        'description',
-        'href',
-      ]));
+      expect(
+        match.keys,
+        containsAll(<String>[
+          'name',
+          'qualifiedName',
+          'kind',
+          'library',
+          'enclosedBy',
+          'description',
+          'href',
+        ]),
+      );
       expect(match['kind'], equals('class'));
       expect(match['library'], equals('package:http/browser_client.dart'));
     });
 
     test('a class reports a null enclosedBy', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'BrowserClient'}),
@@ -212,8 +163,8 @@ void main() {
     });
 
     test('a member reports its enclosing class as enclosedBy', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'withCredentials'}),
@@ -224,8 +175,8 @@ void main() {
     });
 
     test('name matches rank before description-only matches', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       // "abort" is in the name of Abortable/abortTrigger and in descriptions.
       final result = await buildHandler().call(
@@ -250,8 +201,8 @@ void main() {
 
   group('empty results', () {
     test('returns an empty symbols array (no error) when nothing matches', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'zzznomatch123'}),
@@ -266,8 +217,8 @@ void main() {
 
   group('hasMore', () {
     test('is absent when 20 or fewer matches exist', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _bulkIndex(20));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _bulkIndex(20));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'Widget'}),
@@ -278,8 +229,8 @@ void main() {
     });
 
     test('is true and results are capped at 20 when more matches exist', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _bulkIndex(25));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _bulkIndex(25));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'Widget'}),
@@ -294,8 +245,8 @@ void main() {
 
   group('resolvedVersion', () {
     test('equals the resolved latest stable when version is omitted', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -305,7 +256,7 @@ void main() {
     });
 
     test('echoes a pinned version without resolving', () async {
-      _stubIndexJson(mockHttp, version: '1.2.0');
+      stubIndexJson(mockHttp, version: '1.2.0');
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client', 'version': '1.2.0'}),
@@ -319,8 +270,8 @@ void main() {
 
   group('apiIndex facade', () {
     test('issues only one index request across two calls to the same package', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
       final handler = buildHandler();
 
       await handler.call(_request({'package': 'http', 'query': 'client'}));
@@ -344,8 +295,8 @@ void main() {
 
   group('missing dartdoc', () {
     test('returns NO_DOCUMENTATION when the index is 404', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, statusCode: 404);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, statusCode: 404);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -356,8 +307,8 @@ void main() {
     });
 
     test('returns NO_DOCUMENTATION when the index is an empty array', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: '[]');
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: '[]');
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),

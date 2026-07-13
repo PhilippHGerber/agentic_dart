@@ -13,25 +13,16 @@ import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Stubs `GET /api/packages/{name}` so [PubDevClient.resolveLatestStable]
-/// returns the latest stable version from package_info.json (`1.6.0`).
-void _stubPackageInfo(MockHttpClient mock, {String name = 'http'}) {
-  stubUrl(
-    mock: mock,
-    urlFragment: '/api/packages/$name',
-    response: ok(readFixture('package_info.json')),
-  );
-}
 
 /// Stubs a successful changelog fetch for package [name].
 ///
 /// Also stubs the version-resolution endpoint so [PubDevClient.resolveLatestStable]
 /// succeeds.
 void _stubSuccess(MockHttpClient mock, {String name = 'http', String? html}) {
-  _stubPackageInfo(mock, name: name);
+  stubPackageInfo(mock, packageName: name);
   stubUrl(
     mock: mock,
     urlFragment: '/packages/$name/changelog',

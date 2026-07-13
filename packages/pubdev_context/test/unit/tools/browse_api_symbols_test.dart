@@ -4,13 +4,11 @@ library;
 import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
 import 'package:pubdev_context/src/tools/find_symbols.dart';
 import 'package:pubdev_context/src/tools/get_api_diff.dart';
@@ -19,62 +17,9 @@ import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
-/// returns [resolvedVersion].
-void _stubPackageInfo(
-  MockHttpClient mock, {
-  String packageName = 'http',
-  String resolvedVersion = '1.6.0',
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) =>
-              u.toString().contains('/api/packages/$packageName') &&
-              !u.toString().contains('/score') &&
-              !u.toString().contains('/versions/'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async => ok(
-      '{"versions":[{"version":"$resolvedVersion"}],'
-      '"latest":{"version":"$resolvedVersion"}}',
-    ),
-  );
-}
-
-/// Stubs `GET /documentation/{packageName}/{version}/index.json`.
-///
-/// [version] defaults to `'1.6.0'` — the resolved stable version returned by
-/// the package-info stub — so tests that omit `version` in the tool request
-/// pick up the right stub after [PubDevClient.resolveLatestStable].
-void _stubIndexJson(
-  MockHttpClient mock, {
-  int statusCode = 200,
-  String packageName = 'http',
-  String version = '1.6.0',
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) => u.toString().contains('/documentation/$packageName/$version/index.json'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async => statusCode == 200
-        ? ok(readFixture('index_json.json'))
-        : http.Response('Not Found', statusCode),
-  );
-}
 
 /// Creates a [CallToolRequest] for `browse_api_symbols` with the given [args].
 CallToolRequest _request(Map<String, Object?> args) =>
@@ -137,8 +82,8 @@ void main() {
 
   group('limit of 25', () {
     test('is accepted without returning an error', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': '', 'limit': 25}),
@@ -152,8 +97,8 @@ void main() {
 
   group('cache hit after a live call', () {
     test('issues only one HTTP request for two calls to the same package', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
       final handler = buildHandler();
 
       await handler.call(_request({'package': 'http', 'query': 'client'}));
@@ -177,8 +122,8 @@ void main() {
 
   group('warm cache', () {
     test('makes no index HTTP request when the cache is already warm', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
       await apiIndex.resolve((name: 'http', version: '1.6.0'));
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
@@ -197,8 +142,8 @@ void main() {
 
   group('cache miss', () {
     test('logs an info message containing the package name', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
 
@@ -213,8 +158,8 @@ void main() {
 
   group('successful search', () {
     test('returns a non-error result for a query with known matches', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -224,8 +169,8 @@ void main() {
     });
 
     test('returns a JSON array of DartdocSymbol maps', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -235,8 +180,8 @@ void main() {
     });
 
     test('each symbol entry contains a name field', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -246,8 +191,8 @@ void main() {
     });
 
     test('each symbol entry contains a type field', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -257,8 +202,8 @@ void main() {
     });
 
     test('each symbol entry contains a qualifiedName field', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -268,8 +213,8 @@ void main() {
     });
 
     test('symbols with empty desc omit the desc field', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'BrowserClient.new'}),
@@ -288,8 +233,8 @@ void main() {
 
   group('ranking', () {
     test('exact name matches appear before desc-only matches', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -303,8 +248,8 @@ void main() {
     });
 
     test('name matches appear before the desc-only match for the same query', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -327,8 +272,8 @@ void main() {
 
   group('type filter', () {
     test('narrows results to only the requested type', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client', 'type': 'class'}),
@@ -338,8 +283,8 @@ void main() {
     });
 
     test('absent type returns all matching symbol kinds', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -350,8 +295,8 @@ void main() {
     });
 
     test('unknown type string is accepted without returning a type-related error', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client', 'type': 'widget'}),
@@ -362,8 +307,8 @@ void main() {
     });
 
     test('type filter applied after ranking preserves rank order within the type', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'http', 'type': 'class'}),
@@ -382,8 +327,8 @@ void main() {
 
   group('limit cap', () {
     test('returns at most the requested limit of results', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': '', 'limit': 3}),
@@ -393,8 +338,8 @@ void main() {
     });
 
     test('returns at most 10 results when no limit is supplied', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': ''}),
@@ -408,8 +353,8 @@ void main() {
 
   group('no_results', () {
     test('returns no_results when the query matches nothing', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'xyzunknownsymbol123'}),
@@ -420,8 +365,8 @@ void main() {
     });
 
     test('no_results payload contains a suggestion', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'xyzunknownsymbol123'}),
@@ -431,8 +376,8 @@ void main() {
     });
 
     test('returns no_results when type filter eliminates all ranked matches', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       // query "close" matches only the "close" method — filtering by "library" yields nothing
       final result = await buildHandler().call(
@@ -447,8 +392,8 @@ void main() {
 
   group('no_documentation', () {
     test('returns no_documentation when the package has no dartdoc index', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, statusCode: 404);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, statusCode: 404);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -459,8 +404,8 @@ void main() {
     });
 
     test('no_documentation payload contains a suggestion', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, statusCode: 404);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, statusCode: 404);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -470,7 +415,7 @@ void main() {
     });
 
     test('returns no_documentation when the index is an empty array from the server', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       when(
         () => mockHttp.get(
           any(
@@ -494,8 +439,8 @@ void main() {
 
   group('client failure', () {
     test('propagates a rate_limited error when pub.dev returns HTTP 429', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, statusCode: 429);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, statusCode: 429);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -506,8 +451,8 @@ void main() {
     });
 
     test('propagates a service_unavailable error when pub.dev returns HTTP 503', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, statusCode: 503);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, statusCode: 503);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -518,8 +463,8 @@ void main() {
     });
 
     test('error payload always contains message and suggestion fields', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, statusCode: 503);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, statusCode: 503);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -534,8 +479,8 @@ void main() {
 
   group('resolvedVersion', () {
     test('is present and equals the resolved latest stable when version is omitted', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -545,7 +490,7 @@ void main() {
     });
 
     test('echoes the supplied version when a pinned version is requested', () async {
-      _stubIndexJson(mockHttp, version: '1.2.0');
+      stubIndexJson(mockHttp, version: '1.2.0');
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client', 'version': '1.2.0'}),
@@ -559,8 +504,8 @@ void main() {
 
   group('cache identity', () {
     test('a call populates the apiIndex entry for that (package, version)', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
 
       // The identity must include the resolved version so pinned-version
@@ -569,10 +514,10 @@ void main() {
     });
 
     test('different packages populate independent apiIndex entries', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
-      _stubPackageInfo(mockHttp, packageName: 'dio');
-      _stubIndexJson(mockHttp, packageName: 'dio');
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp, packageName: 'dio');
+      stubIndexJson(mockHttp, packageName: 'dio');
 
       final handler = buildHandler();
       await handler.call(_request({'package': 'http', 'query': 'client'}));
@@ -593,8 +538,8 @@ void main() {
 
   group('apiIndex shared across the four api-index tools', () {
     test('find_symbols reuses the index warmed by browse_api_symbols', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
       await FindSymbolsHandler(
@@ -614,8 +559,8 @@ void main() {
     });
 
     test('get_api_diff reuses the index warmed by browse_api_symbols', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
       await GetApiDiffHandler(apiIndex: apiIndex, log: (_, _) {}).call(
@@ -634,8 +579,8 @@ void main() {
     });
 
     test('get_symbol_documentation reuses the index warmed by browse_api_symbols', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
       when(
         () => mockHttp.get(
           any(

@@ -6,9 +6,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
@@ -18,6 +16,8 @@ import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:test/test.dart';
+
+import '../../support/pub_stubs.dart' show buildTarGz;
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -45,15 +45,6 @@ http.Response _jsonFile(String name, {int status = 200}) =>
 
 /// A [RetryPolicy] that never delays.
 RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
-Uint8List _buildTarGz(Map<String, String> files) {
-  final archive = Archive();
-  for (final entry in files.entries) {
-    archive.addFile(ArchiveFile.string(entry.key, entry.value));
-  }
-  final tar = TarEncoder().encodeBytes(archive);
-  return const GZipEncoder().encodeBytes(tar);
-}
 
 void _stubTarballStream(
   _MockHttpClient mock,
@@ -557,7 +548,7 @@ void main() {
       await cache.write(
         'foo',
         '1.0.0',
-        _buildTarGz({'lib/src/foo.dart': 'void foo() {}'}),
+        buildTarGz({'lib/src/foo.dart': 'void foo() {}'}),
       );
 
       final client = PubDevClient(
@@ -611,7 +602,7 @@ void main() {
         }
       });
 
-      final tarballBytes = _buildTarGz({'lib/src/foo.dart': 'void foo() {}'});
+      final tarballBytes = buildTarGz({'lib/src/foo.dart': 'void foo() {}'});
       _stubTarballStream(mock, tarballBytes);
 
       final cache = TarballDiskCache(directoryPath: tempDir.path);
@@ -640,7 +631,7 @@ void main() {
         }
       });
 
-      final validTarball = _buildTarGz({'lib/src/foo.dart': 'void foo() {}'});
+      final validTarball = buildTarGz({'lib/src/foo.dart': 'void foo() {}'});
       var calls = 0;
       when(
         () => mock.send(
@@ -1083,7 +1074,7 @@ void main() {
 
     test('a tarball download logs size and file count, and no archive bytes', () async {
       final mock = _setUp();
-      final bytes = _buildTarGz({
+      final bytes = buildTarGz({
         'foo-1.0.0/pubspec.yaml': 'name: foo\n',
         'foo-1.0.0/lib/foo.dart': 'class Foo {}\n',
       });
@@ -1143,22 +1134,25 @@ void main() {
       );
     });
 
-    test('an exhausted transient failure logs a final ← pub response, not a dangling request', () async {
-      final mock = _setUp();
-      // Every attempt 503s: two ⚠ retry lines, then a give-up ← pub line.
-      _stubGet(mock, '/api/packages/http/score', _json('', status: 503));
-      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
+    test(
+      'an exhausted transient failure logs a final ← pub response, not a dangling request',
+      () async {
+        final mock = _setUp();
+        // Every attempt 503s: two ⚠ retry lines, then a give-up ← pub line.
+        _stubGet(mock, '/api/packages/http/score', _json('', status: 503));
+        final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: trace);
 
-      await inTracedRequest('#077', () => client.getScore('http'));
+        await inTracedRequest('#077', () => client.getScore('http'));
 
-      expect(sink.lines.where((l) => l.contains('⚠ pub')), hasLength(2));
-      // The final failed attempt still gets one ← pub 503 line (the give-up),
-      // so no request is left dangling without a response.
-      final finals = sink.lines.where(
-        (l) => l.contains('← pub') && l.contains('503 /api/packages/http/score'),
-      );
-      expect(finals, hasLength(1));
-    });
+        expect(sink.lines.where((l) => l.contains('⚠ pub')), hasLength(2));
+        // The final failed attempt still gets one ← pub 503 line (the give-up),
+        // so no request is left dangling without a response.
+        final finals = sink.lines.where(
+          (l) => l.contains('← pub') && l.contains('503 /api/packages/http/score'),
+        );
+        expect(finals, hasLength(1));
+      },
+    );
 
     test('--wire-trace-max-preview 0 produces metadata-only lines, no bodies', () async {
       final mock = _setUp();
@@ -1179,8 +1173,7 @@ void main() {
         concurrency: 5,
         cacheDir: '/tmp',
       );
-      final client =
-          PubDevClient(httpClient: mock, retryPolicy: _instant, trace: metaTrace);
+      final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: metaTrace);
 
       await inTracedRequest('#001', () => client.getScore('http'));
 
@@ -1418,37 +1411,40 @@ void main() {
       expect(metricsCalls, equals(2));
     });
 
-    test('getPackageVersion is unaffected by the info cache — the version endpoint is hit every call', () async {
-      final mock = _setUp();
-      final versionJson = jsonEncode({
-        'version': '1.5.0',
-        'pubspec': {
-          'name': 'http',
+    test(
+      'getPackageVersion is unaffected by the info cache — the version endpoint is hit every call',
+      () async {
+        final mock = _setUp();
+        final versionJson = jsonEncode({
           'version': '1.5.0',
-          'description': 'A composable HTTP library.',
-          'environment': {'sdk': '^3.4.0'},
-          'dependencies': <String, Object?>{},
-          'dev_dependencies': <String, Object?>{},
-        },
-        'published': '2025-08-07T22:35:23.863279Z',
-      });
-      var versionCalls = 0;
-      when(
-        () => mock.get(
-          any(that: predicate<Uri>((u) => u.path == '/api/packages/http/versions/1.5.0')),
-          headers: any(named: 'headers'),
-        ),
-      ).thenAnswer((_) async {
-        versionCalls++;
-        return _json(versionJson);
-      });
-      _stubGet(mock, '/api/packages/http/score', _jsonFile('package_score.json'));
-      final client = clientWithCache(mock);
+          'pubspec': {
+            'name': 'http',
+            'version': '1.5.0',
+            'description': 'A composable HTTP library.',
+            'environment': {'sdk': '^3.4.0'},
+            'dependencies': <String, Object?>{},
+            'dev_dependencies': <String, Object?>{},
+          },
+          'published': '2025-08-07T22:35:23.863279Z',
+        });
+        var versionCalls = 0;
+        when(
+          () => mock.get(
+            any(that: predicate<Uri>((u) => u.path == '/api/packages/http/versions/1.5.0')),
+            headers: any(named: 'headers'),
+          ),
+        ).thenAnswer((_) async {
+          versionCalls++;
+          return _json(versionJson);
+        });
+        _stubGet(mock, '/api/packages/http/score', _jsonFile('package_score.json'));
+        final client = clientWithCache(mock);
 
-      await client.getPackageVersion('http', '1.5.0');
-      await client.getPackageVersion('http', '1.5.0');
+        await client.getPackageVersion('http', '1.5.0');
+        await client.getPackageVersion('http', '1.5.0');
 
-      expect(versionCalls, equals(2));
-    });
+        expect(versionCalls, equals(2));
+      },
+    );
   });
 }

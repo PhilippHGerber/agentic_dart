@@ -3,9 +3,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
@@ -13,13 +11,13 @@ import 'package:pubdev_context/src/analysis/ast_access.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_source_slice.dart';
 import 'package:pubdev_context/src/tools/get_throw_statements.dart';
 import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Dart source fixtures ─────────────────────────────────────────────────────
 
@@ -204,64 +202,6 @@ const _repoBSource = 'class Repo { void disconnect() { throw StateError("not con
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
-/// returns [resolvedVersion] when the tool request omits `version`.
-void _stubPackageInfo(
-  MockHttpClient mock, {
-  String packageName = 'foo',
-  String resolvedVersion = '2.5.0',
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) =>
-              u.toString().contains('/api/packages/$packageName') &&
-              !u.toString().contains('/score') &&
-              !u.toString().contains('/versions/'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async => http.Response(
-      '{"versions":[{"version":"$resolvedVersion"}],'
-      '"latest":{"version":"$resolvedVersion"}}',
-      200,
-    ),
-  );
-}
-
-Uint8List _buildTarGz(Map<String, String> files) {
-  final archive = Archive();
-  for (final entry in files.entries) {
-    archive.addFile(ArchiveFile.string(entry.key, entry.value));
-  }
-  final tar = TarEncoder().encodeBytes(archive);
-  return const GZipEncoder().encodeBytes(tar);
-}
-
-/// Stubs the tarball download so the `sourceFiles` facade resolves [files] on
-/// a cache miss for `(name, version)`.
-void _stubTarball(
-  MockHttpClient mock,
-  Map<String, String> files, {
-  String name = 'foo',
-  String version = '1.0.0',
-}) {
-  when(
-    () => mock.send(
-      any(
-        that: predicate<http.BaseRequest>(
-          (r) => r.url.toString().contains(
-            '/api/packages/$name/versions/$version/archive.tar.gz',
-          ),
-        ),
-      ),
-    ),
-  ).thenAnswer((_) async => http.StreamedResponse(Stream.value(_buildTarGz(files)), 200));
-}
-
 DartdocSymbol _sym({
   required String name,
   required String qualifiedName,
@@ -290,25 +230,6 @@ String _indexJsonBody(List<DartdocSymbol> symbols) => jsonEncode([
       'desc': s.desc,
     },
 ]);
-
-/// Stubs `GET /documentation/<package>/<version>/index.json`.
-void _stubIndexJson(
-  MockHttpClient mock, {
-  required List<DartdocSymbol> symbols,
-  String packageName = 'foo',
-  String version = '1.0.0',
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) => u.toString().contains('/documentation/$packageName/$version/index.json'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => http.Response(_indexJsonBody(symbols), 200));
-}
 
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_throw_statements', arguments: args);
@@ -397,7 +318,7 @@ void main() {
 
   group('class-only — entire class scan', () {
     setUp(() {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns non-empty array for class with throws', () async {
@@ -462,7 +383,7 @@ void main() {
     });
 
     test('returns empty array for class with no throws', () async {
-      _stubTarball(mockHttp, {'lib/calc.dart': _noThrowSource});
+      stubTarball(mockHttp, {'lib/calc.dart': _noThrowSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Calculator', 'version': '1.0.0'}),
@@ -483,7 +404,7 @@ void main() {
     });
 
     test('collects throws from mixin', () async {
-      _stubTarball(mockHttp, {'lib/mixin.dart': _mixinSource});
+      stubTarball(mockHttp, {'lib/mixin.dart': _mixinSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Validator', 'version': '1.0.0'}),
@@ -496,7 +417,7 @@ void main() {
     });
 
     test('collects throws from enum method', () async {
-      _stubTarball(mockHttp, {'lib/status.dart': _enumSource});
+      stubTarball(mockHttp, {'lib/status.dart': _enumSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Status', 'version': '1.0.0'}),
@@ -514,7 +435,7 @@ void main() {
 
   group('class + method — single method scan', () {
     setUp(() {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns only throws from the specified method', () async {
@@ -594,7 +515,7 @@ void main() {
     });
 
     test('collects throws inside try/catch block', () async {
-      _stubTarball(mockHttp, {'lib/parser.dart': _tryCatchSource});
+      stubTarball(mockHttp, {'lib/parser.dart': _tryCatchSource});
 
       final result = await buildHandler().call(
         _request({
@@ -612,7 +533,7 @@ void main() {
     });
 
     test('excludes throws inside closures within the method', () async {
-      _stubTarball(mockHttp, {'lib/processor.dart': _closureSource});
+      stubTarball(mockHttp, {'lib/processor.dart': _closureSource});
 
       final result = await buildHandler().call(
         _request({
@@ -631,7 +552,7 @@ void main() {
     });
 
     test('collects throw from constructor when method is "new"', () async {
-      _stubTarball(mockHttp, {'lib/config.dart': _constructorThrowSource});
+      stubTarball(mockHttp, {'lib/config.dart': _constructorThrowSource});
 
       final result = await buildHandler().call(
         _request({
@@ -651,7 +572,7 @@ void main() {
     test(
       'collects throws from both getter and setter when they share the requested name',
       () async {
-        _stubTarball(mockHttp, {'lib/settings.dart': _accessorThrowSource});
+        stubTarball(mockHttp, {'lib/settings.dart': _accessorThrowSource});
 
         final result = await buildHandler().call(
           _request({
@@ -676,7 +597,7 @@ void main() {
 
   group('class_not_found', () {
     setUp(() {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns class_not_found for class-only scan of unknown class', () async {
@@ -716,7 +637,7 @@ void main() {
 
   group('method_not_found', () {
     setUp(() {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('returns method_not_found when method absent from class', () async {
@@ -752,13 +673,15 @@ void main() {
 
   group('top-level function — single match', () {
     setUp(() {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'processData', qualifiedName: 'foo.processData', href: 'foo/processData.html'),
-        ],
+        ]),
       );
-      _stubTarball(mockHttp, {'lib/foo.dart': _utilsSource});
+      stubTarball(mockHttp, {'lib/foo.dart': _utilsSource});
     });
 
     test('returns throws array for top-level function', () async {
@@ -799,14 +722,15 @@ void main() {
     });
 
     test('function with no throws returns empty array', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
         packageName: 'bar',
-        symbols: [
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'noThrow', qualifiedName: 'bar.noThrow', href: 'bar/noThrow.html'),
-        ],
+        ]),
       );
-      _stubTarball(mockHttp, {'lib/bar.dart': 'String noThrow() => "hello";'}, name: 'bar');
+      stubTarball(mockHttp, {'lib/bar.dart': 'String noThrow() => "hello";'}, packageName: 'bar');
 
       final result = await buildHandler().call(
         _request({'package': 'bar', 'method': 'noThrow', 'version': '1.0.0'}),
@@ -821,14 +745,15 @@ void main() {
 
   group('top-level function — explicit version', () {
     test('uses explicit version in API index cache key', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
+        packageName: 'foo',
         version: '2.0.0',
-        symbols: [
+        body: _indexJsonBody([
           _sym(name: 'processData', qualifiedName: 'foo.processData', href: 'foo/processData.html'),
-        ],
+        ]),
       );
-      _stubTarball(mockHttp, {'lib/foo.dart': _utilsSource}, version: '2.0.0');
+      stubTarball(mockHttp, {'lib/foo.dart': _utilsSource}, version: '2.0.0');
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'processData', 'version': '2.0.0'}),
@@ -843,12 +768,14 @@ void main() {
 
   group('ambiguous_symbol', () {
     test('returns ambiguous_symbol when multiple functions match', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
           _sym(name: 'log', qualifiedName: 'bar.log', href: 'bar/log.html'),
-        ],
+        ]),
       );
 
       final result = await buildHandler().call(
@@ -860,12 +787,14 @@ void main() {
     });
 
     test('ambiguous_symbol payload includes candidates list in details', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
           _sym(name: 'log', qualifiedName: 'bar.log', href: 'bar/log.html'),
-        ],
+        ]),
       );
 
       final result = await buildHandler().call(
@@ -878,17 +807,19 @@ void main() {
     });
 
     test('qualified retry resolves to correct function', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
           _sym(name: 'log', qualifiedName: 'bar.log', href: 'bar/log.html'),
-        ],
+        ]),
       );
-      _stubTarball(mockHttp, {
-          'lib/foo.dart': r'void log(String msg) { throw StateError("foo: $msg"); }',
-          'lib/bar.dart': 'void log(String msg) { throw ArgumentError(msg); }',
-        });
+      stubTarball(mockHttp, {
+        'lib/foo.dart': r'void log(String msg) { throw StateError("foo: $msg"); }',
+        'lib/bar.dart': 'void log(String msg) { throw ArgumentError(msg); }',
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'foo.log', 'version': '1.0.0'}),
@@ -904,11 +835,13 @@ void main() {
 
   group('top-level function — method_not_found', () {
     test('returns method_not_found when function absent from API index', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'other', qualifiedName: 'foo.other', href: 'foo/other.html'),
-        ],
+        ]),
       );
 
       final result = await buildHandler().call(
@@ -920,16 +853,18 @@ void main() {
     });
 
     test('non-function symbols excluded from top-level function search', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(
             name: 'processData',
             qualifiedName: 'foo.processData',
             href: 'foo/processData.html',
             type: 'class',
           ),
-        ],
+        ]),
       );
 
       final result = await buildHandler().call(
@@ -965,7 +900,7 @@ void main() {
 
   group('response structure', () {
     setUp(() {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
     test('file field contains the relative source path', () async {
@@ -1020,7 +955,7 @@ void main() {
 
   group('resolvedVersion — all three scan shapes', () {
     test('class-only (entire class) scan echoes the supplied version', () async {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
@@ -1031,7 +966,7 @@ void main() {
     });
 
     test('class + method scan echoes the supplied version', () async {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final result = await buildHandler().call(
         _request({
@@ -1047,13 +982,15 @@ void main() {
     });
 
     test('top-level function scan echoes the supplied version', () async {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'processData', qualifiedName: 'foo.processData', href: 'foo/processData.html'),
-        ],
+        ]),
       );
-      _stubTarball(mockHttp, {'lib/foo.dart': _utilsSource});
+      stubTarball(mockHttp, {'lib/foo.dart': _utilsSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
@@ -1073,10 +1010,10 @@ void main() {
   // shapes (Shape 3 already does via the package-info stub elsewhere).
   group('version omitted — resolves latest stable before scanning', () {
     test('class-only scan resolves version and echoes it in resolvedVersion', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp, packageName: 'foo', version: '2.5.0');
       // Source cache is keyed by the RESOLVED version, proving the handler
       // threads the resolved version through to source loading.
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService'}),
@@ -1088,8 +1025,8 @@ void main() {
     });
 
     test('class + method scan resolves version and echoes it in resolvedVersion', () async {
-      _stubPackageInfo(mockHttp);
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
+      stubPackageInfo(mockHttp, packageName: 'foo', version: '2.5.0');
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'method': 'getUser'}),
@@ -1109,10 +1046,10 @@ void main() {
 
   group('multi-file package', () {
     test('searches lib/ files before other directories', () async {
-      _stubTarball(mockHttp, {
-          'test/service_test.dart': '// not a lib file',
-          'lib/service.dart': _serviceSource,
-        });
+      stubTarball(mockHttp, {
+        'test/service_test.dart': '// not a lib file',
+        'lib/service.dart': _serviceSource,
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
@@ -1122,10 +1059,10 @@ void main() {
     });
 
     test('finds class declared in a non-first file', () async {
-      _stubTarball(mockHttp, {
-          'lib/utils.dart': _utilsSource,
-          'lib/service.dart': _serviceSource,
-        });
+      stubTarball(mockHttp, {
+        'lib/utils.dart': _utilsSource,
+        'lib/service.dart': _serviceSource,
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
@@ -1146,7 +1083,7 @@ void main() {
 
   group('AST cache', () {
     test('caches the parsed AST for reuse across repeated calls for the same file', () async {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
       final handler = buildHandler();
 
       await handler.call(
@@ -1187,7 +1124,7 @@ void main() {
       // Simulates server-level sharing: both handlers are constructed from the
       // same CacheRegistry, so a get_source_slice call must warm the caches
       // get_throw_statements reads from.
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final sourceSliceHandler = GetSourceSliceHandler(
         versionResolver: versionResolver,
@@ -1226,7 +1163,7 @@ void main() {
 
   group('source files cache sharing', () {
     test('warms the sourceFiles facade entry for (package, version)', () async {
-      _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
+      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       await buildHandler().call(
         _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
@@ -1240,9 +1177,9 @@ void main() {
 
   group('thrown type extraction', () {
     test('extracts type from implicit new syntax: throw SomeError(...)', () async {
-      _stubTarball(mockHttp, {
-          'lib/foo.dart': 'class Foo { void m() { throw StateError("x"); } }',
-        });
+      stubTarball(mockHttp, {
+        'lib/foo.dart': 'class Foo { void m() { throw StateError("x"); } }',
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1252,9 +1189,9 @@ void main() {
     });
 
     test('extracts type from named factory: throw ArgumentError.value(...)', () async {
-      _stubTarball(mockHttp, {
-          'lib/foo.dart': "class Foo { void m() { throw ArgumentError.value(0, 'x'); } }",
-        });
+      stubTarball(mockHttp, {
+        'lib/foo.dart': "class Foo { void m() { throw ArgumentError.value(0, 'x'); } }",
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1264,9 +1201,9 @@ void main() {
     });
 
     test('extracts type from explicit new: throw new FormatException(...)', () async {
-      _stubTarball(mockHttp, {
-          'lib/foo.dart': "class Foo { void m() { throw new FormatException('bad'); } }",
-        });
+      stubTarball(mockHttp, {
+        'lib/foo.dart': "class Foo { void m() { throw new FormatException('bad'); } }",
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1276,9 +1213,9 @@ void main() {
     });
 
     test('extracts type from variable: throw someError', () async {
-      _stubTarball(mockHttp, {
-          'lib/foo.dart': 'class Foo { void m(Exception e) { throw e; } }',
-        });
+      stubTarball(mockHttp, {
+        'lib/foo.dart': 'class Foo { void m(Exception e) { throw e; } }',
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1292,8 +1229,8 @@ void main() {
 
   group('context extraction', () {
     test('context for throw inside if contains the if statement', () async {
-      _stubTarball(mockHttp, {
-          'lib/foo.dart': '''
+      stubTarball(mockHttp, {
+        'lib/foo.dart': '''
 class Foo {
   void m(String x) {
     if (x.isEmpty) {
@@ -1302,7 +1239,7 @@ class Foo {
   }
 }
 ''',
-        });
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1315,9 +1252,9 @@ class Foo {
     });
 
     test('context for simple throw statement contains the throw', () async {
-      _stubTarball(mockHttp, {
-          'lib/foo.dart': 'class Foo { void m() { throw UnimplementedError(); } }',
-        });
+      stubTarball(mockHttp, {
+        'lib/foo.dart': 'class Foo { void m() { throw UnimplementedError(); } }',
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
@@ -1328,7 +1265,7 @@ class Foo {
     });
 
     test('context is bounded to a small line window around a direct throw', () async {
-      _stubTarball(mockHttp, {'lib/worker.dart': _wideTryContextSource});
+      stubTarball(mockHttp, {'lib/worker.dart': _wideTryContextSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Worker', 'method': 'run', 'version': '1.0.0'}),
@@ -1345,7 +1282,7 @@ class Foo {
 
   group('field initializer throw (Fix 4)', () {
     test('field initializer throw is excluded from class-wide scan results', () async {
-      _stubTarball(mockHttp, {'lib/config.dart': _fieldThrowSource});
+      stubTarball(mockHttp, {'lib/config.dart': _fieldThrowSource});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Config', 'version': '1.0.0'}),
@@ -1358,14 +1295,14 @@ class Foo {
     });
 
     test('getter method is still included when field initializer throw is present', () async {
-      _stubTarball(mockHttp, {
-          'lib/config.dart': '''
+      stubTarball(mockHttp, {
+        'lib/config.dart': '''
 class Config {
   static final bad = throw UnsupportedError("bad");
   void doWork() { throw StateError("not implemented"); }
 }
 ''',
-        });
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Config', 'version': '1.0.0'}),
@@ -1384,7 +1321,7 @@ class Config {
 
   group('rethrow handling (Fix 3)', () {
     setUp(() {
-      _stubTarball(mockHttp, {'lib/wrapper.dart': _rethrowSource});
+      stubTarball(mockHttp, {'lib/wrapper.dart': _rethrowSource});
     });
 
     test('rethrow inside catch is included in results', () async {
@@ -1437,8 +1374,8 @@ class Config {
     });
 
     test('explicit throw and rethrow in same method both appear in results', () async {
-      _stubTarball(mockHttp, {
-          'lib/svc.dart': '''
+      stubTarball(mockHttp, {
+        'lib/svc.dart': '''
 class Svc {
   void run() {
     try {
@@ -1449,7 +1386,7 @@ class Svc {
   }
 }
 ''',
-        });
+      });
 
       final result = await buildHandler().call(
         _request({
@@ -1472,10 +1409,10 @@ class Svc {
     test(
       'finds method in second file when first file has same-named class without that method',
       () async {
-        _stubTarball(mockHttp, {
-            'lib/a.dart': _repoASource,
-            'lib/b.dart': _repoBSource,
-          });
+        stubTarball(mockHttp, {
+          'lib/a.dart': _repoASource,
+          'lib/b.dart': _repoBSource,
+        });
 
         final result = await buildHandler().call(
           _request({
@@ -1496,10 +1433,10 @@ class Svc {
     test(
       'returns method_not_found when method is absent from ALL homonymous classes',
       () async {
-        _stubTarball(mockHttp, {
-            'lib/a.dart': _repoASource, // has connect(), not disconnect()
-            'lib/b.dart': _repoASource, // also has connect(), not disconnect()
-          });
+        stubTarball(mockHttp, {
+          'lib/a.dart': _repoASource, // has connect(), not disconnect()
+          'lib/b.dart': _repoASource, // also has connect(), not disconnect()
+        });
 
         final result = await buildHandler().call(
           _request({
@@ -1518,9 +1455,9 @@ class Svc {
     test(
       'returns class_not_found when class is absent from all files (not method_not_found)',
       () async {
-        _stubTarball(mockHttp, {
-            'lib/a.dart': 'class Other { void m() {} }',
-          });
+        stubTarball(mockHttp, {
+          'lib/a.dart': 'class Other { void m() {} }',
+        });
 
         final result = await buildHandler().call(
           _request({
@@ -1539,10 +1476,10 @@ class Svc {
 
   group('homonymous class — class-wide scan (Fix 2)', () {
     test('aggregates throws from both files when class name appears in two files', () async {
-      _stubTarball(mockHttp, {
-          'lib/a.dart': 'class Repo { void connect() { throw StateError("a"); } }',
-          'lib/b.dart': 'class Repo { void disconnect() { throw ArgumentError("b"); } }',
-        });
+      stubTarball(mockHttp, {
+        'lib/a.dart': 'class Repo { void connect() { throw StateError("a"); } }',
+        'lib/b.dart': 'class Repo { void disconnect() { throw ArgumentError("b"); } }',
+      });
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'class': 'Repo', 'version': '1.0.0'}),
@@ -1603,11 +1540,13 @@ class Svc {
     test(
       'two concurrent calls that share a cold source-file key both receive the error',
       () async {
-        _stubIndexJson(
+        stubIndexJson(
           mockHttp,
-          symbols: [
+          packageName: 'foo',
+          version: '1.0.0',
+          body: _indexJsonBody([
             _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
-          ],
+          ]),
         );
 
         final completer = Completer<http.StreamedResponse>();
@@ -1717,11 +1656,13 @@ class Svc {
 
   group('_loadSourceFiles — transient error propagation', () {
     setUp(() {
-      _stubIndexJson(
+      stubIndexJson(
         mockHttp,
-        symbols: [
+        packageName: 'foo',
+        version: '1.0.0',
+        body: _indexJsonBody([
           _sym(name: 'log', qualifiedName: 'foo.log', href: 'foo/log.html'),
-        ],
+        ]),
       );
     });
 

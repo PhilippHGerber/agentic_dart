@@ -4,7 +4,6 @@ library;
 import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/keyed_cache.dart';
@@ -14,34 +13,9 @@ import 'package:pubdev_context/src/tools/get_api_diff.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Stubs `GET /documentation/{package}/{version}/index.json`.
-///
-/// [fixture] names the fixture served for a 200 response; [statusCode] other
-/// than 200 serves a plain error body instead.
-void _stubIndexJson(
-  MockHttpClient mock, {
-  required String version,
-  required String fixture,
-  int statusCode = 200,
-  String packageName = 'http',
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) => u.toString().contains('/documentation/$packageName/$version/index.json'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async =>
-        statusCode == 200 ? ok(readFixture(fixture)) : http.Response('Not Found', statusCode),
-  );
-}
 
 /// Creates a [CallToolRequest] for `get_api_diff` with the given [args].
 CallToolRequest _request(Map<String, Object?> args) =>
@@ -93,8 +67,8 @@ void main() {
 
   /// Stubs both the from- and to-version indexes with the diff fixtures.
   void stubBothVersions() {
-    _stubIndexJson(mockHttp, version: '0.13.0', fixture: 'api_diff_from.json');
-    _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
+    stubIndexJson(mockHttp, version: '0.13.0', body: readFixture('api_diff_from.json'));
+    stubIndexJson(mockHttp, version: '1.2.0', body: readFixture('api_diff_to.json'));
   }
 
   CallToolRequest diffRequest() =>
@@ -255,8 +229,13 @@ void main() {
 
   group('missing documentation', () {
     test('returns DOCUMENTATION_NOT_FOUND when fromVersion docs are missing', () async {
-      _stubIndexJson(mockHttp, version: '0.13.0', fixture: 'api_diff_from.json', statusCode: 404);
-      _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
+      stubIndexJson(
+        mockHttp,
+        version: '0.13.0',
+        body: readFixture('api_diff_from.json'),
+        statusCode: 404,
+      );
+      stubIndexJson(mockHttp, version: '1.2.0', body: readFixture('api_diff_to.json'));
 
       final result = await buildHandler().call(diffRequest());
 
@@ -265,8 +244,13 @@ void main() {
     });
 
     test('returns DOCUMENTATION_NOT_FOUND when toVersion docs are missing', () async {
-      _stubIndexJson(mockHttp, version: '0.13.0', fixture: 'api_diff_from.json');
-      _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json', statusCode: 404);
+      stubIndexJson(mockHttp, version: '0.13.0', body: readFixture('api_diff_from.json'));
+      stubIndexJson(
+        mockHttp,
+        version: '1.2.0',
+        body: readFixture('api_diff_to.json'),
+        statusCode: 404,
+      );
 
       final result = await buildHandler().call(diffRequest());
 
@@ -284,7 +268,7 @@ void main() {
           headers: any(named: 'headers'),
         ),
       ).thenAnswer((_) async => ok('[]'));
-      _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
+      stubIndexJson(mockHttp, version: '1.2.0', body: readFixture('api_diff_to.json'));
 
       final result = await buildHandler().call(diffRequest());
 
@@ -292,8 +276,13 @@ void main() {
     });
 
     test('error names the offending version in suggestedNextStep', () async {
-      _stubIndexJson(mockHttp, version: '0.13.0', fixture: 'api_diff_from.json', statusCode: 404);
-      _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
+      stubIndexJson(
+        mockHttp,
+        version: '0.13.0',
+        body: readFixture('api_diff_from.json'),
+        statusCode: 404,
+      );
+      stubIndexJson(mockHttp, version: '1.2.0', body: readFixture('api_diff_to.json'));
 
       final result = await buildHandler().call(diffRequest());
       final next = _errorPayload(result)['suggestedNextStep']! as Map<String, Object?>;
@@ -309,8 +298,13 @@ void main() {
 
   group('transient client failure', () {
     test('propagates RATE_LIMITED rather than masking it as missing docs', () async {
-      _stubIndexJson(mockHttp, version: '0.13.0', fixture: 'api_diff_from.json', statusCode: 429);
-      _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
+      stubIndexJson(
+        mockHttp,
+        version: '0.13.0',
+        body: readFixture('api_diff_from.json'),
+        statusCode: 429,
+      );
+      stubIndexJson(mockHttp, version: '1.2.0', body: readFixture('api_diff_to.json'));
 
       final result = await buildHandler().call(diffRequest());
 
@@ -332,8 +326,8 @@ void main() {
 
     test('reuses a warm cache entry without issuing an HTTP request', () async {
       // Only the from-version needs a live fetch; the to-version is already warm.
-      _stubIndexJson(mockHttp, version: '0.13.0', fixture: 'api_diff_from.json');
-      _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
+      stubIndexJson(mockHttp, version: '0.13.0', body: readFixture('api_diff_from.json'));
+      stubIndexJson(mockHttp, version: '1.2.0', body: readFixture('api_diff_to.json'));
       await apiIndex.resolve((name: 'http', version: '1.2.0'));
 
       final result = await buildHandler().call(diffRequest());

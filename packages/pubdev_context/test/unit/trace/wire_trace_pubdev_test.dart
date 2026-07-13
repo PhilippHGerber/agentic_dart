@@ -3,9 +3,9 @@
 /// to the inbound LLM request via one shared Correlation Id.
 ///
 /// Constructs a [PubMcpServer] in-process over an in-memory channel with a fake
-/// `http.Client` in [PubDevClient] and tracing enabled to a temp directory, then
+/// `http.Client` in `PubDevClient` and tracing enabled to a temp directory, then
 /// drives real `tools/call` requests. This is the only place that proves the
-/// central wrapper fired, the [Zone] propagated the id into [PubDevClient] and
+/// central wrapper fired, the `Zone` propagated the id into `PubDevClient` and
 /// the shared caches, and both emitted. No spawned binary, no network — runs in
 /// the default suite.
 library;
@@ -16,9 +16,7 @@ import 'dart:io';
 import 'package:dart_mcp/client.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/config/config.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/server.dart';
 import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:stream_channel/stream_channel.dart';
@@ -78,7 +76,7 @@ String? _idOf(String line) => RegExp(r'#\d+').firstMatch(line)?.group(0);
 
 void main() {
   late Directory tempDir;
-  late MockHttpClient mock;
+  late TestStack stack;
   late _TestMcpClient testClient;
   late PubMcpServer server;
   late ServerConnection serverConnection;
@@ -86,8 +84,6 @@ void main() {
 
   setUp(() {
     tempDir = Directory.systemTemp.createTempSync('pubdev_context_wire_trace_pub_');
-    mock = MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
     testClient = _TestMcpClient();
   });
 
@@ -95,12 +91,14 @@ void main() {
     await testClient.shutdown();
     await server.shutdown();
     trace?.close();
+    stack.close();
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
   /// Builds and connects a server with the fake client and a Wire Trace writing
   /// into [tempDir], with the trace injected into both the client and every
-  /// cache. Returns after `initialize` completes.
+  /// cache. Returns after `initialize` completes. Stub [stack.http] once this
+  /// returns — the mock only exists once [TestStack] has been built.
   Future<void> connect() async {
     trace = WireTrace.open(
       directoryPath: tempDir.path,
@@ -109,19 +107,14 @@ void main() {
       concurrency: 5,
       cacheDir: tempDir.path,
     );
-    final activeTrace = trace;
+    stack = TestStack(trace: trace);
     final (clientChannel, serverChannel) = _inProcessChannels();
-    final client = PubDevClient(
-      httpClient: mock,
-      retryPolicy: instantRetryPolicy,
-      trace: activeTrace,
-    );
     server = PubMcpServer(
       serverChannel,
       config: const PubMcpConfig(),
-      client: client,
-      cacheRegistry: CacheRegistry(client: client, trace: activeTrace),
-      trace: activeTrace,
+      client: stack.client,
+      cacheRegistry: stack.caches,
+      trace: trace,
     );
     serverConnection = testClient.connectServer(clientChannel);
     await serverConnection.initialize(
@@ -146,9 +139,9 @@ void main() {
   }
 
   test('a tool call hitting pub.dev shows correlated inbound, pub, and result lines', () async {
-    _stubGet(mock, '/api/packages/http', _jsonFile('package_info.json'));
-
     await connect();
+    _stubGet(stack.http, '/api/packages/http', _jsonFile('package_info.json'));
+
     await serverConnection.callTool(
       CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
     );
@@ -180,9 +173,9 @@ void main() {
   test(
     'a cached tool call shows a cache-hit line and no pub.dev lines, under its own id',
     () async {
-      _stubGet(mock, '/api/packages/http', _jsonFile('package_info.json'));
-
       await connect();
+      _stubGet(stack.http, '/api/packages/http', _jsonFile('package_info.json'));
+
       // First call warms the cache (and produces pub lines under its own id).
       await serverConnection.callTool(
         CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
@@ -223,22 +216,22 @@ void main() {
   test(
     'two concurrent tool calls stay fully attributable by id — no cross-contamination',
     () async {
+      await connect();
       // Delay the responses so the two calls are genuinely in flight together and
       // their boundary lines interleave in the file.
       _stubGet(
-        mock,
+        stack.http,
         '/api/packages/http',
         _jsonFile('package_info.json'),
         delay: const Duration(milliseconds: 30),
       );
       _stubGet(
-        mock,
+        stack.http,
         '/api/packages/dio',
         _jsonFile('package_info.json'),
         delay: const Duration(milliseconds: 30),
       );
 
-      await connect();
       await Future.wait([
         serverConnection.callTool(
           CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),

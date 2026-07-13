@@ -9,69 +9,14 @@ import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_symbol_documentation.dart';
 import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── HTTP stub helpers ─────────────────────────────────────────────────────────
-
-/// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
-/// returns [resolvedVersion] (defaults to `'1.6.0'`).
-void _stubPackageInfo(
-  MockHttpClient mock, {
-  String packageName = 'http',
-  String resolvedVersion = '1.6.0',
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) =>
-              u.toString().contains('/api/packages/$packageName') &&
-              !u.toString().contains('/score') &&
-              !u.toString().contains('/versions/'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async => ok(
-      '{"versions":[{"version":"$resolvedVersion"}],'
-      '"latest":{"version":"$resolvedVersion"}}',
-    ),
-  );
-}
-
-/// Stubs `GET /documentation/<package>/<version>/index.json`.
-///
-/// [version] defaults to `'1.6.0'` — the resolved stable version returned by
-/// the package-info stub — so tests that omit `version` in the tool request
-/// pick up the right stub after [PubDevClient.resolveLatestStable].
-void _stubIndexJson(
-  MockHttpClient mock, {
-  int statusCode = 200,
-  String packageName = 'http',
-  String version = '1.6.0',
-  String? body,
-}) {
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) => u.toString().contains('/documentation/$packageName/$version/index.json'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer(
-    (_) async => statusCode == 200
-        ? ok(body ?? readFixture('index_json.json'))
-        : http.Response('Not Found', statusCode),
-  );
-}
 
 /// Stubs `GET /documentation/<package>/<version>/<href>`.
 ///
@@ -228,8 +173,8 @@ void main() {
 
   group('pass 1 — exact name match', () {
     test('resolves a single exact name match and returns documentation', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -241,8 +186,8 @@ void main() {
     });
 
     test('returns non-empty plain-text content on a pass 1 hit', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -253,8 +198,8 @@ void main() {
     });
 
     test('makes exactly one HTTP request for the symbol doc on a pass 1 hit', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       await buildHandler().call(_request({'package': 'http', 'symbol': 'Client'}));
@@ -276,8 +221,8 @@ void main() {
 
   group('pass 2 — qualifiedName suffix match', () {
     test('resolves "Client.send" via suffix match to the method href', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass, _clientSend]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass, _clientSend]));
       _stubSymbolDoc(mockHttp, href: 'http/Client/send.html');
 
       final result = await buildHandler().call(
@@ -298,14 +243,14 @@ void main() {
     });
 
     test('ignores symbols whose qualifiedName has no dot separator in pass 2', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final library = _sym(
         name: 'http',
         qualifiedName: 'http', // no dot — must not match anything
         href: 'http/',
         type: 'library',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([library, _clientSend]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([library, _clientSend]));
       _stubSymbolDoc(mockHttp, href: 'http/Client/send.html');
 
       final result = await buildHandler().call(
@@ -321,7 +266,7 @@ void main() {
 
   group('pass 0 — exact qualifiedName match', () {
     test('resolves "http.Client" to the class href (retry after ambiguous_symbol)', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final classA = _sym(
         name: 'Client',
         qualifiedName: 'http.Client',
@@ -334,7 +279,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       // First call returns ambiguous_symbol; simulated retry passes the
@@ -357,7 +302,7 @@ void main() {
     });
 
     test('resolves "browser_client.Client" to the correct href', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final classA = _sym(
         name: 'Client',
         qualifiedName: 'http.Client',
@@ -370,7 +315,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
       _stubSymbolDoc(mockHttp, href: 'browser_client/Client-class.html');
 
       final result = await buildHandler().call(
@@ -391,7 +336,7 @@ void main() {
     });
 
     test('pass 0 takes priority over pass 1 for the same symbol', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       // qualifiedName 'http.Client' would also match pass 1 (name == 'Client'
       // for a different entry) — pass 0 should resolve it first and unambiguously.
       final classA = _sym(
@@ -406,7 +351,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       // 'http.Client' has an exact qualifiedName match — must resolve without
@@ -420,7 +365,7 @@ void main() {
     });
 
     test('end-to-end ambiguous_symbol retry succeeds', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final classA = _sym(
         name: 'Client',
         qualifiedName: 'http.Client',
@@ -433,7 +378,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final handler = buildHandler();
 
@@ -462,14 +407,14 @@ void main() {
 
   group('disambiguation', () {
     test('prefers the sole class entry when multiple name matches exist', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final closeMethod = _sym(
         name: 'Client',
         qualifiedName: 'http.Client.Client',
         href: 'http/Client/Client.html',
         type: 'constructor',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass, closeMethod]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass, closeMethod]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -490,7 +435,7 @@ void main() {
     });
 
     test('returns ambiguous_symbol when multiple class entries match', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final classA = _sym(
         name: 'Client',
         qualifiedName: 'http.Client',
@@ -503,7 +448,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -514,7 +459,7 @@ void main() {
     });
 
     test('ambiguous_symbol payload includes candidates list in details', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final classA = _sym(
         name: 'Client',
         qualifiedName: 'http.Client',
@@ -527,7 +472,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -539,7 +484,7 @@ void main() {
     });
 
     test('returns ambiguous_symbol when multiple matches have no class entry', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final methodA = _sym(
         name: 'close',
         qualifiedName: 'http.Client.close',
@@ -550,7 +495,7 @@ void main() {
         qualifiedName: 'browser_client.BrowserClient.close',
         href: 'browser_client/BrowserClient/close.html',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([methodA, methodB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([methodA, methodB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'close'}),
@@ -561,7 +506,7 @@ void main() {
     });
 
     test('ambiguous_symbol payload contains message and suggestion', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       final classA = _sym(
         name: 'Client',
         qualifiedName: 'http.Client',
@@ -574,7 +519,7 @@ void main() {
         href: 'browser_client/Client-class.html',
         type: 'class',
       );
-      _stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
+      stubIndexJson(mockHttp, body: _indexJsonBody([classA, classB]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -589,8 +534,8 @@ void main() {
 
   group('symbol_not_found', () {
     test('returns symbol_not_found when symbol is absent from the index', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'NonExistentSymbol'}),
@@ -601,8 +546,8 @@ void main() {
     });
 
     test('returns symbol_not_found when the resolved href returns HTTP 404', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 404, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -614,8 +559,8 @@ void main() {
     });
 
     test('symbol_not_found payload contains message and suggestion', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 404, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -631,8 +576,8 @@ void main() {
 
   group('no_documentation', () {
     test('returns no_documentation when the API index is empty', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody(const <DartdocSymbol>[]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody(const <DartdocSymbol>[]));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -643,8 +588,8 @@ void main() {
     });
 
     test('returns no_documentation when the index endpoint returns 404', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, statusCode: 404);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, statusCode: 404);
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'symbol': 'Client'}),
@@ -709,8 +654,8 @@ void main() {
 
   group('API index cache', () {
     test('a second call is an index cache hit issuing no further HTTP request', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
       final handler = buildHandler();
 
@@ -735,8 +680,8 @@ void main() {
 
   group('symbol doc cache', () {
     test('issues only one doc HTTP request for two calls resolving to the same href', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
       final handler = buildHandler();
 
@@ -757,8 +702,8 @@ void main() {
     });
 
     test('warms the symbolDoc facade entry for (package, version, href)', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       await buildHandler().call(_request({'package': 'http', 'symbol': 'Client'}));
@@ -778,9 +723,9 @@ void main() {
 
   group('symbol doc cache — version isolation', () {
     test('pinned-version request populates a separate cache entry from resolved', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
-      _stubIndexJson(mockHttp, version: '1.0.0', body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubIndexJson(mockHttp, version: '1.0.0', body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html', version: '1.0.0');
       final handler = buildHandler();
@@ -809,9 +754,9 @@ void main() {
     });
 
     test('different versions issue separate HTTP doc requests', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
-      _stubIndexJson(mockHttp, version: '1.0.0', body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubIndexJson(mockHttp, version: '1.0.0', body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html', version: '1.0.0');
       final handler = buildHandler();
@@ -843,7 +788,6 @@ void main() {
         ),
       ).called(1);
     });
-
   });
 
   // ─── Cache poisoning on transient failure (P0.4) ────────────────────────────
@@ -853,7 +797,7 @@ void main() {
 
   group('transient failure must not poison the cache (P0.4)', () {
     test('a transient index 503 is not cached — a second call retries and succeeds', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       // The index endpoint fails with 503 during the first handler call (the
       // client exhausts its retries), then recovers for the second call.
       var indexHealthy = false;
@@ -891,7 +835,7 @@ void main() {
     });
 
     test('a transient index 429 is not cached — a second call retries and succeeds', () async {
-      _stubPackageInfo(mockHttp);
+      stubPackageInfo(mockHttp);
       // The index endpoint is rate-limited (429) during the first handler call,
       // then recovers for the second call.
       var indexHealthy = false;
@@ -929,8 +873,8 @@ void main() {
     });
 
     test('a transient doc 503 is not cached — a second call retries and succeeds', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       // The symbol-doc endpoint fails with 503 during the first handler call,
       // then recovers for the second call.
       var docHealthy = false;
@@ -973,8 +917,8 @@ void main() {
     });
 
     test('a transient doc 429 is not cached — a second call retries and succeeds', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       // The symbol-doc endpoint is rate-limited (429) during the first handler
       // call, then recovers for the second call.
       var docHealthy = false;
@@ -1021,8 +965,8 @@ void main() {
 
   group('client failure (doc fetch)', () {
     test('propagates rate_limited when the symbol doc page returns HTTP 429', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 429, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1034,8 +978,8 @@ void main() {
     });
 
     test('propagates service_unavailable when the symbol doc page returns HTTP 503', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 503, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1047,8 +991,8 @@ void main() {
     });
 
     test('error payload always contains message and suggestion fields', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, statusCode: 503, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1064,7 +1008,7 @@ void main() {
 
   group('version parameter', () {
     test('uses the specified version in the index URL', () async {
-      _stubIndexJson(mockHttp, version: '1.2.0');
+      stubIndexJson(mockHttp, version: '1.2.0');
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html', version: '1.2.0');
 
       await buildHandler().call(
@@ -1084,7 +1028,7 @@ void main() {
     });
 
     test('uses the specified version in the symbol doc URL', () async {
-      _stubIndexJson(mockHttp, version: '1.2.0');
+      stubIndexJson(mockHttp, version: '1.2.0');
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html', version: '1.2.0');
 
       await buildHandler().call(
@@ -1106,9 +1050,9 @@ void main() {
     });
 
     test('a pinned version does not reuse the resolved-latest index cache entry', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, version: '1.2.0');
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, version: '1.2.0');
+      stubIndexJson(mockHttp);
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html', version: '1.2.0');
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html');
       final handler = buildHandler();
@@ -1143,8 +1087,8 @@ void main() {
     });
 
     test('omitting version resolves to latest stable version', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp);
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html');
 
       await buildHandler().call(
@@ -1168,8 +1112,8 @@ void main() {
 
   group('resolvedVersion', () {
     test('equals the resolved latest stable version when version is omitted', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1180,7 +1124,7 @@ void main() {
     });
 
     test('echoes the supplied version on a pinned request', () async {
-      _stubIndexJson(mockHttp, version: '1.2.0', body: _indexJsonBody([_clientClass]));
+      stubIndexJson(mockHttp, version: '1.2.0', body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html', version: '1.2.0');
 
       final result = await buildHandler().call(
@@ -1195,8 +1139,8 @@ void main() {
 
   group('HTML processing', () {
     test('strips HTML tags from the returned content', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1208,8 +1152,8 @@ void main() {
     });
 
     test('decodes HTML entities in the returned content', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(
@@ -1222,8 +1166,8 @@ void main() {
     });
 
     test('result contains recognisable symbol content from the fixture', () async {
-      _stubPackageInfo(mockHttp);
-      _stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp, body: _indexJsonBody([_clientClass]));
       _stubSymbolDoc(mockHttp, href: 'http/Client-class.html');
 
       final result = await buildHandler().call(

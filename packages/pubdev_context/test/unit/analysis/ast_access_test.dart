@@ -1,11 +1,8 @@
 /// Unit tests for [AstAccess].
 library;
 
-import 'dart:typed_data';
-
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/analysis/ast_access.dart';
@@ -14,6 +11,7 @@ import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -44,34 +42,6 @@ const Map<String, String> _files = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-Uint8List _buildTarGz(Map<String, String> files) {
-  final archive = Archive();
-  for (final entry in files.entries) {
-    archive.addFile(ArchiveFile.string(entry.key, entry.value));
-  }
-  final tar = TarEncoder().encodeBytes(archive);
-  return const GZipEncoder().encodeBytes(tar);
-}
-
-void _stubTarball(
-  MockHttpClient mock,
-  Map<String, String> files, {
-  String name = 'foo',
-  String version = '1.0.0',
-}) {
-  when(
-    () => mock.send(
-      any(
-        that: predicate<http.BaseRequest>(
-          (r) => r.url.toString().contains(
-            '/api/packages/$name/versions/$version/archive.tar.gz',
-          ),
-        ),
-      ),
-    ),
-  ).thenAnswer((_) async => http.StreamedResponse(Stream.value(_buildTarGz(files)), 200));
-}
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
@@ -79,8 +49,7 @@ void main() {
   late MockHttpClient mockHttp;
   late CacheRegistry registry;
 
-  AstAccess buildAccess() =>
-      AstAccess(sourceFiles: registry.sourceFiles, ast: registry.ast);
+  AstAccess buildAccess() => AstAccess(sourceFiles: registry.sourceFiles, ast: registry.ast);
 
   setUp(() {
     stack = TestStack();
@@ -94,7 +63,7 @@ void main() {
 
   group('fileText', () {
     test('returns the raw file content on a hit', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildAccess().fileText('foo', '1.0.0', 'lib/src/widget.dart');
 
@@ -103,7 +72,7 @@ void main() {
     });
 
     test('returns SOURCE_FILE_NOT_FOUND for a missing path', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildAccess().fileText('foo', '1.0.0', 'lib/src/missing.dart');
 
@@ -112,7 +81,7 @@ void main() {
     });
 
     test('suggests a filename match when one exists', () async {
-      _stubTarball(mockHttp, {'lib/src/server/widget.dart': 'class Widget {}'});
+      stubTarball(mockHttp, {'lib/src/server/widget.dart': 'class Widget {}'});
 
       final result = await buildAccess().fileText('foo', '1.0.0', 'lib/widget.dart');
 
@@ -123,7 +92,7 @@ void main() {
     });
 
     test('falls back to a generic suggestion when no filename matches', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildAccess().fileText('foo', '1.0.0', 'lib/does_not_exist.dart');
 
@@ -151,7 +120,7 @@ void main() {
 
   group('unit', () {
     test('parses the file and exposes content/unit/lineInfo', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildAccess().unit('foo', '1.0.0', 'lib/src/widget.dart');
 
@@ -162,7 +131,7 @@ void main() {
     });
 
     test('propagates SOURCE_FILE_NOT_FOUND for a missing path', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildAccess().unit('foo', '1.0.0', 'lib/src/missing.dart');
 
@@ -173,7 +142,7 @@ void main() {
     });
 
     test('does not re-download the tarball across repeated calls', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
       final access = buildAccess();
 
       await access.unit('foo', '1.0.0', 'lib/src/widget.dart');
@@ -197,7 +166,7 @@ void main() {
     late CompilationUnit widgetUnit;
 
     setUp(() async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
       final result = await buildAccess().unit('foo', '1.0.0', 'lib/src/widget.dart');
       widgetUnit = (result as PubDevSuccess<ParseStringResult>).value.unit;
     });

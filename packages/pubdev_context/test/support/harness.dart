@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
+import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:test/test.dart' show predicate;
 
 /// A mocktail double for [http.Client].
@@ -68,12 +69,15 @@ void _registerHttpFallbacks() {
 /// Wires a mock `http.Client` → real [PubDevClient] (instant retry) → real
 /// [CacheRegistry] — the stack most tool-handler and resource-handler tests
 /// build. `clock` is forwarded to [CacheRegistry] for TTL control; omit it
-/// for wall-clock time.
+/// for wall-clock time. `trace` is forwarded to both [PubDevClient] and
+/// [CacheRegistry] — [TestStack] does not construct the [WireTrace] itself
+/// since its directory is per-test-temp; callers that need tracing build
+/// their own and pass it in.
 class TestStack {
-  TestStack({DateTime Function()? clock}) : http = MockHttpClient() {
+  TestStack({DateTime Function()? clock, WireTrace? trace}) : http = MockHttpClient() {
     _registerHttpFallbacks();
-    client = PubDevClient(httpClient: http, retryPolicy: instantRetryPolicy);
-    caches = CacheRegistry(client: client, clock: clock);
+    client = PubDevClient(httpClient: http, retryPolicy: instantRetryPolicy, trace: trace);
+    caches = CacheRegistry(client: client, clock: clock, trace: trace);
   }
 
   /// The mock HTTP client backing [client]. Stub it with [stubUrl] or a

@@ -2,9 +2,7 @@
 library;
 
 import 'dart:convert';
-import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
@@ -16,6 +14,7 @@ import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/pub_stubs.dart';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -51,57 +50,6 @@ const Map<String, String> _files = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-Uint8List _buildTarGz(Map<String, String> files) {
-  final archive = Archive();
-  for (final entry in files.entries) {
-    archive.addFile(ArchiveFile.string(entry.key, entry.value));
-  }
-  final tar = TarEncoder().encodeBytes(archive);
-  return const GZipEncoder().encodeBytes(tar);
-}
-
-void _stubTarball(
-  MockHttpClient mock,
-  Map<String, String> files, {
-  String name = 'foo',
-  String version = '1.0.0',
-}) {
-  when(
-    () => mock.send(
-      any(
-        that: predicate<http.BaseRequest>(
-          (r) => r.url.toString().contains(
-            '/api/packages/$name/versions/$version/archive.tar.gz',
-          ),
-        ),
-      ),
-    ),
-  ).thenAnswer((_) async => http.StreamedResponse(Stream.value(_buildTarGz(files)), 200));
-}
-
-/// Stubs the package-info fetch used by `resolveLatestStable`.
-void _stubPackageInfo(MockHttpClient mock, {String name = 'foo', String version = '2.0.0'}) {
-  final body = jsonEncode({
-    'name': name,
-    'latest': {'version': version},
-    'versions': [
-      {'version': version},
-    ],
-  });
-  when(
-    () => mock.get(
-      any(
-        that: predicate<Uri>(
-          (u) =>
-              u.toString().contains('/api/packages/$name') &&
-              !u.toString().contains('archive'),
-        ),
-      ),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => ok(body));
-}
 
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_source_slice', arguments: args);
@@ -148,7 +96,7 @@ void main() {
 
   group('line-range mode', () {
     test('returns exactly the requested inclusive line range', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -173,7 +121,7 @@ void main() {
     });
 
     test('returns the full file verbatim when both bounds are omitted', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'version': '1.0.0', 'file': 'lib/src/widget.dart'}),
@@ -187,7 +135,7 @@ void main() {
     });
 
     test('reads from lineStart to end when only lineStart is supplied', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -205,7 +153,7 @@ void main() {
     });
 
     test('clamps an out-of-range lineEnd to the last line', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -228,7 +176,7 @@ void main() {
 
   group('symbol-bounded mode', () {
     test('returns the full class body when no maxLines is supplied', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -249,7 +197,7 @@ void main() {
     });
 
     test('truncates to signature + omission comment + closing brace', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -272,7 +220,7 @@ void main() {
     });
 
     test('locates a class member via "ClassName.member"', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -294,7 +242,7 @@ void main() {
     });
 
     test('truncates a member body when maxLines is exceeded', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -315,7 +263,7 @@ void main() {
     });
 
     test('resolves the unnamed constructor via "new"', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -332,7 +280,7 @@ void main() {
     });
 
     test('returns SYMBOL_NOT_FOUND for an unknown symbol', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({
@@ -352,8 +300,8 @@ void main() {
 
   group('version resolution', () {
     test('resolves the latest stable version when version is omitted', () async {
-      _stubPackageInfo(mockHttp);
-      _stubTarball(mockHttp, _files, version: '2.0.0');
+      stubPackageInfo(mockHttp, packageName: 'foo', version: '2.0.0');
+      stubTarball(mockHttp, _files, version: '2.0.0');
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'file': 'lib/src/widget.dart', 'lineStart': 1, 'lineEnd': 1}),
@@ -401,7 +349,7 @@ void main() {
 
   group('source_file_not_found', () {
     test('returns SOURCE_FILE_NOT_FOUND for a missing path', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'version': '1.0.0', 'file': 'lib/src/missing.dart'}),
@@ -412,7 +360,7 @@ void main() {
     });
 
     test('suggestion names a filename match when one exists', () async {
-      _stubTarball(mockHttp, {'lib/src/server/widget.dart': 'class Widget {}'});
+      stubTarball(mockHttp, {'lib/src/server/widget.dart': 'class Widget {}'});
 
       final result = await buildHandler().call(
         _request({'package': 'foo', 'version': '1.0.0', 'file': 'lib/widget.dart'}),
@@ -429,7 +377,7 @@ void main() {
 
   group('caching', () {
     test('does not issue a second tarball request within the TTL window', () async {
-      _stubTarball(mockHttp, _files);
+      stubTarball(mockHttp, _files);
       final handler = buildHandler();
 
       await handler.call(

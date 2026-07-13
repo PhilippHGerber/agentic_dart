@@ -13,9 +13,7 @@ import 'dart:io';
 import 'package:dart_mcp/client.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
-import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/config/config.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/server.dart';
 import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:stream_channel/stream_channel.dart';
@@ -64,7 +62,7 @@ String? _idOf(String line) => RegExp(r'#\d+').firstMatch(line)?.group(0);
 
 void main() {
   late Directory tempDir;
-  late MockHttpClient mock;
+  late TestStack stack;
   late _TestMcpClient testClient;
   late PubMcpServer server;
   late ServerConnection serverConnection;
@@ -72,8 +70,6 @@ void main() {
 
   setUp(() {
     tempDir = Directory.systemTemp.createTempSync('pubdev_context_wire_trace_seam2_');
-    mock = MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
     testClient = _TestMcpClient();
   });
 
@@ -81,11 +77,14 @@ void main() {
     await testClient.shutdown();
     await server.shutdown();
     trace?.close();
+    stack.close();
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
   /// Builds and connects a server with the fake client and, when [enableTrace],
   /// a Wire Trace writing into [tempDir]. Returns after `initialize` completes.
+  /// Stub [stack.http] once this returns — the mock only exists once
+  /// [TestStack] has been built.
   Future<void> connect({bool enableTrace = true}) async {
     trace = enableTrace
         ? WireTrace.open(
@@ -96,13 +95,13 @@ void main() {
             cacheDir: tempDir.path,
           )
         : null;
+    stack = TestStack(trace: trace);
     final (clientChannel, serverChannel) = _inProcessChannels();
-    final client = PubDevClient(httpClient: mock, retryPolicy: instantRetryPolicy);
     server = PubMcpServer(
       serverChannel,
       config: const PubMcpConfig(),
-      client: client,
-      cacheRegistry: CacheRegistry(client: client),
+      client: stack.client,
+      cacheRegistry: stack.caches,
       trace: trace,
     );
     serverConnection = testClient.connectServer(clientChannel);
@@ -128,11 +127,11 @@ void main() {
   }
 
   test('a tool call writes inbound + result lines sharing one Correlation Id', () async {
-    _stubGet(mock, '/api/search', _jsonFile('search_result.json'));
-    _stubGet(mock, '/api/packages/', _jsonFile('package_info.json'));
-    _stubGet(mock, '/score', _jsonFile('package_score.json'));
-
     await connect();
+    _stubGet(stack.http, '/api/search', _jsonFile('search_result.json'));
+    _stubGet(stack.http, '/api/packages/', _jsonFile('package_info.json'));
+    _stubGet(stack.http, '/score', _jsonFile('package_score.json'));
+
     await serverConnection.callTool(
       CallToolRequest(name: 'search_packages', arguments: {'query': 'http'}),
     );
@@ -152,10 +151,10 @@ void main() {
   });
 
   test('a resource read is traced like a tool call, under one shared id', () async {
-    // `latest` resolution hits /api/packages/htp, which 404s → PACKAGE_NOT_FOUND.
-    _stubGet(mock, '/api/packages/htp', _json('', status: 404));
-
     await connect();
+    // `latest` resolution hits /api/packages/htp, which 404s → PACKAGE_NOT_FOUND.
+    _stubGet(stack.http, '/api/packages/htp', _json('', status: 404));
+
     await serverConnection.readResource(
       ReadResourceRequest(uri: 'pub://package/htp@latest/readme'),
     );
@@ -172,9 +171,9 @@ void main() {
   });
 
   test('an error result is rendered with its ERROR code', () async {
-    _stubGet(mock, '/api/packages/htp', _json('', status: 404));
-
     await connect();
+    _stubGet(stack.http, '/api/packages/htp', _json('', status: 404));
+
     await serverConnection.callTool(
       CallToolRequest(name: 'get_package', arguments: {'name': 'htp'}),
     );
@@ -210,15 +209,15 @@ void main() {
     expect(_idOf(inbound), isNotNull);
     expect(_idOf(result), equals(_idOf(inbound)));
     expect(result, contains('ERROR INVALID_ARGUMENT'));
-    verifyNever(() => mock.get(any(), headers: any(named: 'headers')));
+    verifyNever(() => stack.http.get(any(), headers: any(named: 'headers')));
   });
 
   test('without tracing, no session file is created', () async {
-    _stubGet(mock, '/api/search', _jsonFile('search_result.json'));
-    _stubGet(mock, '/api/packages/', _jsonFile('package_info.json'));
-    _stubGet(mock, '/score', _jsonFile('package_score.json'));
-
     await connect(enableTrace: false);
+    _stubGet(stack.http, '/api/search', _jsonFile('search_result.json'));
+    _stubGet(stack.http, '/api/packages/', _jsonFile('package_info.json'));
+    _stubGet(stack.http, '/score', _jsonFile('package_score.json'));
+
     await serverConnection.callTool(
       CallToolRequest(name: 'search_packages', arguments: {'query': 'http'}),
     );
