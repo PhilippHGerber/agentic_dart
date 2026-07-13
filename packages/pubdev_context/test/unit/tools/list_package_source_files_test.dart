@@ -11,20 +11,13 @@ import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/list_package_source_files.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-http.Response _ok(String body) => http.Response(body, 200);
-http.Response _notFound() => http.Response('Not Found', 404);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
 
 Uint8List _buildTarGz(Map<String, String> files) {
   final archive = Archive();
@@ -36,7 +29,7 @@ Uint8List _buildTarGz(Map<String, String> files) {
 }
 
 void _stubTarball(
-  _MockHttpClient mock,
+  MockHttpClient mock,
   Map<String, String> files, {
   String name = 'foo',
   String version = '1.0.0',
@@ -54,7 +47,7 @@ void _stubTarball(
   ).thenAnswer((_) async => http.StreamedResponse(Stream.value(_buildTarGz(files)), 200));
 }
 
-void _stubPackageInfo(_MockHttpClient mock, {String name = 'foo', String version = '1.0.0'}) {
+void _stubPackageInfo(MockHttpClient mock, {String name = 'foo', String version = '1.0.0'}) {
   final body = jsonEncode({
     'name': name,
     'latest': {
@@ -82,7 +75,7 @@ void _stubPackageInfo(_MockHttpClient mock, {String name = 'foo', String version
       any(that: predicate<Uri>((u) => u.toString().contains('/api/packages/$name/score'))),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => _ok(scoreBody));
+  ).thenAnswer((_) async => ok(scoreBody));
 
   when(
     () => mock.get(
@@ -97,14 +90,14 @@ void _stubPackageInfo(_MockHttpClient mock, {String name = 'foo', String version
       ),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => _ok(body));
+  ).thenAnswer((_) async => ok(body));
 
   when(
     () => mock.get(
       any(that: predicate<Uri>((u) => u.toString().contains('/documentation/$name/'))),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => _notFound());
+  ).thenAnswer((_) async => notFound());
 }
 
 const _defaultFiles = {
@@ -134,25 +127,25 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late CacheRegistry registry;
 
   ListPackageSourceFilesHandler buildHandler() => ListPackageSourceFilesHandler(
-    client: client,
+    versionResolver: versionResolver,
     sourceFiles: registry.sourceFiles,
     log: (_, _) {},
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    registry = CacheRegistry(client: client);
+    stack = TestStack();
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(client: stack.client, log: (_, _) {});
+    registry = stack.caches;
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Successful listing ────────────────────────────────────────────────────
 
@@ -315,7 +308,7 @@ void main() {
           ),
           headers: any(named: 'headers'),
         ),
-      ).thenAnswer((_) async => _notFound());
+      ).thenAnswer((_) async => notFound());
     }
 
     test('propagates package_not_found when resolution returns 404', () async {

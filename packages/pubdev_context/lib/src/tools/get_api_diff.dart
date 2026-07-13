@@ -27,14 +27,13 @@
 /// See `issues/pubdev-context-v1/08-get-api-diff.md` (S9).
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'tool_response.dart';
 
 /// Handles calls to the `get_api_diff` MCP tool.
 ///
@@ -71,7 +70,7 @@ final class GetApiDiffHandler {
     final toVersion = (args['toVersion'] as String?) ?? '';
 
     if (package.isEmpty || fromVersion.isEmpty || toVersion.isEmpty) {
-      return _domainError(
+      return ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
           message: 'package, fromVersion, and toVersion are all required.',
@@ -98,8 +97,8 @@ final class GetApiDiffHandler {
 
     // Propagate transient/real failures (rate-limited, service-unavailable, …)
     // before treating anything as a missing-docs case.
-    if (fromResult case PubDevFailure(:final error)) return _domainError(error);
-    if (toResult case PubDevFailure(:final error)) return _domainError(error);
+    if (fromResult case PubDevFailure(:final error)) return ToolResponse.error(error);
+    if (toResult case PubDevFailure(:final error)) return ToolResponse.error(error);
 
     final fromSymbols = (fromResult as PubDevSuccess<List<DartdocSymbol>>).value;
     final toSymbols = (toResult as PubDevSuccess<List<DartdocSymbol>>).value;
@@ -142,19 +141,13 @@ final class GetApiDiffHandler {
         if (!toByName.containsKey(entry.key)) entry.value,
     ];
 
-    return CallToolResult(
-      content: [
-        TextContent(
-          text: jsonEncode({
-            'package': package,
-            'fromVersion': fromVersion,
-            'toVersion': toVersion,
-            'added': _bucketize(added),
-            'removed': _bucketize(removed),
-          }),
-        ),
-      ],
-    );
+    return ToolResponse.ok({
+      'package': package,
+      'fromVersion': fromVersion,
+      'toVersion': toVersion,
+      'added': _bucketize(added),
+      'removed': _bucketize(removed),
+    });
   }
 
   /// Groups [symbols] into the four API-surface buckets, dropping any symbol
@@ -180,12 +173,7 @@ final class GetApiDiffHandler {
   /// `null` when the kind is not part of the tracked public surface.
   static String? _bucketFor(String type) => switch (type) {
     'library' => 'libraries',
-    'class' ||
-    'mixin' ||
-    'enum' ||
-    'extension' ||
-    'extension-type' ||
-    'typedef' => 'classes',
+    'class' || 'mixin' || 'enum' || 'extension' || 'extension-type' || 'typedef' => 'classes',
     'method' || 'function' || 'constructor' => 'methods',
     'property' ||
     'accessor' ||
@@ -195,7 +183,7 @@ final class GetApiDiffHandler {
     _ => null,
   };
 
-  CallToolResult _documentationNotFound(String package, String version) => _domainError(
+  CallToolResult _documentationNotFound(String package, String version) => ToolResponse.error(
     DomainError(
       code: DomainErrors.documentationNotFound,
       message: 'No dartdoc documentation found for $package version $version.',
@@ -208,7 +196,4 @@ final class GetApiDiffHandler {
       },
     ),
   );
-
-  static CallToolResult _domainError(DomainError error) =>
-      CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);
 }

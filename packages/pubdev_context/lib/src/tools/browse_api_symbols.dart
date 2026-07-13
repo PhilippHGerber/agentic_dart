@@ -6,8 +6,8 @@
 /// after ranking. Results are capped at `limit`.
 ///
 /// When `version` is omitted the handler resolves the latest stable version
-/// via [PubDevClient.resolveLatestStable]. Every success response includes
-/// `resolvedVersion` as its first JSON key.
+/// via [VersionResolver]. Every success response includes `resolvedVersion` as
+/// its first JSON key.
 ///
 /// The dartdoc symbol index is resolved through the shared `apiIndex`
 /// [KeyedCache] facade (built by `CacheRegistry`), keyed by `(package,
@@ -23,15 +23,14 @@
 /// See `issues/pub-dev-mcp/09-search-api-symbols-tool.md`.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 /// Handles calls to the `browse_api_symbols` MCP tool.
 ///
@@ -40,30 +39,31 @@ import '../data/pub_client.dart';
 final class BrowseApiSymbolsHandler {
   /// Creates a [BrowseApiSymbolsHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
-  /// [apiIndex] is the shared [KeyedCache] facade (from `CacheRegistry`) that
-  /// resolves and caches the dartdoc symbol index by [ApiIndexId]. [log]
-  /// receives structured log events at the appropriate [LoggingLevel].
+  /// [versionResolver] resolves the Resolved Version, falling back to the
+  /// Latest Stable Version when the caller omits one. [apiIndex] is the shared
+  /// [KeyedCache] facade (from `CacheRegistry`) that resolves and caches the
+  /// dartdoc symbol index by [ApiIndexId]. [log] receives structured log
+  /// events at the appropriate [LoggingLevel].
   const BrowseApiSymbolsHandler({
-    required PubDevClient client,
+    required VersionResolver versionResolver,
     required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
+  }) : _versionResolver = versionResolver,
        _apiIndex = apiIndex,
        _log = log;
 
-  final PubDevClient _client;
+  final VersionResolver _versionResolver;
   final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `browse_api_symbols`.
   ///
-  /// Resolves the version (via [PubDevClient.resolveLatestStable] when absent),
-  /// validates `limit` against the 25-result cap, and resolves the dartdoc
-  /// symbol index through `apiIndex`. Exact [DartdocSymbol.name] matches are
-  /// ranked before [DartdocSymbol.desc]-only matches; the optional `type`
-  /// filter is applied after ranking. Returns [CallToolResult.isError] `true`
-  /// with a structured JSON payload on any domain failure.
+  /// Resolves the version (via [VersionResolver] when absent) and resolves the
+  /// dartdoc symbol index through `apiIndex`. Exact
+  /// [DartdocSymbol.name] matches are ranked before [DartdocSymbol.desc]-only
+  /// matches; the optional `type` filter is applied after ranking. Returns
+  /// [CallToolResult.isError] `true` with a structured JSON payload on any
+  /// domain failure. `limit` is capped at 25 by the tool's input schema.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
 
@@ -72,16 +72,6 @@ final class BrowseApiSymbolsHandler {
     final type = args['type'] as String?;
     final limit = (args['limit'] as int?) ?? 10;
     final suppliedVersion = args['version'] as String?;
-
-    if (limit > 25) {
-      return _domainError(
-        const DomainError(
-          code: DomainErrors.invalidArgument,
-          message: 'limit must not exceed 25.',
-          suggestion: 'Set limit to a value between 1 and 25 and retry.',
-        ),
-      );
-    }
 
     _log(
       LoggingLevel.info,
@@ -92,14 +82,15 @@ final class BrowseApiSymbolsHandler {
     // ── Resolve version ────────────────────────────────────────────────────────
 
     final String resolvedVersion;
-    if (suppliedVersion != null) {
-      resolvedVersion = suppliedVersion;
-    } else {
-      _log(LoggingLevel.info, 'browse_api_symbols: resolving latest stable version for $package');
-      final versionResult = await _client.resolveLatestStable(package);
-      if (versionResult case PubDevFailure(:final error)) return _domainError(error);
-      resolvedVersion = (versionResult as PubDevSuccess<String>).value;
-      _log(LoggingLevel.debug, 'browse_api_symbols: resolved version=$resolvedVersion');
+    switch (await _versionResolver.resolve(
+      package: package,
+      supplied: suppliedVersion,
+      tool: 'browse_api_symbols',
+    )) {
+      case PubDevFailure(:final error):
+        return ToolResponse.error(error);
+      case PubDevSuccess(:final value):
+        resolvedVersion = value;
     }
 
     // ── Resolve the API index ───────────────────────────────────────────────────
@@ -108,7 +99,7 @@ final class BrowseApiSymbolsHandler {
 
     return switch (result) {
       PubDevSuccess(:final value) => _buildResponse(value, query, type, limit, resolvedVersion),
-      PubDevFailure(:final error) => _domainError(error),
+      PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }
 
@@ -123,7 +114,7 @@ final class BrowseApiSymbolsHandler {
     int limit,
     String resolvedVersion,
   ) {
-    if (symbols.isEmpty) return _domainError(_kNoDocumentation);
+    if (symbols.isEmpty) return ToolResponse.error(_kNoDocumentation);
 
     final queryLower = query.toLowerCase();
     final nameMatches = <DartdocSymbol>[];
@@ -141,7 +132,7 @@ final class BrowseApiSymbolsHandler {
     final filtered = type != null ? ranked.where((s) => s.type == type).toList() : ranked;
 
     if (filtered.isEmpty) {
-      return _domainError(
+      return ToolResponse.error(
         const DomainError(
           code: DomainErrors.noResults,
           message: 'No symbols matched the query or type filter.',
@@ -150,15 +141,9 @@ final class BrowseApiSymbolsHandler {
       );
     }
 
-    return CallToolResult(
-      content: [
-        TextContent(
-          text: jsonEncode({
-            'resolvedVersion': resolvedVersion,
-            'symbols': _symbolsToJson(filtered.take(limit).toList()),
-          }),
-        ),
-      ],
+    return ToolResponse.ok(
+      {'symbols': _symbolsToJson(filtered.take(limit).toList())},
+      resolvedVersion: resolvedVersion,
     );
   }
 
@@ -167,9 +152,6 @@ final class BrowseApiSymbolsHandler {
     message: 'No API documentation found for this package.',
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
-
-  static CallToolResult _domainError(DomainError error) =>
-      CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);
 
   static List<Map<String, Object?>> _symbolsToJson(List<DartdocSymbol> symbols) => [
     for (final s in symbols) _symbolToJson(s),

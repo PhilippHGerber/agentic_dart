@@ -2,7 +2,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
@@ -12,26 +11,17 @@ import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_symbol_documentation.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
-
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
-
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
+import '../../support/harness.dart';
 
 // ─── HTTP stub helpers ─────────────────────────────────────────────────────────
 
 /// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
 /// returns [resolvedVersion] (defaults to `'1.6.0'`).
 void _stubPackageInfo(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   String packageName = 'http',
   String resolvedVersion = '1.6.0',
 }) {
@@ -48,7 +38,7 @@ void _stubPackageInfo(
       headers: any(named: 'headers'),
     ),
   ).thenAnswer(
-    (_) async => _ok(
+    (_) async => ok(
       '{"versions":[{"version":"$resolvedVersion"}],'
       '"latest":{"version":"$resolvedVersion"}}',
     ),
@@ -61,7 +51,7 @@ void _stubPackageInfo(
 /// the package-info stub — so tests that omit `version` in the tool request
 /// pick up the right stub after [PubDevClient.resolveLatestStable].
 void _stubIndexJson(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
   String version = '1.6.0',
@@ -78,7 +68,7 @@ void _stubIndexJson(
     ),
   ).thenAnswer(
     (_) async => statusCode == 200
-        ? _ok(body ?? _readFixture('index_json.json'))
+        ? ok(body ?? readFixture('index_json.json'))
         : http.Response('Not Found', statusCode),
   );
 }
@@ -87,7 +77,7 @@ void _stubIndexJson(
 ///
 /// [version] defaults to `'1.6.0'` — matching the resolved stable version.
 void _stubSymbolDoc(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   required String href,
   int statusCode = 200,
   String packageName = 'http',
@@ -104,7 +94,7 @@ void _stubSymbolDoc(
     ),
   ).thenAnswer(
     (_) async => statusCode == 200
-        ? _ok(_readFixture('symbol_doc.html'))
+        ? ok(readFixture('symbol_doc.html'))
         : http.Response('Not Found', statusCode),
   );
 }
@@ -206,29 +196,33 @@ String? _resolvedVersion(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late DateTime fakeNow;
   late CacheRegistry registry;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetSymbolDocumentationHandler buildHandler() => GetSymbolDocumentationHandler(
-    client: client,
+    versionResolver: versionResolver,
     apiIndex: registry.apiIndex,
     symbolDoc: registry.symbolDoc,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    registry = CacheRegistry(client: client, clock: () => fakeNow);
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(
+      client: stack.client,
+      log: (level, data) => loggedMessages.add((level, data)),
+    );
+    registry = stack.caches;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Pass 1: exact name match ───────────────────────────────────────────────
 
@@ -874,7 +868,7 @@ void main() {
         ),
       ).thenAnswer(
         (_) async => indexHealthy
-            ? _ok(_readFixture('index_json.json'))
+            ? ok(readFixture('index_json.json'))
             : http.Response('Service Unavailable', 503),
       );
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html');
@@ -912,7 +906,7 @@ void main() {
         ),
       ).thenAnswer(
         (_) async => indexHealthy
-            ? _ok(_readFixture('index_json.json'))
+            ? ok(readFixture('index_json.json'))
             : http.Response('Too Many Requests', 429),
       );
       _stubSymbolDoc(mockHttp, href: 'browser_client/BrowserClient-class.html');
@@ -951,7 +945,7 @@ void main() {
         ),
       ).thenAnswer(
         (_) async => docHealthy
-            ? _ok(_readFixture('symbol_doc.html'))
+            ? ok(readFixture('symbol_doc.html'))
             : http.Response('Service Unavailable', 503),
       );
       final handler = buildHandler();
@@ -995,7 +989,7 @@ void main() {
         ),
       ).thenAnswer(
         (_) async => docHealthy
-            ? _ok(_readFixture('symbol_doc.html'))
+            ? ok(readFixture('symbol_doc.html'))
             : http.Response('Too Many Requests', 429),
       );
       final handler = buildHandler();

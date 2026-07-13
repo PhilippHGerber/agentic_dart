@@ -2,10 +2,9 @@
 library;
 
 import 'dart:async';
-import 'dart:io';
+import 'dart:convert';
 
 import 'package:dart_mcp/client.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/config/config.dart';
@@ -15,9 +14,7 @@ import 'package:pubdev_context/src/server.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../support/harness.dart';
 
 // ─── In-memory channel pair ───────────────────────────────────────────────────
 
@@ -456,22 +453,22 @@ void main() {
   // completion reads the warm entry and issues no further pub.dev call.
 
   group('handleComplete against warm facades', () {
-    late _MockHttpClient mockHttp;
+    late TestStack stack;
+    late MockHttpClient mockHttp;
     late TestMcpClient testClient;
     late PubMcpServer server;
     late ServerConnection serverConnection;
 
     setUp(() async {
-      mockHttp = _MockHttpClient();
-      registerFallbackValue(Uri.parse('https://pub.dev'));
-      final client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
+      stack = TestStack();
+      mockHttp = stack.http;
       final (clientChannel, serverChannel) = inProcessChannels();
       testClient = TestMcpClient();
       server = PubMcpServer(
         serverChannel,
         config: const PubMcpConfig(),
-        client: client,
-        cacheRegistry: CacheRegistry(client: client),
+        client: stack.client,
+        cacheRegistry: stack.caches,
       );
       serverConnection = testClient.connectServer(clientChannel);
       await serverConnection.initialize(
@@ -491,9 +488,21 @@ void main() {
     });
 
     test('{name} completion returns names from a warm search cache, no pub.dev call', () async {
-      _stubUrl(mockHttp, '/api/search', _jsonFixture('search_result.json'));
-      _stubUrl(mockHttp, '/api/packages/', _jsonFixture('package_info.json'));
-      _stubUrl(mockHttp, '/score', _jsonFixture('package_score.json'));
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/search',
+        response: ok(readFixture('search_result.json')),
+      );
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/',
+        response: ok(readFixture('package_info.json')),
+      );
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/score',
+        response: ok(readFixture('package_score.json')),
+      );
 
       await serverConnection.callTool(
         CallToolRequest(name: 'search_packages', arguments: {'query': 'http'}),
@@ -514,7 +523,11 @@ void main() {
     test(
       '{version} completion returns versions from a warm version list, no pub.dev call',
       () async {
-        _stubUrl(mockHttp, '/api/packages/http', _jsonFixture('package_versions.json'));
+        stubUrl(
+          mock: mockHttp,
+          urlFragment: '/api/packages/http',
+          response: ok(readFixture('package_versions.json')),
+        );
 
         await serverConnection.callTool(
           CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
@@ -534,21 +547,134 @@ void main() {
       },
     );
   });
-}
 
-// ─── Fixture helpers for the warm-facade completion tests ──────────────────
+  // ─── Argument validation (ADR-0006) ────────────────────────────────────────
+  //
+  // The central `_validated` wrapper in `server.dart` runs `tool.inputSchema
+  // .validate()` ahead of every handler. A schema violation short-circuits to
+  // an ADR-0002 `INVALID_ARGUMENT` envelope without the handler — or a
+  // pub.dev call — ever running; a valid call passes through untouched.
 
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
+  group('argument validation', () {
+    late TestStack stack;
+    late MockHttpClient mockHttp;
+    late TestMcpClient testClient;
+    late PubMcpServer server;
+    late ServerConnection serverConnection;
 
-http.Response _jsonFixture(String name) => http.Response(_readFixture(name), 200);
+    setUp(() async {
+      stack = TestStack();
+      mockHttp = stack.http;
+      final (clientChannel, serverChannel) = inProcessChannels();
+      testClient = TestMcpClient();
+      server = PubMcpServer(
+        serverChannel,
+        config: const PubMcpConfig(),
+        client: stack.client,
+        cacheRegistry: stack.caches,
+      );
+      serverConnection = testClient.connectServer(clientChannel);
+      await serverConnection.initialize(
+        InitializeRequest(
+          protocolVersion: ProtocolVersion.latestSupported,
+          capabilities: testClient.capabilities,
+          clientInfo: testClient.implementation,
+        ),
+      );
+      serverConnection.notifyInitialized(InitializedNotification());
+      await server.initialized;
+    });
 
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
+    tearDown(() async {
+      await testClient.shutdown();
+      await server.shutdown();
+    });
 
-void _stubUrl(_MockHttpClient mock, String urlFragment, http.Response response) {
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains(urlFragment))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => response);
+    /// Decodes a tool result's single text block as JSON.
+    Map<String, Object?> decodeBody(CallToolResult result) =>
+        jsonDecode((result.content.single as TextContent).text) as Map<String, Object?>;
+
+    /// Decodes an ADR-0002 error envelope's nested `error` object.
+    Map<String, Object?> decodeError(CallToolResult result) {
+      final error = decodeBody(result)['error'];
+      if (error is! Map<String, Object?>) {
+        fail('expected an ADR-0002 error envelope, got: ${decodeBody(result)}');
+      }
+      return error;
+    }
+
+    test(
+      'a limit above the schema maximum returns an ADR-0002 INVALID_ARGUMENT envelope',
+      () async {
+        final result = await serverConnection.callTool(
+          CallToolRequest(
+            name: 'browse_api_symbols',
+            arguments: {'package': 'http', 'query': 'Client', 'limit': 99},
+          ),
+        );
+
+        expect(result.isError, isTrue);
+        expect(decodeError(result)['code'], equals('INVALID_ARGUMENT'));
+        // browse_api_symbols' own inline `limit > 25` check was deleted in
+        // favor of the schema's `maximum: 25` — proves the central wrapper,
+        // not stray handler code, is what rejects this call.
+        verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      },
+    );
+
+    test('a missing required argument returns an ADR-0002 INVALID_ARGUMENT envelope', () async {
+      final result = await serverConnection.callTool(
+        CallToolRequest(name: 'find_symbols', arguments: {'query': 'Client'}),
+      );
+
+      expect(result.isError, isTrue);
+      expect(decodeError(result)['code'], equals('INVALID_ARGUMENT'));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test('the rejection body is JSON, never a plain-text validation message', () async {
+      final result = await serverConnection.callTool(
+        CallToolRequest(name: 'find_symbols', arguments: {'query': 'Client'}),
+      );
+
+      // dart_mcp's own (disabled) validation would emit plain Content.text
+      // lines that are not JSON at all; decoding must succeed.
+      expect(() => decodeBody(result), returnsNormally);
+    });
+
+    test(
+      'a schema-violating names list on compare_packages is rejected before any fetch',
+      () async {
+        final result = await serverConnection.callTool(
+          CallToolRequest(
+            name: 'compare_packages',
+            arguments: {
+              'names': ['http'],
+            },
+          ),
+        );
+
+        expect(result.isError, isTrue);
+        expect(decodeError(result)['code'], equals('INVALID_ARGUMENT'));
+        verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      },
+    );
+
+    test('a valid call reaches the handler unchanged', () async {
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/http',
+        response: ok(readFixture('package_versions.json')),
+      );
+
+      final result = await serverConnection.callTool(
+        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+      );
+
+      expect(result.isError, isNull);
+      final decoded = decodeBody(result);
+      expect(decoded['package'], equals('http'));
+      expect(decoded, contains('stable'));
+    });
+  });
 }

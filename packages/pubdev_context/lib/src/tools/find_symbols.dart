@@ -12,8 +12,8 @@
 /// matches exist, `hasMore: true` is included in the response.
 ///
 /// When `version` is omitted the handler resolves the latest stable version via
-/// [PubDevClient.resolveLatestStable]. Every success response includes
-/// `resolvedVersion` as its first JSON key.
+/// [VersionResolver]. Every success response includes `resolvedVersion` as its
+/// first JSON key.
 ///
 /// Domain errors:
 /// - `INVALID_ARGUMENT`: `package` or `query` is missing. The missing-`package`
@@ -23,16 +23,15 @@
 /// See `issues/pubdev-context-v1/09-find-symbols.md`.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
 import 'browse_api_symbols.dart' show BrowseApiSymbolsHandler;
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 /// Maximum number of symbol matches returned in a single response.
 const _kMaxResults = 20;
@@ -44,29 +43,29 @@ const _kMaxResults = 20;
 final class FindSymbolsHandler {
   /// Creates a [FindSymbolsHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
-  /// [apiIndex] is the shared [KeyedCache] facade (from `CacheRegistry`) that
-  /// resolves and caches the dartdoc symbol index by [ApiIndexId]; pass the
-  /// same instance used by [BrowseApiSymbolsHandler] so both tools warm each
-  /// other's cache. [log] receives structured log events at the appropriate
-  /// [LoggingLevel].
+  /// [versionResolver] resolves the Resolved Version, falling back to the
+  /// Latest Stable Version when the caller omits one. [apiIndex] is the shared
+  /// [KeyedCache] facade (from `CacheRegistry`) that resolves and caches the
+  /// dartdoc symbol index by [ApiIndexId]; pass the same instance used by
+  /// [BrowseApiSymbolsHandler] so both tools warm each other's cache. [log]
+  /// receives structured log events at the appropriate [LoggingLevel].
   const FindSymbolsHandler({
-    required PubDevClient client,
+    required VersionResolver versionResolver,
     required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
+  }) : _versionResolver = versionResolver,
        _apiIndex = apiIndex,
        _log = log;
 
-  final PubDevClient _client;
+  final VersionResolver _versionResolver;
   final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `find_symbols`.
   ///
   /// Validates that both `package` and `query` are present, resolves the
-  /// version (via [PubDevClient.resolveLatestStable] when absent), and
-  /// resolves the dartdoc symbol index through `apiIndex`. Returns
+  /// version (via [VersionResolver] when absent), and resolves the dartdoc
+  /// symbol index through `apiIndex`. Returns
   /// [CallToolResult.isError] `true` with a structured JSON payload on any
   /// domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
@@ -77,7 +76,7 @@ final class FindSymbolsHandler {
     final suppliedVersion = args['version'] as String?;
 
     if (package.isEmpty) {
-      return _domainError(
+      return ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
           message: 'The package argument is required.',
@@ -88,7 +87,7 @@ final class FindSymbolsHandler {
     }
 
     if (query.isEmpty) {
-      return _domainError(
+      return ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
           message: 'The query argument is required.',
@@ -106,14 +105,15 @@ final class FindSymbolsHandler {
     // ── Resolve version ────────────────────────────────────────────────────────
 
     final String resolvedVersion;
-    if (suppliedVersion != null) {
-      resolvedVersion = suppliedVersion;
-    } else {
-      _log(LoggingLevel.info, 'find_symbols: resolving latest stable version for $package');
-      final versionResult = await _client.resolveLatestStable(package);
-      if (versionResult case PubDevFailure(:final error)) return _domainError(error);
-      resolvedVersion = (versionResult as PubDevSuccess<String>).value;
-      _log(LoggingLevel.debug, 'find_symbols: resolved version=$resolvedVersion');
+    switch (await _versionResolver.resolve(
+      package: package,
+      supplied: suppliedVersion,
+      tool: 'find_symbols',
+    )) {
+      case PubDevFailure(:final error):
+        return ToolResponse.error(error);
+      case PubDevSuccess(:final value):
+        resolvedVersion = value;
     }
 
     // ── Resolve the API index ───────────────────────────────────────────────────
@@ -122,7 +122,7 @@ final class FindSymbolsHandler {
 
     return switch (result) {
       PubDevSuccess(:final value) => _buildResponse(value, package, query, resolvedVersion),
-      PubDevFailure(:final error) => _domainError(error),
+      PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }
 
@@ -137,7 +137,7 @@ final class FindSymbolsHandler {
     String query,
     String resolvedVersion,
   ) {
-    if (symbols.isEmpty) return _domainError(_kNoDocumentation);
+    if (symbols.isEmpty) return ToolResponse.error(_kNoDocumentation);
 
     final queryLower = query.toLowerCase();
     final queryTokens = queryLower.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
@@ -156,19 +156,12 @@ final class FindSymbolsHandler {
     final ranked = [...nameMatches, ...descMatches];
     final hasMore = ranked.length > _kMaxResults;
 
-    return CallToolResult(
-      content: [
-        TextContent(
-          text: jsonEncode({
-            'resolvedVersion': resolvedVersion,
-            if (hasMore) 'hasMore': true,
-            'symbols': [
-              for (final s in ranked.take(_kMaxResults)) _symbolToJson(s, package),
-            ],
-          }),
-        ),
+    return ToolResponse.ok({
+      if (hasMore) 'hasMore': true,
+      'symbols': [
+        for (final s in ranked.take(_kMaxResults)) _symbolToJson(s, package),
       ],
-    );
+    }, resolvedVersion: resolvedVersion);
   }
 
   /// Fuzzy description match: every query token must appear as a substring of
@@ -209,7 +202,4 @@ final class FindSymbolsHandler {
     message: 'No API documentation found for this package.',
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
-
-  static CallToolResult _domainError(DomainError error) =>
-      CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);
 }

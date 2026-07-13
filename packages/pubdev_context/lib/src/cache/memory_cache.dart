@@ -4,8 +4,12 @@
 /// Each entry carries an expiry timestamp; expired entries are treated
 /// as misses and evicted on next access.
 ///
-/// TTL constants (named Durations) are defined here and used by handlers
-/// to ensure consistent cache expiry across the codebase.
+/// This is a mechanism-only module: it defines the cache implementation, not
+/// cache policy. Most TTL constants live in `cache_registry.dart`, the single
+/// home for `CacheRegistry`'s key formats, TTLs, and fetch wiring.
+/// [kPackageMetadataTtl] is the one exception — it stays here because
+/// `pub_client.dart`'s private Package Info Cache uses it directly, outside
+/// `CacheRegistry`.
 ///
 /// Pre-v1.0: gains a pluggable backend interface for file-based persistence
 /// (see issue #14). The public interface defined here will not change.
@@ -20,41 +24,11 @@ import '../trace/wire_trace.dart';
 /// Inject a custom implementation in tests to control time without sleeping.
 typedef Clock = DateTime Function();
 
-/// TTL applied to search-result entries.
-const Duration kSearchResultsTtl = Duration(minutes: 5);
-
 /// TTL applied to package-metadata entries.
-const Duration kPackageMetadataTtl = Duration(minutes: 15);
-
-/// TTL applied to package version-list entries (parsed `PackageVersion` lists).
 ///
-/// Matches [kPackageMetadataTtl]: both derive from `GET /api/packages/{name}`,
-/// so a newly published version becomes visible within the same short window.
-const Duration kPackageVersionsTtl = Duration(minutes: 15);
-
-/// TTL applied to changelog entries (parsed `ChangelogEntry` lists).
-const Duration kChangelogTtl = Duration(minutes: 15);
-
-/// TTL applied to raw changelog text entries (the `pub://package/{name}@{version}/changelog` resource).
-const Duration kChangelogRawTtl = Duration(hours: 1);
-
-/// TTL applied to API-documentation index (`index.json`) entries.
-const Duration kApiDocsTtl = Duration(hours: 1);
-
-/// TTL applied to README entries.
-const Duration kReadmeTtl = Duration(hours: 1);
-
-/// TTL applied to symbol documentation page entries.
-const Duration kSymbolDocTtl = Duration(hours: 1);
-
-/// TTL applied to source file map entries (path → content maps).
-const Duration kSourceFileTtl = Duration(hours: 1);
-
-/// TTL applied to AST snapshot entries (parsed `ParseStringResult` objects).
-const Duration kAstSnapshotTtl = Duration(hours: 1);
-
-/// TTL applied to meta-resource entries (scoring, SDK versions).
-const Duration kMetaResourcesTtl = Duration(hours: 24);
+/// Shared by `CacheRegistry`'s `packageDetail` facade and `pub_client.dart`'s
+/// private Package Info Cache — both derive from `GET /api/packages/{name}`.
+const Duration kPackageMetadataTtl = Duration(minutes: 15);
 
 /// A single cached entry pairing a [Future] value with its [createdAt] time and
 /// absolute [expiry].

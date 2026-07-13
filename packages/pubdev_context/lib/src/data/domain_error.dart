@@ -51,7 +51,7 @@ abstract final class DomainErrors {
   static const noResults = 'NO_RESULTS';
 
   /// Dartdoc documentation was not found for one or both requested versions.
-  /// No handler yet — registered for future use by `get_api_diff` (S9).
+  /// Returned by `get_api_diff` when either version has no dartdoc symbols.
   static const documentationNotFound = 'DOCUMENTATION_NOT_FOUND';
 
   /// A package tarball download exceeded the per-tarball size limit.

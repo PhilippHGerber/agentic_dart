@@ -2,7 +2,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
@@ -11,28 +10,19 @@ import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_api_diff.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
 
 /// Stubs `GET /documentation/{package}/{version}/index.json`.
 ///
 /// [fixture] names the fixture served for a 200 response; [statusCode] other
 /// than 200 serves a plain error body instead.
 void _stubIndexJson(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   required String version,
   required String fixture,
   int statusCode = 200,
@@ -49,7 +39,7 @@ void _stubIndexJson(
     ),
   ).thenAnswer(
     (_) async =>
-        statusCode == 200 ? _ok(_readFixture(fixture)) : http.Response('Not Found', statusCode),
+        statusCode == 200 ? ok(readFixture(fixture)) : http.Response('Not Found', statusCode),
   );
 }
 
@@ -80,8 +70,8 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
   late DateTime fakeNow;
   late KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex;
   final loggedMessages = <(LoggingLevel, Object)>[];
@@ -92,15 +82,14 @@ void main() {
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    apiIndex = CacheRegistry(client: client, clock: () => fakeNow).apiIndex;
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    apiIndex = stack.caches.apiIndex;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   /// Stubs both the from- and to-version indexes with the diff fixtures.
   void stubBothVersions() {
@@ -294,7 +283,7 @@ void main() {
           ),
           headers: any(named: 'headers'),
         ),
-      ).thenAnswer((_) async => _ok('[]'));
+      ).thenAnswer((_) async => ok('[]'));
       _stubIndexJson(mockHttp, version: '1.2.0', fixture: 'api_diff_to.json');
 
       final result = await buildHandler().call(diffRequest());

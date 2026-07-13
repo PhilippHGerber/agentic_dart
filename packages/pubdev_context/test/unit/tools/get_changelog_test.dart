@@ -2,50 +2,27 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_changelog.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-http.Response _notFound() => http.Response('Not Found', 404);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
-void _stubUrl({
-  required _MockHttpClient mock,
-  required String urlFragment,
-  required http.Response response,
-}) {
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains(urlFragment))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => response);
-}
-
 /// Stubs `GET /api/packages/{name}` so [PubDevClient.resolveLatestStable]
 /// returns the latest stable version from package_info.json (`1.6.0`).
-void _stubPackageInfo(_MockHttpClient mock, {String name = 'http'}) {
-  _stubUrl(
+void _stubPackageInfo(MockHttpClient mock, {String name = 'http'}) {
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/$name',
-    response: _ok(_readFixture('package_info.json')),
+    response: ok(readFixture('package_info.json')),
   );
 }
 
@@ -53,12 +30,12 @@ void _stubPackageInfo(_MockHttpClient mock, {String name = 'http'}) {
 ///
 /// Also stubs the version-resolution endpoint so [PubDevClient.resolveLatestStable]
 /// succeeds.
-void _stubSuccess(_MockHttpClient mock, {String name = 'http', String? html}) {
+void _stubSuccess(MockHttpClient mock, {String name = 'http', String? html}) {
   _stubPackageInfo(mock, name: name);
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/packages/$name/changelog',
-    response: _ok(html ?? _defaultChangelogHtml),
+    response: ok(html ?? _defaultChangelogHtml),
   );
 }
 
@@ -111,28 +88,32 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late DateTime fakeNow;
   late CacheRegistry registry;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetChangelogHandler buildHandler() => GetChangelogHandler(
-    client: client,
+    versionResolver: versionResolver,
     changelog: registry.changelog,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2026, 5, 12);
-    registry = CacheRegistry(client: client, clock: () => fakeNow);
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(
+      client: stack.client,
+      log: (level, data) => loggedMessages.add((level, data)),
+    );
+    registry = stack.caches;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Successful parse ─────────────────────────────────────────────────────────
 
@@ -524,10 +505,10 @@ void main() {
     /// Stubs the resolve endpoint for 'unknown' to succeed (so the test
     /// exercises the changelog-404 path, not the resolve-404 path).
     void stubUnknownResolve() {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/unknown',
-        response: _ok(
+        response: ok(
           '{"versions":[{"version":"1.0.0"}],"latest":{"version":"1.0.0"}}',
         ),
       );
@@ -535,10 +516,10 @@ void main() {
 
     test('returns isError true when the changelog page returns 404', () async {
       stubUnknownResolve();
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/packages/unknown/changelog',
-        response: _notFound(),
+        response: notFound(),
       );
 
       final result = await buildHandler().call(_request({'name': 'unknown'}));
@@ -548,10 +529,10 @@ void main() {
 
     test('error code is package_not_found on 404', () async {
       stubUnknownResolve();
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/packages/unknown/changelog',
-        response: _notFound(),
+        response: notFound(),
       );
 
       final result = await buildHandler().call(_request({'name': 'unknown'}));
@@ -561,10 +542,10 @@ void main() {
 
     test('HTTP error result is not cached so the next call retries', () async {
       stubUnknownResolve();
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/packages/unknown/changelog',
-        response: _notFound(),
+        response: notFound(),
       );
       final handler = buildHandler();
 
@@ -594,7 +575,7 @@ void main() {
 
   group('resolve failure', () {
     test('propagates package_not_found when version resolution returns 404', () async {
-      _stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: _notFound());
+      stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: notFound());
 
       final result = await buildHandler().call(_request({'name': 'http'}));
 
@@ -603,7 +584,7 @@ void main() {
     });
 
     test('does not fetch the changelog page when resolution fails', () async {
-      _stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: _notFound());
+      stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: notFound());
 
       await buildHandler().call(_request({'name': 'http'}));
 

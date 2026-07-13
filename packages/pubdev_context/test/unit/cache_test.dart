@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 
+import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/memory_cache.dart';
 import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:test/test.dart';

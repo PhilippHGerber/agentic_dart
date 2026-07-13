@@ -21,9 +21,9 @@ import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
+import '../../support/harness.dart';
 
-class _MockHttpClient extends Mock implements http.Client {}
+// ─── Mocks ────────────────────────────────────────────────────────────────────
 
 base class _TestMcpClient extends MCPClient {
   _TestMcpClient() : super(Implementation(name: 'test-client', version: '0.0.1'));
@@ -31,14 +31,12 @@ base class _TestMcpClient extends MCPClient {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
 http.Response _json(String body, {int status = 200}) => http.Response(body, status);
 
 http.Response _jsonFile(String name, {int status = 200}) =>
-    _json(_readFixture(name), status: status);
+    _json(readFixture(name), status: status);
 
-void _stubGet(_MockHttpClient mock, String urlSubstring, http.Response response) {
+void _stubGet(MockHttpClient mock, String urlSubstring, http.Response response) {
   when(
     () => mock.get(
       any(that: predicate<Uri>((u) => u.toString().contains(urlSubstring))),
@@ -61,16 +59,12 @@ void _stubGet(_MockHttpClient mock, String urlSubstring, http.Response response)
   return (clientChannel, serverChannel);
 }
 
-/// A retry policy that never sleeps, so 404s (and any retryable status) resolve
-/// instantly instead of waiting out real backoff delays.
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
 /// The Correlation Id (`#001`, …) embedded in a trace [line].
 String? _idOf(String line) => RegExp(r'#\d+').firstMatch(line)?.group(0);
 
 void main() {
   late Directory tempDir;
-  late _MockHttpClient mock;
+  late MockHttpClient mock;
   late _TestMcpClient testClient;
   late PubMcpServer server;
   late ServerConnection serverConnection;
@@ -78,7 +72,7 @@ void main() {
 
   setUp(() {
     tempDir = Directory.systemTemp.createTempSync('pubdev_context_wire_trace_seam2_');
-    mock = _MockHttpClient();
+    mock = MockHttpClient();
     registerFallbackValue(Uri.parse('https://pub.dev'));
     testClient = _TestMcpClient();
   });
@@ -103,7 +97,7 @@ void main() {
           )
         : null;
     final (clientChannel, serverChannel) = _inProcessChannels();
-    final client = PubDevClient(httpClient: mock, retryPolicy: _instant);
+    final client = PubDevClient(httpClient: mock, retryPolicy: instantRetryPolicy);
     server = PubMcpServer(
       serverChannel,
       config: const PubMcpConfig(),
@@ -195,6 +189,28 @@ void main() {
 
     expect(result, contains('ERROR PACKAGE_NOT_FOUND'));
     expect(_idOf(result), equals(_idOf(inbound)));
+  });
+
+  test('a schema-rejected call is traced under its own Correlation Id', () async {
+    await connect();
+    await serverConnection.callTool(
+      // find_symbols requires `query`; omitting it is a schema violation
+      // rejected by the central validation wrapper before the handler runs.
+      CallToolRequest(name: 'find_symbols', arguments: {'package': 'http'}),
+    );
+
+    final lines = traceLines();
+    final inbound = lines.firstWhere(
+      (l) => l.contains('← LLM   tools/call  find_symbols'),
+    );
+    final result = lines.firstWhere(
+      (l) => l.contains('→ LLM   result  find_symbols'),
+    );
+
+    expect(_idOf(inbound), isNotNull);
+    expect(_idOf(result), equals(_idOf(inbound)));
+    expect(result, contains('ERROR INVALID_ARGUMENT'));
+    verifyNever(() => mock.get(any(), headers: any(named: 'headers')));
   });
 
   test('without tracing, no session file is created', () async {

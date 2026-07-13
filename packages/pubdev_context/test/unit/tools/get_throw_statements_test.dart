@@ -9,17 +9,17 @@ import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
+import 'package:pubdev_context/src/analysis/ast_access.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_source_slice.dart';
 import 'package:pubdev_context/src/tools/get_throw_statements.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Dart source fixtures ─────────────────────────────────────────────────────
 
@@ -204,12 +204,10 @@ const _repoBSource = 'class Repo { void disconnect() { throw StateError("not con
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
 /// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
 /// returns [resolvedVersion] when the tool request omits `version`.
 void _stubPackageInfo(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   String packageName = 'foo',
   String resolvedVersion = '2.5.0',
 }) {
@@ -246,7 +244,7 @@ Uint8List _buildTarGz(Map<String, String> files) {
 /// Stubs the tarball download so the `sourceFiles` facade resolves [files] on
 /// a cache miss for `(name, version)`.
 void _stubTarball(
-  _MockHttpClient mock,
+  MockHttpClient mock,
   Map<String, String> files, {
   String name = 'foo',
   String version = '1.0.0',
@@ -295,7 +293,7 @@ String _indexJsonBody(List<DartdocSymbol> symbols) => jsonEncode([
 
 /// Stubs `GET /documentation/<package>/<version>/index.json`.
 void _stubIndexJson(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   required List<DartdocSymbol> symbols,
   String packageName = 'foo',
   String version = '1.0.0',
@@ -347,27 +345,26 @@ int _lineCount(String text) => '\n'.allMatches(text).length + 1;
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late CacheRegistry registry;
 
   GetThrowStatementsHandler buildHandler() => GetThrowStatementsHandler(
-    client: client,
-    sourceFiles: registry.sourceFiles,
-    ast: registry.ast,
+    versionResolver: versionResolver,
+    astAccess: AstAccess(sourceFiles: registry.sourceFiles, ast: registry.ast),
     apiIndex: registry.apiIndex,
     log: (_, _) {},
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    registry = CacheRegistry(client: client);
+    stack = TestStack();
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(client: stack.client, log: (_, _) {});
+    registry = stack.caches;
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── invalid_input ────────────────────────────────────────────────────────
 
@@ -1193,9 +1190,8 @@ void main() {
       _stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final sourceSliceHandler = GetSourceSliceHandler(
-        client: client,
-        sourceFiles: registry.sourceFiles,
-        ast: registry.ast,
+        versionResolver: versionResolver,
+        astAccess: AstAccess(sourceFiles: registry.sourceFiles, ast: registry.ast),
         log: (_, _) {},
       );
       await sourceSliceHandler.call(

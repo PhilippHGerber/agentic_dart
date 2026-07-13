@@ -30,13 +30,12 @@
 ///
 /// The `pubspec` resource resolves the extracted source-file map through the
 /// shared `sourceFiles` [KeyedCache] facade, keyed by `(name, resolvedVersion)`.
-/// That facade is also shared by `get_source_slice` and `get_throw_statements`,
-/// so a single tarball download warms every migrated source-backed reader for
-/// that package version. `list_package_source_files` is not yet migrated onto
-/// it — see `issues/keyed-cache/04-source-and-ast-cache.md`.
+/// That facade is also shared by `list_package_source_files`, `get_source_slice`,
+/// and `get_throw_statements`, so a single tarball download warms every
+/// source-backed reader for that package version.
 ///
 /// [CompletionsSupport] for the `{name}` and `{version}` parameters is handled
-/// in the server layer ([PubMcpServer.handleComplete]) using the search and
+/// in the server layer (`PubMcpServer.handleComplete`) using the search and
 /// versions caches.
 ///
 /// See issue #11.
@@ -51,7 +50,6 @@ import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
-import '../server.dart' show PubMcpServer;
 import '../tools/browse_api_symbols.dart';
 
 /// URI template string for the package README resource.

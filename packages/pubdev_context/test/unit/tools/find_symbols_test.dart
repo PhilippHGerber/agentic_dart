@@ -2,7 +2,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
@@ -13,24 +12,17 @@ import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
 import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/find_symbols.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
 
 /// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
 /// returns [resolvedVersion].
 void _stubPackageInfo(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   String packageName = 'http',
   String resolvedVersion = '1.6.0',
 }) {
@@ -47,7 +39,7 @@ void _stubPackageInfo(
       headers: any(named: 'headers'),
     ),
   ).thenAnswer(
-    (_) async => _ok(
+    (_) async => ok(
       '{"versions":[{"version":"$resolvedVersion"}],'
       '"latest":{"version":"$resolvedVersion"}}',
     ),
@@ -56,7 +48,7 @@ void _stubPackageInfo(
 
 /// Stubs `GET /documentation/{packageName}/{version}/index.json`.
 void _stubIndexJson(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
   String version = '1.6.0',
@@ -73,7 +65,7 @@ void _stubIndexJson(
     ),
   ).thenAnswer(
     (_) async => statusCode == 200
-        ? _ok(body ?? _readFixture('index_json.json'))
+        ? ok(body ?? readFixture('index_json.json'))
         : http.Response('Not Found', statusCode),
   );
 }
@@ -114,28 +106,32 @@ String _bulkIndex(int count) => jsonEncode([
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late DateTime fakeNow;
   late KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   FindSymbolsHandler buildHandler() => FindSymbolsHandler(
-    client: client,
+    versionResolver: versionResolver,
     apiIndex: apiIndex,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    apiIndex = CacheRegistry(client: client, clock: () => fakeNow).apiIndex;
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(
+      client: stack.client,
+      log: (level, data) => loggedMessages.add((level, data)),
+    );
+    apiIndex = stack.caches.apiIndex;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Argument validation ──────────────────────────────────────────────────────
 

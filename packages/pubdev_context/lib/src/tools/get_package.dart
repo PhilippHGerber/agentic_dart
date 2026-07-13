@@ -2,9 +2,9 @@
 ///
 /// Returns a full [PackageDetail] for one package, optionally at a pinned
 /// version. When `version` is omitted the handler resolves the latest stable
-/// version via [PubDevClient.resolveLatestStable] so that the identity passed
-/// to [PackageDetailId] is always version-anchored (e.g. `(http, 1.6.0)`,
-/// never a version-less identity).
+/// version via [VersionResolver] so that the identity passed to
+/// [PackageDetailId] is always version-anchored (e.g. `(http, 1.6.0)`, never a
+/// version-less identity).
 ///
 /// Every success response includes `resolvedVersion` as its first JSON key,
 /// reflecting the exact semver used — whether the caller supplied it or the
@@ -18,15 +18,14 @@
 /// `true` and a structured JSON payload — exceptions are never swallowed silently.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 /// Handles calls to the `get_package` MCP tool.
 ///
@@ -35,27 +34,28 @@ import '../data/pub_client.dart';
 final class GetPackageHandler {
   /// Creates a [GetPackageHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
-  /// [packageDetail] is the shared [KeyedCache] facade (from `CacheRegistry`)
-  /// that resolves and caches [PackageDetail] by [PackageDetailId]. [log]
-  /// receives structured log events at the appropriate [LoggingLevel].
+  /// [versionResolver] resolves the Resolved Version, falling back to the
+  /// Latest Stable Version when the caller omits one. [packageDetail] is the
+  /// shared [KeyedCache] facade (from `CacheRegistry`) that resolves and
+  /// caches [PackageDetail] by [PackageDetailId]. [log] receives structured
+  /// log events at the appropriate [LoggingLevel].
   const GetPackageHandler({
-    required PubDevClient client,
+    required VersionResolver versionResolver,
     required KeyedCache<PackageDetailId, PackageDetail> packageDetail,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
+  }) : _versionResolver = versionResolver,
        _packageDetail = packageDetail,
        _log = log;
 
-  final PubDevClient _client;
+  final VersionResolver _versionResolver;
   final KeyedCache<PackageDetailId, PackageDetail> _packageDetail;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `get_package`.
   ///
-  /// Resolves the version (via [PubDevClient.resolveLatestStable] when absent),
-  /// then resolves [PackageDetail] through `packageDetail`. Returns
-  /// [CallToolResult.isError] `true` on any domain failure.
+  /// Resolves the version (via [VersionResolver] when absent), then resolves
+  /// [PackageDetail] through `packageDetail`. Returns [CallToolResult.isError]
+  /// `true` on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final name = (args['name'] as String?) ?? '';
@@ -69,17 +69,15 @@ final class GetPackageHandler {
     // ── Resolve version ────────────────────────────────────────────────────────
 
     final String resolvedVersion;
-    if (suppliedVersion != null) {
-      resolvedVersion = suppliedVersion;
-    } else {
-      _log(LoggingLevel.info, 'get_package: resolving latest stable version for $name');
-      switch (await _client.resolveLatestStable(name)) {
-        case PubDevFailure(:final error):
-          return _domainError(error);
-        case PubDevSuccess(:final value):
-          resolvedVersion = value;
-      }
-      _log(LoggingLevel.debug, 'get_package: resolved version=$resolvedVersion');
+    switch (await _versionResolver.resolve(
+      package: name,
+      supplied: suppliedVersion,
+      tool: 'get_package',
+    )) {
+      case PubDevFailure(:final error):
+        return ToolResponse.error(error);
+      case PubDevSuccess(:final value):
+        resolvedVersion = value;
     }
 
     // ── Resolve package detail ──────────────────────────────────────────────────
@@ -92,23 +90,13 @@ final class GetPackageHandler {
 
     switch (result) {
       case PubDevSuccess(:final value):
-        return _success(value, resolvedVersion);
+        return ToolResponse.ok(_detailToJson(value), resolvedVersion: resolvedVersion);
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
     }
   }
 
-  static CallToolResult _success(PackageDetail detail, String resolvedVersion) => CallToolResult(
-    content: [TextContent(text: jsonEncode(_detailToJson(detail, resolvedVersion)))],
-  );
-
-  static CallToolResult _domainError(DomainError error) => CallToolResult(
-    content: [TextContent(text: error.toJsonString())],
-    isError: true,
-  );
-
-  static Map<String, Object?> _detailToJson(PackageDetail d, String resolvedVersion) => {
-    'resolvedVersion': resolvedVersion,
+  static Map<String, Object?> _detailToJson(PackageDetail d) => {
     'name': d.name,
     'version': d.version,
     'description': d.description,

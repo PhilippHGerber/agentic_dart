@@ -52,15 +52,14 @@
 /// See issues #28, #32, #33.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 // ─── Internal resolution result types ─────────────────────────────────────────
 
@@ -88,32 +87,33 @@ final class _NoMatch extends _SymbolMatch {}
 final class GetSymbolDocumentationHandler {
   /// Creates a [GetSymbolDocumentationHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
-  /// [apiIndex] is the shared [KeyedCache] facade (from `CacheRegistry`) that
-  /// resolves and caches the dartdoc symbol index by [ApiIndexId] — pass the
-  /// same instance used by `browse_api_symbols` to share warm index data.
-  /// [symbolDoc] is the shared [KeyedCache] facade that resolves and caches
-  /// individual symbol documentation pages by [SymbolDocId]. [log] receives
-  /// structured log events at the appropriate [LoggingLevel].
+  /// [versionResolver] resolves the Resolved Version, falling back to the
+  /// Latest Stable Version when the caller omits one. [apiIndex] is the shared
+  /// [KeyedCache] facade (from `CacheRegistry`) that resolves and caches the
+  /// dartdoc symbol index by [ApiIndexId] — pass the same instance used by
+  /// `browse_api_symbols` to share warm index data. [symbolDoc] is the shared
+  /// [KeyedCache] facade that resolves and caches individual symbol
+  /// documentation pages by [SymbolDocId]. [log] receives structured log
+  /// events at the appropriate [LoggingLevel].
   const GetSymbolDocumentationHandler({
-    required PubDevClient client,
+    required VersionResolver versionResolver,
     required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required KeyedCache<SymbolDocId, String> symbolDoc,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
+  }) : _versionResolver = versionResolver,
        _apiIndex = apiIndex,
        _symbolDoc = symbolDoc,
        _log = log;
 
-  final PubDevClient _client;
+  final VersionResolver _versionResolver;
   final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final KeyedCache<SymbolDocId, String> _symbolDoc;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `get_symbol_documentation`.
   ///
-  /// Resolves the version (via [PubDevClient.resolveLatestStable] when absent),
-  /// resolves the `symbol` name to an href via the API index, then fetches
+  /// Resolves the version (via [VersionResolver] when absent), resolves the
+  /// `symbol` name to an href via the API index, then fetches
   /// and returns the dartdoc page content wrapped in a JSON object with
   /// `resolvedVersion` as the first key. Returns [CallToolResult.isError]
   /// `true` with a structured JSON payload on any domain failure.
@@ -133,20 +133,15 @@ final class GetSymbolDocumentationHandler {
     // ── Step 1: resolve version ────────────────────────────────────────────────
 
     final String resolvedVersion;
-    if (suppliedVersion != null) {
-      resolvedVersion = suppliedVersion;
-    } else {
-      _log(
-        LoggingLevel.info,
-        'get_symbol_documentation: resolving latest stable version for $package',
-      );
-      switch (await _client.resolveLatestStable(package)) {
-        case PubDevFailure(:final error):
-          return _domainError(error);
-        case PubDevSuccess(:final value):
-          resolvedVersion = value;
-      }
-      _log(LoggingLevel.debug, 'get_symbol_documentation: resolved version=$resolvedVersion');
+    switch (await _versionResolver.resolve(
+      package: package,
+      supplied: suppliedVersion,
+      tool: 'get_symbol_documentation',
+    )) {
+      case PubDevFailure(:final error):
+        return ToolResponse.error(error);
+      case PubDevSuccess(:final value):
+        resolvedVersion = value;
     }
 
     // ── Step 2: resolve the API index ─────────────────────────────────────────
@@ -154,19 +149,19 @@ final class GetSymbolDocumentationHandler {
     final List<DartdocSymbol> symbols;
     switch (await _apiIndex.resolve((name: package, version: resolvedVersion))) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         symbols = value;
     }
 
-    if (symbols.isEmpty) return _domainError(_kNoDocumentation);
+    if (symbols.isEmpty) return ToolResponse.error(_kNoDocumentation);
 
     // ── Step 3: resolve symbol name → href ────────────────────────────────────
 
     final match = _resolveSymbol(symbols, symbol);
 
     return switch (match) {
-      _NoMatch() => _domainError(
+      _NoMatch() => ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
           message: "Symbol '$symbol' was not found in the API index for package '$package'.",
@@ -175,7 +170,7 @@ final class GetSymbolDocumentationHandler {
               'Use browse_api_symbols to discover available symbol names.',
         ),
       ),
-      _AmbiguousMatch(:final alternatives) => _domainError(
+      _AmbiguousMatch(:final alternatives) => ToolResponse.error(
         DomainError(
           code: DomainErrors.ambiguousSymbol,
           message: "Symbol '$symbol' is ambiguous — ${alternatives.length} candidates were found.",
@@ -244,10 +239,14 @@ final class GetSymbolDocumentationHandler {
   // ── Symbol doc fetch ───────────────────────────────────────────────────────
 
   Future<CallToolResult> _fetchDoc(String package, String href, String resolvedVersion) async {
-    final result = await _symbolDoc.resolve((package: package, version: resolvedVersion, href: href));
+    final result = await _symbolDoc.resolve((
+      package: package,
+      version: resolvedVersion,
+      href: href,
+    ));
     return switch (result) {
       PubDevSuccess(:final value) => _successResult(value, resolvedVersion),
-      PubDevFailure(:final error) => _domainError(error),
+      PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }
 
@@ -259,14 +258,6 @@ final class GetSymbolDocumentationHandler {
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
 
-  static CallToolResult _successResult(String text, String resolvedVersion) => CallToolResult(
-    content: [
-      TextContent(
-        text: jsonEncode({'resolvedVersion': resolvedVersion, 'documentation': text}),
-      ),
-    ],
-  );
-
-  static CallToolResult _domainError(DomainError error) =>
-      CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);
+  static CallToolResult _successResult(String text, String resolvedVersion) =>
+      ToolResponse.ok({'documentation': text}, resolvedVersion: resolvedVersion);
 }

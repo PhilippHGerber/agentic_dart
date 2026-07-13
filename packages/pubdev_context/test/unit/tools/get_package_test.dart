@@ -2,81 +2,57 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_package.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-http.Response _notFound() => http.Response('Not Found', 404);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
-void _stubUrl({
-  required _MockHttpClient mock,
-  required String urlFragment,
-  required http.Response response,
-}) {
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains(urlFragment))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => response);
-}
-
 /// Stubs the three endpoints for a successful `get_package` call (latest version).
 ///
-/// Registration order matters: mocktail resolves stubs LIFO, so the more specific
-/// `/score` stub must be registered last to win over the `/api/packages/http` stub.
-void _stubSuccess(_MockHttpClient mock) {
-  _stubUrl(
+/// The more specific `/score` stub is registered last so it wins over the
+/// broader `/api/packages/http` stub (see [stubUrl] for why order matters).
+void _stubSuccess(MockHttpClient mock) {
+  stubUrl(
     mock: mock,
     urlFragment: '/documentation/http/latest/',
-    response: _notFound(),
+    response: notFound(),
   );
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/http',
-    response: _ok(_readFixture('package_info.json')),
+    response: ok(readFixture('package_info.json')),
   );
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/http/score',
-    response: _ok(_readFixture('package_score.json')),
+    response: ok(readFixture('package_score.json')),
   );
 }
 
 /// Stubs the two endpoints for a version-pinned `get_package` call.
-void _stubVersionSuccess(_MockHttpClient mock, String version) {
-  final versionData = jsonDecode(_readFixture('package_info.json')) as Map<String, Object?>;
+void _stubVersionSuccess(MockHttpClient mock, String version) {
+  final versionData = jsonDecode(readFixture('package_info.json')) as Map<String, Object?>;
   final latestData = versionData['latest']! as Map<String, Object?>;
 
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/http/versions/$version',
-    response: _ok(jsonEncode(latestData)),
+    response: ok(jsonEncode(latestData)),
   );
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/http/score',
-    response: _ok(_readFixture('package_score.json')),
+    response: ok(readFixture('package_score.json')),
   );
 }
 
@@ -102,28 +78,32 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late DateTime fakeNow;
   late KeyedCache<PackageDetailId, PackageDetail> packageDetail;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetPackageHandler buildHandler() => GetPackageHandler(
-    client: client,
+    versionResolver: versionResolver,
     packageDetail: packageDetail,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2026, 5, 12);
-    packageDetail = CacheRegistry(client: client, clock: () => fakeNow).packageDetail;
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(
+      client: stack.client,
+      log: (level, data) => loggedMessages.add((level, data)),
+    );
+    packageDetail = stack.caches.packageDetail;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Successful fetch (latest) ────────────────────────────────────────────────
 
@@ -289,20 +269,20 @@ void main() {
 
     test('is present and non-empty when the docs page returns valid HTML', () async {
       const html = '<div class="desc markdown"><p>A great HTTP library.</p></div>';
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/documentation/http/latest/',
-        response: _ok(html),
+        response: ok(html),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http',
-        response: _ok(_readFixture('package_info.json')),
+        response: ok(readFixture('package_info.json')),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http/score',
-        response: _ok(_readFixture('package_score.json')),
+        response: ok(readFixture('package_score.json')),
       );
 
       final result = await buildHandler().call(_request({'name': 'http'}));
@@ -442,10 +422,10 @@ void main() {
 
   group('package not found', () {
     test('returns a domain error when the package endpoint returns 404', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/unknown',
-        response: _notFound(),
+        response: notFound(),
       );
 
       final result = await buildHandler().call(_request({'name': 'unknown'}));
@@ -454,10 +434,10 @@ void main() {
     });
 
     test('domain error code is package_not_found on 404', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/unknown',
-        response: _notFound(),
+        response: notFound(),
       );
 
       final result = await buildHandler().call(_request({'name': 'unknown'}));
@@ -466,10 +446,10 @@ void main() {
     });
 
     test('domain error contains a suggestion on 404', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/unknown',
-        response: _notFound(),
+        response: notFound(),
       );
 
       final result = await buildHandler().call(_request({'name': 'unknown'}));
@@ -478,10 +458,10 @@ void main() {
     });
 
     test('error result is not cached so the next call retries the HTTP request', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/unknown',
-        response: _notFound(),
+        response: notFound(),
       );
       final handler = buildHandler();
 
@@ -497,15 +477,15 @@ void main() {
     });
 
     test('returns a domain error when the version endpoint returns 404', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http/versions/9.9.9',
-        response: _notFound(),
+        response: notFound(),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http/score',
-        response: _ok(_readFixture('package_score.json')),
+        response: ok(readFixture('package_score.json')),
       );
 
       final result = await buildHandler().call(

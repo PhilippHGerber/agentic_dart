@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — pubdev_context</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .band { border-left-width: 4px; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-3">
+        <h1 class="font-serif text-3xl font-bold">Architecture review — <span class="text-indigo-700">pubdev_context</span></h1>
+        <p class="text-sm text-slate-500">2026-07-12 · lib/src: 9,190 LOC / 30 files · tests: 16,200 LOC · 12 tool handlers, 5 resource templates</p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600">
+          <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-3 border border-slate-400 bg-white"></span> module</span>
+          <span class="inline-flex items-center gap-1.5"><svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#64748b" stroke-width="1.5" class="seam"/></svg> seam</span>
+          <span class="inline-flex items-center gap-1.5"><svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage / duplication</span>
+          <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-3 deep rounded-sm"></span> deep module</span>
+        </div>
+      </header>
+
+      <!-- What is already deep -->
+      <section class="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+        <strong>Already deep — measure everything else against these.</strong>
+        The Wire Trace is seamed at registration: zero handler code touches tracing, the Correlation Id rides a Zone, and when disabled nothing is installed.
+        <code class="font-mono text-xs">CacheRegistry</code>/<code class="font-mono text-xs">KeyedCache</code> (ADR-0005) completed their migration: no get/miss/fetch/set dance survives in any handler; every handler calls <code class="font-mono text-xs">facade.resolve(typedId)</code>.
+        The null-assertion policy is clean in <code class="font-mono text-xs">lib/</code>.
+      </section>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- ============ CANDIDATE 1 ============ -->
+        <article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="font-serif text-2xl font-semibold">1 · One home for the Tool Error envelope</h2>
+            <span class="shrink-0 rounded-full bg-emerald-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+          </div>
+          <div class="flex gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-0.5 text-slate-600">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-600">lib/src/tools/*.dart (all 12 handlers) · lib/src/data/domain_error.dart</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- BEFORE: 12 handler boxes each with duplicated strips -->
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — 12 copies of the same mapping</p>
+              <div class="grid grid-cols-4 gap-1.5">
+                <!-- 12 handler mini-boxes -->
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">get_package</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">browse_api</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">find_symbols</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">changelog</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">compare</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">versions</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">search</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">api_diff</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">symbol_doc</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">source_slice</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">throws</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+                <div class="border border-slate-300 rounded p-1 text-center"><p class="text-[9px] font-mono truncate">source_files</p><div class="mt-1 h-1.5 bg-red-400 rounded-sm"></div><div class="mt-0.5 h-1.5 bg-red-300 rounded-sm"></div></div>
+              </div>
+              <div class="mt-3 flex gap-3 text-[10px] text-slate-500">
+                <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-1.5 bg-red-400 rounded-sm"></span> _domainError (×12, 66 call sites)</span>
+                <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-1.5 bg-red-300 rounded-sm"></span> _success envelope (×9)</span>
+              </div>
+            </div>
+            <!-- AFTER: one deep box -->
+            <div class="rounded-lg border border-slate-200 p-4 flex flex-col">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one deep envelope module</p>
+              <div class="flex-1 flex flex-col items-center justify-center gap-2">
+                <div class="grid grid-cols-6 gap-1 w-full">
+                  <div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div>
+                  <div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div><div class="h-4 border border-slate-200 rounded bg-slate-50"></div>
+                </div>
+                <svg width="24" height="24" viewBox="0 0 24 24"><line x1="12" y1="0" x2="12" y2="18" stroke="#64748b" stroke-width="1.5" class="seam"/><path d="M8 16 L12 22 L16 16" fill="none" stroke="#64748b" stroke-width="1.5"/></svg>
+                <div class="deep text-white rounded-lg w-3/4 p-3 text-center">
+                  <p class="text-xs uppercase tracking-wider text-slate-300">ToolResponse</p>
+                  <p class="font-mono text-[11px] mt-1 text-slate-100">ok(resolvedVersion, payload)<br/>error(DomainError)</p>
+                </div>
+                <p class="text-[10px] text-slate-400">resolvedVersion-first invariant + isError mapping live here, once</p>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-sm"><strong>Problem:</strong> the <code class="font-mono text-xs">DomainError → CallToolResult(isError: true)</code> mapping is one concept implemented as 12 identical private <code class="font-mono text-xs">_domainError</code> adapters, and the "<code class="font-mono text-xs">resolvedVersion</code> is the first key" invariant is enforced by comment in ~9 separate <code class="font-mono text-xs">_success</code> builders.</p>
+          <p class="text-sm"><strong>Solution:</strong> a <code class="font-mono text-xs">ToolResponse</code> module with a two-method interface — <code class="font-mono text-xs">ok()</code> and <code class="font-mono text-xs">error()</code> — that owns the Tool Error envelope (ADR-0002) and the Resolved Version placement; delete all 12 copies.</p>
+          <ul class="text-sm space-y-1 list-disc list-inside marker:text-indigo-500">
+            <li><strong>locality:</strong> envelope changes touch one module</li>
+            <li><strong>leverage:</strong> one interface, 66 call sites</li>
+            <li>resolvedVersion invariant becomes code, not comments</li>
+            <li>deletion test: complexity concentrates, clearly</li>
+          </ul>
+          <div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Aligns with ADR-0002 — same wire schema, finally with a single implementation. No conflict.</div>
+        </article>
+
+        <!-- ============ CANDIDATE 2 ============ -->
+        <article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="font-serif text-2xl font-semibold">2 · Deepen Latest Stable Version resolution</h2>
+            <span class="shrink-0 rounded-full bg-emerald-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+          </div>
+          <div class="flex gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-0.5 text-slate-600">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-600">9 handlers calling resolveLatestStable · get_api_diff.dart resolves twice</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — 9 handlers, 3 spellings of the same dance</p>
+              <pre class="mermaid">
+flowchart TB
+  subgraph handlers [" "]
+    A[get_package<br/>+ 2 more]:::h
+    B[browse_api_symbols<br/>+ variants]:::h
+    C[find_symbols<br/>compare_packages]:::h
+  end
+  A -- "switch form" --> R[resolveLatestStable]
+  B -- "if-case + downcast<br/>as PubDevSuccess" --> R
+  C -- "ad-hoc variants" --> R
+  classDef h fill:#fff,stroke:#94a3b8;
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class A,B,C leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After — one seam, one spelling</p>
+              <pre class="mermaid">
+flowchart TB
+  H[9 handlers]:::h
+  VR[VersionResolver<br/>resolve name, version?]:::deep
+  PC[PubDevClient<br/>Package Info Cache · ADR-0004]:::h
+  H -- "PubDevResult&lt;String&gt;" --> VR
+  VR --> PC
+  classDef h fill:#fff,stroke:#94a3b8;
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#fff;
+              </pre>
+            </div>
+          </div>
+
+          <p class="text-sm"><strong>Problem:</strong> "if version supplied use it, else log + resolve Latest Stable Version + on failure return the Tool Error" is re-implemented in 9 handlers in three different spellings, including a hand downcast (<code class="font-mono text-xs">as PubDevSuccess&lt;String&gt;</code>) that pattern matching should make impossible.</p>
+          <p class="text-sm"><strong>Solution:</strong> one <code class="font-mono text-xs">VersionResolver</code> module (or handler-base method): <code class="font-mono text-xs">resolve(name, suppliedVersion) → PubDevResult&lt;String&gt;</code>. The logging line and failure path move behind the interface.</p>
+          <ul class="text-sm space-y-1 list-disc list-inside marker:text-indigo-500">
+            <li><strong>locality:</strong> resolution bugs fix once, fixed 9×</li>
+            <li><strong>leverage:</strong> get_api_diff's double-resolve comes free</li>
+            <li>downcast smell deleted</li>
+            <li>tests: resolution tested once at its interface</li>
+          </ul>
+          <div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">ADR-0004 keeps the caching below the client seam — this resolver adds no cache, so no conflict.</div>
+        </article>
+
+        <!-- ============ CANDIDATE 3 ============ -->
+        <article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="font-serif text-2xl font-semibold">3 · Typed tool-argument extraction</h2>
+            <span class="shrink-0 rounded-full bg-amber-500 text-white text-xs font-semibold px-3 py-1">Worth exploring</span>
+          </div>
+          <div class="flex gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-0.5 text-slate-600">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-600">lib/src/tools/*.dart (all 12 handlers open with the same casts + ad-hoc INVALID_ARGUMENT literals)</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- BEFORE: cross-section, repeated bands -->
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — every handler re-answers "how do I read an argument?"</p>
+              <div class="space-y-1.5">
+                <div class="band border-red-400 bg-red-50 px-3 py-1.5 text-[11px] font-mono">args['package'] as String? ?? '' · inline check · own INVALID_ARGUMENT literal</div>
+                <div class="band border-red-400 bg-red-50 px-3 py-1.5 text-[11px] font-mono">args['limit'] as int? ?? 10 · limit &gt; 25 check inline</div>
+                <div class="band border-red-400 bg-red-50 px-3 py-1.5 text-[11px] font-mono">required-field emptiness check · own literal</div>
+                <div class="band border-red-300 bg-red-50/60 px-3 py-1.5 text-[11px] font-mono text-slate-400">… ×12 handlers, each its own dialect</div>
+              </div>
+            </div>
+            <!-- AFTER: one band -->
+            <div class="rounded-lg border border-slate-200 p-4 flex flex-col">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one deep extractor</p>
+              <div class="flex-1 flex flex-col justify-center gap-2">
+                <div class="deep text-white rounded px-4 py-3">
+                  <p class="text-xs uppercase tracking-wider text-slate-300">ToolArgs</p>
+                  <p class="font-mono text-[11px] mt-1 text-slate-100">requiredString('package')<br/>intInRange('limit', 1, 25)<br/>→ PubDevResult&lt;T&gt;</p>
+                </div>
+                <p class="text-[10px] text-slate-400 text-center">parse + validate + INVALID_ARGUMENT construction, behind one interface</p>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-sm"><strong>Problem:</strong> argument parsing and validation is a shallow ritual repeated 12×; each handler builds its own <code class="font-mono text-xs">INVALID_ARGUMENT</code> <code class="font-mono text-xs">DomainError</code> literal, so message wording and validation strictness drift per tool.</p>
+          <p class="text-sm"><strong>Solution:</strong> a small typed extractor over <code class="font-mono text-xs">request.arguments</code> returning <code class="font-mono text-xs">PubDevResult</code>, so failures flow into the same envelope as every other Tool Error.</p>
+          <ul class="text-sm space-y-1 list-disc list-inside marker:text-indigo-500">
+            <li><strong>locality:</strong> validation wording drifts nowhere</li>
+            <li><strong>leverage:</strong> one interface, 12 handlers</li>
+            <li>composes with candidates 1 and 2</li>
+          </ul>
+        </article>
+
+        <!-- ============ CANDIDATE 4 ============ -->
+        <article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="font-serif text-2xl font-semibold">4 · Shared Source Slice / AST access module</h2>
+            <span class="shrink-0 rounded-full bg-emerald-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+          </div>
+          <div class="flex gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-0.5 text-slate-600">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-600">lib/src/tools/get_source_slice.dart (544 LOC) · lib/src/tools/get_throw_statements.dart (815 LOC)</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- BEFORE: two god files with identical inner boxes -->
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — parallel private copies in two god files</p>
+              <div class="relative grid grid-cols-2 gap-6">
+                <div class="border border-slate-300 rounded p-2">
+                  <p class="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">get_source_slice</p>
+                  <div class="space-y-1">
+                    <div class="border border-red-400 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-mono">_getOrParseAst</div>
+                    <div class="border border-red-400 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-mono">_loadSourceFiles</div>
+                    <div class="border border-red-400 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-mono">_membersForDecl</div>
+                    <div class="border border-red-300 bg-red-50/60 rounded px-1.5 py-0.5 text-[10px] font-mono">_normalizeMemberName</div>
+                    <div class="border border-slate-200 rounded px-1.5 py-0.5 text-[10px] font-mono text-slate-400">slice logic…</div>
+                  </div>
+                </div>
+                <div class="border border-slate-300 rounded p-2">
+                  <p class="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">get_throw_statements</p>
+                  <div class="space-y-1">
+                    <div class="border border-red-400 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-mono">_getOrParseAst</div>
+                    <div class="border border-red-400 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-mono">_loadSourceFiles</div>
+                    <div class="border border-red-400 bg-red-50 rounded px-1.5 py-0.5 text-[10px] font-mono">_membersForDecl</div>
+                    <div class="border border-red-300 bg-red-50/60 rounded px-1.5 py-0.5 text-[10px] font-mono">_normalizeMethodName</div>
+                    <div class="border border-slate-200 rounded px-1.5 py-0.5 text-[10px] font-mono text-slate-400">throw walk…</div>
+                  </div>
+                </div>
+                <svg class="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
+                  <line x1="46%" y1="30%" x2="54%" y2="30%" stroke="#dc2626" stroke-width="2"/>
+                  <line x1="46%" y1="44%" x2="54%" y2="44%" stroke="#dc2626" stroke-width="2"/>
+                  <line x1="46%" y1="58%" x2="54%" y2="58%" stroke="#dc2626" stroke-width="2"/>
+                </svg>
+              </div>
+              <p class="mt-2 text-[10px] text-slate-500">red = byte-for-byte or near-twin duplicates</p>
+            </div>
+            <!-- AFTER -->
+            <div class="rounded-lg border border-slate-200 p-4 flex flex-col">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one deep dependency, two thin callers</p>
+              <div class="flex-1 flex flex-col items-center justify-center gap-2">
+                <div class="grid grid-cols-2 gap-6 w-full">
+                  <div class="border border-slate-300 rounded p-2 text-center text-[10px] uppercase tracking-wider text-slate-500">get_source_slice<br/><span class="normal-case font-mono text-slate-400">slice logic only</span></div>
+                  <div class="border border-slate-300 rounded p-2 text-center text-[10px] uppercase tracking-wider text-slate-500">get_throw_statements<br/><span class="normal-case font-mono text-slate-400">throw walk only</span></div>
+                </div>
+                <svg width="120" height="28" viewBox="0 0 120 28"><line x1="30" y1="0" x2="60" y2="22" stroke="#64748b" stroke-width="1.5" class="seam"/><line x1="90" y1="0" x2="60" y2="22" stroke="#64748b" stroke-width="1.5" class="seam"/></svg>
+                <div class="deep text-white rounded-lg w-2/3 p-3 text-center">
+                  <p class="text-xs uppercase tracking-wider text-slate-300">AstAccess</p>
+                  <p class="font-mono text-[11px] mt-1 text-slate-100">tarball → source files → parsed AST<br/>Symbol Identity → member node</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-sm"><strong>Problem:</strong> "how a package tarball becomes a parsed AST" and "how a member name maps to an AST node" have no home — the answer is duplicated (partly byte-for-byte) inside the two largest handler files, so any fix must be made twice and understanding either tool means reading both.</p>
+          <p class="text-sm"><strong>Solution:</strong> extract an <code class="font-mono text-xs">AstAccess</code> module owning source-file loading, AST parse (via the existing ast facade), and member lookup by Symbol Identity; both handlers depend on it.</p>
+          <ul class="text-sm space-y-1 list-disc list-inside marker:text-indigo-500">
+            <li><strong>locality:</strong> AST bugs concentrate in one module</li>
+            <li>two 500–800 LOC files shrink toward their real jobs</li>
+            <li>member-lookup edge cases tested once</li>
+          </ul>
+        </article>
+
+        <!-- ============ CANDIDATE 5 ============ -->
+        <article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="font-serif text-2xl font-semibold">5 · A test harness module in test/support/</h2>
+            <span class="shrink-0 rounded-full bg-amber-500 text-white text-xs font-semibold px-3 py-1">Worth exploring</span>
+          </div>
+          <div class="flex gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-0.5 text-slate-600">mock</span>
+          </div>
+          <p class="font-mono text-sm text-slate-600">test/**/*_test.dart (16,200 LOC — no shared helpers exist today)</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- BEFORE: bar chart of duplicated helpers -->
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — the same helper, re-declared per file</p>
+              <div class="space-y-2 text-[11px] font-mono">
+                <div class="flex items-center gap-2"><span class="w-32 shrink-0 text-right text-slate-500">_MockHttpClient</span><div class="h-4 bg-red-400 rounded-sm" style="width:90%"></div><span class="text-slate-500">×18</span></div>
+                <div class="flex items-center gap-2"><span class="w-32 shrink-0 text-right text-slate-500">_instant retry</span><div class="h-4 bg-red-400 rounded-sm" style="width:85%"></div><span class="text-slate-500">×17</span></div>
+                <div class="flex items-center gap-2"><span class="w-32 shrink-0 text-right text-slate-500">_readFixture</span><div class="h-4 bg-red-300 rounded-sm" style="width:70%"></div><span class="text-slate-500">×14</span></div>
+                <div class="flex items-center gap-2"><span class="w-32 shrink-0 text-right text-slate-500">_ok response</span><div class="h-4 bg-red-300 rounded-sm" style="width:65%"></div><span class="text-slate-500">×13</span></div>
+                <div class="flex items-center gap-2"><span class="w-32 shrink-0 text-right text-slate-500">_stubUrl</span><div class="h-4 bg-red-200 rounded-sm" style="width:30%"></div><span class="text-slate-500">×6</span></div>
+              </div>
+              <p class="mt-3 text-[10px] text-slate-500">plus the mocktail LIFO-ordering gotcha, documented inline wherever someone got bitten</p>
+            </div>
+            <!-- AFTER -->
+            <div class="rounded-lg border border-slate-200 p-4 flex flex-col">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one harness, N thin test files</p>
+              <div class="flex-1 flex flex-col items-center justify-center gap-2">
+                <div class="grid grid-cols-6 gap-1 w-full">
+                  <div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div>
+                  <div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div><div class="h-3 border border-slate-200 rounded bg-slate-50"></div>
+                </div>
+                <svg width="24" height="24" viewBox="0 0 24 24"><line x1="12" y1="0" x2="12" y2="18" stroke="#64748b" stroke-width="1.5" class="seam"/><path d="M8 16 L12 22 L16 16" fill="none" stroke="#64748b" stroke-width="1.5"/></svg>
+                <div class="deep text-white rounded-lg w-3/4 p-3 text-center">
+                  <p class="text-xs uppercase tracking-wider text-slate-300">test/support/harness</p>
+                  <p class="font-mono text-[11px] mt-1 text-slate-100">mock http.Client · stub responses<br/>fixtures · instant retry · LIFO note</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-sm"><strong>Problem:</strong> the test suite mocks at exactly the right seam (<code class="font-mono text-xs">http.Client</code>, real client + real CacheRegistry above it) but rebuilds the mock plumbing per file — hundreds of duplicated lines, and the mocktail stub-ordering gotcha is folklore rather than a documented helper.</p>
+          <p class="text-sm"><strong>Solution:</strong> a <code class="font-mono text-xs">test/support/</code> harness module exposing the mock client, canned responses, fixture loading, and the instant retry policy through one small interface.</p>
+          <ul class="text-sm space-y-1 list-disc list-inside marker:text-indigo-500">
+            <li><strong>locality:</strong> stub gotchas documented once</li>
+            <li>delete hundreds of duplicated test lines</li>
+            <li>new tool tests start at the interface, not at plumbing</li>
+          </ul>
+        </article>
+
+        <!-- ============ CANDIDATE 6 ============ -->
+        <article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="font-serif text-2xl font-semibold">6 · Split transport policy out of PubDevClient</h2>
+            <span class="shrink-0 rounded-full bg-slate-500 text-white text-xs font-semibold px-3 py-1">Speculative</span>
+          </div>
+          <div class="flex gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-0.5 text-slate-600">local-substitutable</span>
+          </div>
+          <p class="font-mono text-sm text-slate-600">lib/src/data/pub_client.dart (1,144 LOC)</p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- BEFORE: cross-section of mixed concerns -->
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — five concerns, one file</p>
+              <div class="space-y-1">
+                <div class="band border-slate-400 bg-slate-100 px-3 py-1.5 text-[11px] font-mono">~17 public PubDevResult methods</div>
+                <div class="band border-red-400 bg-red-50 px-3 py-1.5 text-[11px] font-mono">RetryPolicy (inline)</div>
+                <div class="band border-red-400 bg-red-50 px-3 py-1.5 text-[11px] font-mono">semaphore / concurrency limit (inline)</div>
+                <div class="band border-slate-300 bg-slate-50 px-3 py-1.5 text-[11px] font-mono">HTTP + JSON parsing + HTML→markdown dispatch</div>
+                <div class="band border-slate-300 bg-slate-50 px-3 py-1.5 text-[11px] font-mono">Package Info Cache (ADR-0004 — stays)</div>
+              </div>
+            </div>
+            <!-- AFTER -->
+            <div class="rounded-lg border border-slate-200 p-4 flex flex-col justify-center">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — transport policy as its own module</p>
+              <div class="space-y-2">
+                <div class="border-2 border-slate-800 rounded px-3 py-2 text-[11px] font-mono">PubDevClient — endpoints, parsing, Package Info Cache</div>
+                <div class="flex justify-center"><svg width="24" height="18" viewBox="0 0 24 18"><line x1="12" y1="0" x2="12" y2="12" stroke="#64748b" stroke-width="1.5" class="seam"/><path d="M8 10 L12 16 L16 10" fill="none" stroke="#64748b" stroke-width="1.5"/></svg></div>
+                <div class="deep text-white rounded px-3 py-2 text-[11px] font-mono text-center">transport module: retry + concurrency limiting</div>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-sm"><strong>Problem:</strong> <code class="font-mono text-xs">pub_client.dart</code> mixes endpoint logic with transport policy (retry, concurrency limiting) — the file is the package's largest, and RetryPolicy already has its own test file, hinting it wants its own module.</p>
+          <p class="text-sm"><strong>Solution:</strong> move <code class="font-mono text-xs">RetryPolicy</code> + semaphore behind a small transport module; PubDevClient's interface to callers is unchanged.</p>
+          <ul class="text-sm space-y-1 list-disc list-inside marker:text-indigo-500">
+            <li><strong>locality:</strong> transport tuning stops touching endpoint code</li>
+            <li>speculative: only one adapter today — do it when transport actually varies</li>
+          </ul>
+        </article>
+
+      </section>
+
+      <!-- Hygiene -->
+      <section class="rounded-lg border border-slate-200 bg-white p-5 text-sm space-y-2">
+        <h2 class="font-serif text-lg font-semibold">Small hygiene items (no card needed)</h2>
+        <ul class="list-disc list-inside space-y-1 text-slate-700">
+          <li><code class="font-mono text-xs">package_resources.dart:54</code> imports <code class="font-mono text-xs">server.dart</code> only for a doc-comment link — a needless import cycle; delete the import.</li>
+          <li><code class="font-mono text-xs">package_resources.dart:35</code> claims <code class="font-mono text-xs">list_package_source_files</code> is "not yet migrated" — it is; the doc contradicts the code.</li>
+          <li><code class="font-mono text-xs">kChangelogRawTtl</code> (<code class="font-mono text-xs">memory_cache.dart:39</code>) is dead — zero references.</li>
+          <li><code class="font-mono text-xs">domain_error.dart:54</code> — "No handler yet" comment on <code class="font-mono text-xs">documentationNotFound</code> is stale (used by <code class="font-mono text-xs">get_api_diff.dart:200</code>).</li>
+          <li>TTL constants live in <code class="font-mono text-xs">memory_cache.dart</code> but are a CacheRegistry concern — move when convenient.</li>
+        </ul>
+      </section>
+
+      <!-- Top recommendation -->
+      <section id="top-recommendation" class="rounded-xl border-2 border-indigo-600 bg-indigo-50 p-8 space-y-3">
+        <p class="text-xs uppercase tracking-wider text-indigo-600 font-semibold">Top recommendation</p>
+        <h2 class="font-serif text-2xl font-bold"><a href="#c1" class="hover:underline">1 · One home for the Tool Error envelope</a></h2>
+        <p class="text-sm text-slate-700 max-w-3xl">It is the widest duplication (12 modules, 66 call sites), the most mechanical to land, and it creates the seam that candidates 2 and 3 plug into — both version resolution and argument validation end by producing exactly this envelope. Land it first and the other two deepenings become small diffs instead of medium ones.</p>
+      </section>
+
+      <footer class="text-xs text-slate-400 pb-8">Vocabulary: /codebase-design · Domain terms: packages/pubdev_context/CONTEXT.md · ADRs: packages/pubdev_context/docs/adr/</footer>
+    </main>
+  </body>
+</html>

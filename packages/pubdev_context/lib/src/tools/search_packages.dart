@@ -15,17 +15,13 @@
 /// See `issues/pub-dev-mcp/05-server-skeleton-search-packages.md`.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-
-/// Well-known error code returned when the caller supplies an invalid input.
-const String _kInvalidInput = DomainErrors.invalidArgument;
+import 'tool_response.dart';
 
 /// Handles calls to the `search_packages` MCP tool.
 ///
@@ -48,9 +44,9 @@ final class SearchPackagesHandler {
 
   /// Handles a [CallToolRequest] for `search_packages`.
   ///
-  /// Validates `limit` against the 20-result cap, then resolves the page
-  /// through `searchResults`. Returns [CallToolResult.isError] `true` with a
-  /// structured JSON payload on any domain failure.
+  /// Resolves the page through `searchResults`. Returns
+  /// [CallToolResult.isError] `true` with a structured JSON payload on any
+  /// domain failure. `limit` is capped at 20 by the tool's input schema.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
 
@@ -60,16 +56,6 @@ final class SearchPackagesHandler {
     final sdk = args['sdk'] as String?;
     final sort = (args['sort'] as String?) ?? 'relevance';
     final platform = args['platform'] as String?;
-
-    if (limit > 20) {
-      return _domainError(
-        const DomainError(
-          code: _kInvalidInput,
-          message: 'limit must not exceed 20.',
-          suggestion: 'Set limit to a value between 1 and 20 and retry.',
-        ),
-      );
-    }
 
     _log(LoggingLevel.info, 'search_packages: query=$query limit=$limit page=$page');
 
@@ -83,19 +69,10 @@ final class SearchPackagesHandler {
     ));
 
     return switch (result) {
-      PubDevSuccess(:final value) => _success(value),
-      PubDevFailure(:final error) => _domainError(error),
+      PubDevSuccess(:final value) => ToolResponse.ok(_summariesToJson(value)),
+      PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }
-
-  static CallToolResult _success(List<PackageSummary> summaries) => CallToolResult(
-    content: [TextContent(text: jsonEncode(_summariesToJson(summaries)))],
-  );
-
-  static CallToolResult _domainError(DomainError error) => CallToolResult(
-    content: [TextContent(text: error.toJsonString())],
-    isError: true,
-  );
 
   static List<Map<String, Object?>> _summariesToJson(List<PackageSummary> summaries) => [
     for (final s in summaries) _summaryToJson(s),

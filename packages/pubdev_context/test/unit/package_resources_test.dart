@@ -4,7 +4,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -19,20 +18,11 @@ import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/resources/package_resources.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../support/harness.dart';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-
 http.Response _status(int code) => http.Response('', code);
-
-/// A [RetryPolicy] that never delays between attempts.
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
 
 /// Minimal stub HTML that looks like a pub.dev documentation page with a
 /// README section.
@@ -69,7 +59,7 @@ const _kChangelogHtml =
 // ─── Stub helpers ─────────────────────────────────────────────────────────────
 
 void _stubDocsPage(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
   String body = _kReadmeHtml,
@@ -85,11 +75,11 @@ void _stubDocsPage(
       ),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => statusCode == 200 ? _ok(body) : _status(statusCode));
+  ).thenAnswer((_) async => statusCode == 200 ? ok(body) : _status(statusCode));
 }
 
 void _stubExamplePage(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
   String body = _kExampleHtml,
@@ -101,11 +91,11 @@ void _stubExamplePage(
       ),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => statusCode == 200 ? _ok(body) : _status(statusCode));
+  ).thenAnswer((_) async => statusCode == 200 ? ok(body) : _status(statusCode));
 }
 
 void _stubChangelogPage(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
   String body = _kChangelogHtml,
@@ -117,11 +107,11 @@ void _stubChangelogPage(
       ),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => statusCode == 200 ? _ok(body) : _status(statusCode));
+  ).thenAnswer((_) async => statusCode == 200 ? ok(body) : _status(statusCode));
 }
 
 void _stubIndexJson(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
   String version = '1.6.0',
@@ -136,7 +126,7 @@ void _stubIndexJson(
       headers: any(named: 'headers'),
     ),
   ).thenAnswer(
-    (_) async => statusCode == 200 ? _ok(_readFixture('index_json.json')) : _status(statusCode),
+    (_) async => statusCode == 200 ? ok(readFixture('index_json.json')) : _status(statusCode),
   );
 }
 
@@ -146,7 +136,7 @@ void _stubIndexJson(
 /// resolution fails with `package_not_found`. Otherwise it returns a minimal
 /// JSON body that makes [PubDevClient.resolveLatestStable] return [version].
 void _stubPackageInfo(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   String packageName = 'http',
   String version = '1.6.0',
   int statusCode = 200,
@@ -187,7 +177,7 @@ void _stubPackageInfo(
       ),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => _ok(body));
+  ).thenAnswer((_) async => ok(body));
 }
 
 Uint8List _buildTarGz(Map<String, String> files) {
@@ -202,7 +192,7 @@ Uint8List _buildTarGz(Map<String, String> files) {
 /// Stubs the version-tarball endpoint (`send`, not `get`) with a gzip archive
 /// built from [files]. A non-200 [statusCode] returns an empty body.
 void _stubTarball(
-  _MockHttpClient mock,
+  MockHttpClient mock,
   Map<String, String> files, {
   String packageName = 'http',
   String version = '1.6.0',
@@ -277,28 +267,26 @@ String? _mimeType(ReadResourceResult result) => result.contents.first.mimeType;
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
   late DateTime fakeNow;
   late CacheRegistry registry;
 
   PackageResourcesHandler buildHandler() => PackageResourcesHandler(
-    client: client,
+    client: stack.client,
     readme: registry.readme,
     apiIndex: registry.apiIndex,
     sourceFiles: registry.sourceFiles,
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    registry = CacheRegistry(client: client, clock: () => fakeNow);
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    registry = stack.caches;
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Static template descriptors ─────────────────────────────────────────────
 
@@ -1000,7 +988,7 @@ void main() {
           headers: any(named: 'headers'),
         ),
       ).thenAnswer(
-        (_) async => indexHealthy ? _ok(_readFixture('index_json.json')) : _status(503),
+        (_) async => indexHealthy ? ok(readFixture('index_json.json')) : _status(503),
       );
       final handler = buildHandler();
 
@@ -1033,7 +1021,7 @@ void main() {
           headers: any(named: 'headers'),
         ),
       ).thenAnswer(
-        (_) async => indexHealthy ? _ok(_readFixture('index_json.json')) : _status(429),
+        (_) async => indexHealthy ? ok(readFixture('index_json.json')) : _status(429),
       );
       final handler = buildHandler();
 

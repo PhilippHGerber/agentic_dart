@@ -3,45 +3,21 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/cache/keyed_cache.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
 import 'package:pubdev_context/src/data/models.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/compare_packages.dart';
 import 'package:pubdev_context/src/tools/get_package.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-http.Response _notFound() => http.Response('Not Found', 404);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
-void _stubUrl({
-  required _MockHttpClient mock,
-  required String urlFragment,
-  required http.Response response,
-}) {
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains(urlFragment))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => response);
-}
 
 /// Returns a minimal package-info JSON body for [name].
 String _packageInfoJson(String name) => jsonEncode({
@@ -82,17 +58,17 @@ String _packageScoreJson() => jsonEncode({
 ///
 /// The `/score` stub is registered last so mocktail resolves it before the
 /// broader `/api/packages/{name}` stub.
-void _stubSuccess(_MockHttpClient mock, String name) {
-  _stubUrl(mock: mock, urlFragment: '/documentation/$name/latest/', response: _notFound());
-  _stubUrl(
+void _stubSuccess(MockHttpClient mock, String name) {
+  stubUrl(mock: mock, urlFragment: '/documentation/$name/latest/', response: notFound());
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/$name',
-    response: _ok(_packageInfoJson(name)),
+    response: ok(_packageInfoJson(name)),
   );
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/$name/score',
-    response: _ok(_packageScoreJson()),
+    response: ok(_packageScoreJson()),
   );
 }
 
@@ -100,9 +76,9 @@ void _stubSuccess(_MockHttpClient mock, String name) {
 /// endpoint on a [Completer] so the fetch cannot complete until the returned
 /// completer is completed. The `score` and documentation endpoints resolve
 /// immediately. Used to force out-of-order completion between packages.
-Completer<void> _stubGatedInfo(_MockHttpClient mock, String name) {
+Completer<void> _stubGatedInfo(MockHttpClient mock, String name) {
   final gate = Completer<void>();
-  _stubUrl(mock: mock, urlFragment: '/documentation/$name/latest/', response: _notFound());
+  stubUrl(mock: mock, urlFragment: '/documentation/$name/latest/', response: notFound());
   when(
     () => mock.get(
       any(that: predicate<Uri>((u) => u.toString().endsWith('/api/packages/$name'))),
@@ -110,19 +86,19 @@ Completer<void> _stubGatedInfo(_MockHttpClient mock, String name) {
     ),
   ).thenAnswer((_) async {
     await gate.future;
-    return _ok(_packageInfoJson(name));
+    return ok(_packageInfoJson(name));
   });
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/$name/score',
-    response: _ok(_packageScoreJson()),
+    response: ok(_packageScoreJson()),
   );
   return gate;
 }
 
 /// Stubs the package endpoint for [name] to return 404.
-void _stubNotFound(_MockHttpClient mock, String name) {
-  _stubUrl(mock: mock, urlFragment: '/api/packages/$name', response: _notFound());
+void _stubNotFound(MockHttpClient mock, String name) {
+  stubUrl(mock: mock, urlFragment: '/api/packages/$name', response: notFound());
 }
 
 /// Creates a [CallToolRequest] for `compare_packages` with [names].
@@ -147,62 +123,37 @@ Map<String, Object?> _matrixOf(CallToolResult result) =>
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late KeyedCache<PackageDetailId, PackageDetail> packageDetail;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   ComparePackagesHandler buildHandler({
     void Function(LoggingLevel, Object)? log,
   }) => ComparePackagesHandler(
-    client: client,
+    versionResolver: versionResolver,
     packageDetail: packageDetail,
     log: log ?? (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    packageDetail = CacheRegistry(client: client).packageDetail;
+    stack = TestStack();
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(
+      client: stack.client,
+      log: (level, data) => loggedMessages.add((level, data)),
+    );
+    packageDetail = stack.caches.packageDetail;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
-  // ─── Input validation ─────────────────────────────────────────────────────────
-
-  group('input validation', () {
-    test('names with one entry sets isError to true', () async {
-      final result = await buildHandler().call(_request(['http']));
-
-      expect(result.isError, isTrue);
-    });
-
-    test('names with one entry returns an invalid_input domain error', () async {
-      final result = await buildHandler().call(_request(['http']));
-
-      expect(_errorInner(result)['code'], equals(DomainErrors.invalidArgument));
-    });
-
-    test('names with six entries sets isError to true', () async {
-      final result = await buildHandler().call(_request(['a', 'b', 'c', 'd', 'e', 'f']));
-
-      expect(result.isError, isTrue);
-    });
-
-    test('names with six entries returns an invalid_input domain error', () async {
-      final result = await buildHandler().call(_request(['a', 'b', 'c', 'd', 'e', 'f']));
-
-      expect(_errorInner(result)['code'], equals(DomainErrors.invalidArgument));
-    });
-
-    test('invalid_input error includes a suggestion', () async {
-      final result = await buildHandler().call(_request(['http']));
-
-      expect(_errorInner(result), contains('suggestion'));
-    });
-  });
+  // names.length validation (2-5 entries) moved to server-owned schema
+  // validation (ADR-0006, ticket 02) — see test/unit/pub_mcp_test.dart's
+  // 'argument validation' group. The handler no longer checks `names.length`
+  // itself; the tool's input schema already caps it via minItems/maxItems.
 
   // ─── Successful comparison ────────────────────────────────────────────────────
 
@@ -451,10 +402,10 @@ void main() {
         var inFlight = 0;
         var peak = 0;
         for (final name in names) {
-          _stubUrl(
+          stubUrl(
             mock: mockHttp,
             urlFragment: '/documentation/$name/latest/',
-            response: _notFound(),
+            response: notFound(),
           );
           when(
             () => mockHttp.get(
@@ -466,12 +417,12 @@ void main() {
             if (inFlight > peak) peak = inFlight;
             await gate.future;
             inFlight--;
-            return _ok(_packageInfoJson(name));
+            return ok(_packageInfoJson(name));
           });
-          _stubUrl(
+          stubUrl(
             mock: mockHttp,
             urlFragment: '/api/packages/$name/score',
-            response: _ok(_packageScoreJson()),
+            response: ok(_packageScoreJson()),
           );
         }
 
@@ -552,7 +503,7 @@ void main() {
       _stubSuccess(mockHttp, 'dio');
 
       final getPackageHandler = GetPackageHandler(
-        client: client,
+        versionResolver: versionResolver,
         packageDetail: packageDetail,
         log: (level, data) {},
       );
@@ -581,20 +532,20 @@ void main() {
 
   group('fixture smoke test', () {
     test('pubPoints from the http fixture are reflected in the matrix', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/documentation/http/latest/',
-        response: _notFound(),
+        response: notFound(),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http',
-        response: _ok(_readFixture('package_info.json')),
+        response: ok(readFixture('package_info.json')),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http/score',
-        response: _ok(_readFixture('package_score.json')),
+        response: ok(readFixture('package_score.json')),
       );
       _stubSuccess(mockHttp, 'dio');
 

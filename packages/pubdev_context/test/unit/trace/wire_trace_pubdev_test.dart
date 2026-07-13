@@ -24,9 +24,9 @@ import 'package:pubdev_context/src/trace/wire_trace.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
+import '../../support/harness.dart';
 
-class _MockHttpClient extends Mock implements http.Client {}
+// ─── Mocks ────────────────────────────────────────────────────────────────────
 
 base class _TestMcpClient extends MCPClient {
   _TestMcpClient() : super(Implementation(name: 'test-client', version: '0.0.1'));
@@ -34,18 +34,16 @@ base class _TestMcpClient extends MCPClient {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
 http.Response _json(String body, {int status = 200}) => http.Response(
   body,
   status,
   headers: const {'content-type': 'application/vnd.pub.v2+json'},
 );
 
-http.Response _jsonFile(String name) => _json(_readFixture(name));
+http.Response _jsonFile(String name) => _json(readFixture(name));
 
 void _stubGet(
-  _MockHttpClient mock,
+  MockHttpClient mock,
   String urlSubstring,
   http.Response response, {
   Duration delay = Duration.zero,
@@ -75,15 +73,12 @@ void _stubGet(
   return (clientChannel, serverChannel);
 }
 
-/// A retry policy that never sleeps, so any retryable status resolves instantly.
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
 /// The Correlation Id (`#001`, …) embedded in a trace [line], or `null`.
 String? _idOf(String line) => RegExp(r'#\d+').firstMatch(line)?.group(0);
 
 void main() {
   late Directory tempDir;
-  late _MockHttpClient mock;
+  late MockHttpClient mock;
   late _TestMcpClient testClient;
   late PubMcpServer server;
   late ServerConnection serverConnection;
@@ -91,7 +86,7 @@ void main() {
 
   setUp(() {
     tempDir = Directory.systemTemp.createTempSync('pubdev_context_wire_trace_pub_');
-    mock = _MockHttpClient();
+    mock = MockHttpClient();
     registerFallbackValue(Uri.parse('https://pub.dev'));
     testClient = _TestMcpClient();
   });
@@ -116,7 +111,11 @@ void main() {
     );
     final activeTrace = trace;
     final (clientChannel, serverChannel) = _inProcessChannels();
-    final client = PubDevClient(httpClient: mock, retryPolicy: _instant, trace: activeTrace);
+    final client = PubDevClient(
+      httpClient: mock,
+      retryPolicy: instantRetryPolicy,
+      trace: activeTrace,
+    );
     server = PubMcpServer(
       serverChannel,
       config: const PubMcpConfig(),

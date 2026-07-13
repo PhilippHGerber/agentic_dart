@@ -16,9 +16,7 @@ import 'package:pubdev_context/src/resources/meta_resources.dart';
 import 'package:pubdev_context/src/tools/tool_definitions.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../support/harness.dart';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -38,16 +36,14 @@ final String _kFlutterReleasesJson = jsonEncode({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-http.Response _ok(String body) => http.Response(body, 200);
-
 /// Stubs both Google Storage endpoints on [mock].
-void _stubSdkVersionsEndpoints(_MockHttpClient mock) {
+void _stubSdkVersionsEndpoints(MockHttpClient mock) {
   when(
     () => mock.get(any(that: predicate<Uri>((u) => u.toString().contains('dart-archive')))),
-  ).thenAnswer((_) async => _ok(_kDartVersionJson));
+  ).thenAnswer((_) async => ok(_kDartVersionJson));
   when(
     () => mock.get(any(that: predicate<Uri>((u) => u.toString().contains('flutter_infra')))),
-  ).thenAnswer((_) async => _ok(_kFlutterReleasesJson));
+  ).thenAnswer((_) async => ok(_kFlutterReleasesJson));
 }
 
 ReadResourceRequest _request(String uri) => ReadResourceRequest(uri: uri);
@@ -55,7 +51,7 @@ ReadResourceRequest _request(String uri) => ReadResourceRequest(uri: uri);
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
+  late MockHttpClient mockHttp;
   late DateTime fakeNow;
   late CacheRegistry registry;
 
@@ -65,7 +61,7 @@ void main() {
       MetaResourcesHandler(meta: registry.meta, resourcesManifest: kTestManifest);
 
   setUp(() {
-    mockHttp = _MockHttpClient();
+    mockHttp = MockHttpClient();
     registerFallbackValue(Uri.parse('https://example.com'));
     fakeNow = DateTime(2025, 5, 10);
     registry = CacheRegistry(
@@ -231,7 +227,7 @@ void main() {
       when(
         () =>
             mockHttp.get(any(that: predicate<Uri>((u) => u.toString().contains('flutter_infra')))),
-      ).thenAnswer((_) async => _ok(_kFlutterReleasesJson));
+      ).thenAnswer((_) async => ok(_kFlutterReleasesJson));
 
       await expectLater(
         buildHandler().handleSdkVersions(_request('pub://meta/sdk-versions')),
@@ -242,7 +238,7 @@ void main() {
     test('throws when the Flutter endpoint returns a non-200 status', () async {
       when(
         () => mockHttp.get(any(that: predicate<Uri>((u) => u.toString().contains('dart-archive')))),
-      ).thenAnswer((_) async => _ok(_kDartVersionJson));
+      ).thenAnswer((_) async => ok(_kDartVersionJson));
       when(
         () =>
             mockHttp.get(any(that: predicate<Uri>((u) => u.toString().contains('flutter_infra')))),
@@ -263,11 +259,11 @@ void main() {
       });
       when(
         () => mockHttp.get(any(that: predicate<Uri>((u) => u.toString().contains('dart-archive')))),
-      ).thenAnswer((_) async => _ok(_kDartVersionJson));
+      ).thenAnswer((_) async => ok(_kDartVersionJson));
       when(
         () =>
             mockHttp.get(any(that: predicate<Uri>((u) => u.toString().contains('flutter_infra')))),
-      ).thenAnswer((_) async => _ok(brokenReleasesJson));
+      ).thenAnswer((_) async => ok(brokenReleasesJson));
 
       await expectLater(
         buildHandler().handleSdkVersions(_request('pub://meta/sdk-versions')),

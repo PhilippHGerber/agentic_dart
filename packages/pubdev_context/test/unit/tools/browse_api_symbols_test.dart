@@ -2,7 +2,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
@@ -16,24 +15,17 @@ import 'package:pubdev_context/src/tools/browse_api_symbols.dart';
 import 'package:pubdev_context/src/tools/find_symbols.dart';
 import 'package:pubdev_context/src/tools/get_api_diff.dart';
 import 'package:pubdev_context/src/tools/get_symbol_documentation.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
 
 /// Stubs `GET /api/packages/{packageName}` so [PubDevClient.resolveLatestStable]
 /// returns [resolvedVersion].
 void _stubPackageInfo(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   String packageName = 'http',
   String resolvedVersion = '1.6.0',
 }) {
@@ -50,7 +42,7 @@ void _stubPackageInfo(
       headers: any(named: 'headers'),
     ),
   ).thenAnswer(
-    (_) async => _ok(
+    (_) async => ok(
       '{"versions":[{"version":"$resolvedVersion"}],'
       '"latest":{"version":"$resolvedVersion"}}',
     ),
@@ -63,7 +55,7 @@ void _stubPackageInfo(
 /// the package-info stub — so tests that omit `version` in the tool request
 /// pick up the right stub after [PubDevClient.resolveLatestStable].
 void _stubIndexJson(
-  _MockHttpClient mock, {
+  MockHttpClient mock, {
   int statusCode = 200,
   String packageName = 'http',
   String version = '1.6.0',
@@ -79,7 +71,7 @@ void _stubIndexJson(
     ),
   ).thenAnswer(
     (_) async => statusCode == 200
-        ? _ok(_readFixture('index_json.json'))
+        ? ok(readFixture('index_json.json'))
         : http.Response('Not Found', statusCode),
   );
 }
@@ -92,9 +84,7 @@ CallToolRequest _request(Map<String, Object?> args) =>
 /// returns the `symbols` list.
 List<Map<String, Object?>> _symbols(CallToolResult result) {
   final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
-  return ((json['symbols'] as List<Object?>?) ?? const [])
-      .cast<Map<String, Object?>>()
-      .toList();
+  return ((json['symbols'] as List<Object?>?) ?? const []).cast<Map<String, Object?>>().toList();
 }
 
 /// Decodes the first content item of [result] and returns its `resolvedVersion`.
@@ -114,50 +104,36 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late DateTime fakeNow;
   late KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   BrowseApiSymbolsHandler buildHandler() => BrowseApiSymbolsHandler(
-    client: client,
+    versionResolver: versionResolver,
     apiIndex: apiIndex,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    apiIndex = CacheRegistry(client: client, clock: () => fakeNow).apiIndex;
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(
+      client: stack.client,
+      log: (level, data) => loggedMessages.add((level, data)),
+    );
+    apiIndex = stack.caches.apiIndex;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
-  // ─── Limit validation ───────────────────────────────────────────────────────
-
-  group('limit greater than 25', () {
-    test('returns invalid_input domain error without calling the HTTP client', () async {
-      final result = await buildHandler().call(
-        _request({'package': 'http', 'query': 'client', 'limit': 26}),
-      );
-
-      expect(result.isError, isTrue);
-      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
-      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
-    });
-
-    test('error payload contains a suggestion', () async {
-      final result = await buildHandler().call(
-        _request({'package': 'http', 'query': 'client', 'limit': 26}),
-      );
-
-      expect(_errorPayload(result), contains('suggestion'));
-    });
-  });
+  // Limit validation (limit > 25) moved to server-owned schema validation
+  // (ADR-0006, ticket 02) — see test/unit/pub_mcp_test.dart's
+  // 'argument validation' group. The handler no longer checks `limit` itself.
 
   group('limit of 25', () {
     test('is accepted without returning an error', () async {
@@ -195,7 +171,6 @@ void main() {
         ),
       ).called(1);
     });
-
   });
 
   // ─── Warm cache (pre-primed) ────────────────────────────────────────────────
@@ -505,7 +480,7 @@ void main() {
           ),
           headers: any(named: 'headers'),
         ),
-      ).thenAnswer((_) async => _ok('[]'));
+      ).thenAnswer((_) async => ok('[]'));
 
       final result = await buildHandler().call(
         _request({'package': 'http', 'query': 'client'}),
@@ -623,10 +598,12 @@ void main() {
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
       await FindSymbolsHandler(
-        client: client,
+        versionResolver: versionResolver,
         apiIndex: apiIndex,
         log: (_, _) {},
-      ).call(CallToolRequest(name: 'find_symbols', arguments: {'package': 'http', 'query': 'client'}));
+      ).call(
+        CallToolRequest(name: 'find_symbols', arguments: {'package': 'http', 'query': 'client'}),
+      );
 
       verify(
         () => mockHttp.get(
@@ -668,13 +645,13 @@ void main() {
           ),
           headers: any(named: 'headers'),
         ),
-      ).thenAnswer((_) async => _ok(_readFixture('symbol_doc.html')));
+      ).thenAnswer((_) async => ok(readFixture('symbol_doc.html')));
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
       await GetSymbolDocumentationHandler(
-        client: client,
+        versionResolver: versionResolver,
         apiIndex: apiIndex,
-        symbolDoc: CacheRegistry(client: client, clock: () => fakeNow).symbolDoc,
+        symbolDoc: CacheRegistry(client: stack.client, clock: () => fakeNow).symbolDoc,
         log: (_, _) {},
       ).call(
         CallToolRequest(

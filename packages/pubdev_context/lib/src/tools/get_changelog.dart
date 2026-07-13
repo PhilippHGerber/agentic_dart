@@ -7,15 +7,14 @@
 /// See `issues/pub-dev-mcp/07-get-changelog-tool.md`.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 // ─── Regex patterns ───────────────────────────────────────────────────────────
 
@@ -54,26 +53,27 @@ const _invalidInput = DomainError(
 final class GetChangelogHandler {
   /// Creates a [GetChangelogHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway, used only for version resolution.
-  /// [changelog] is the shared [KeyedCache] facade (from `CacheRegistry`) that
-  /// resolves and caches the full parsed entry list by [ChangelogEntriesId].
-  /// [log] receives structured log events at the appropriate [LoggingLevel].
+  /// [versionResolver] resolves the Resolved Version, falling back to the
+  /// Latest Stable Version when the caller omits one. [changelog] is the
+  /// shared [KeyedCache] facade (from `CacheRegistry`) that resolves and
+  /// caches the full parsed entry list by [ChangelogEntriesId]. [log] receives
+  /// structured log events at the appropriate [LoggingLevel].
   const GetChangelogHandler({
-    required PubDevClient client,
+    required VersionResolver versionResolver,
     required KeyedCache<ChangelogEntriesId, List<ChangelogEntry>> changelog,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
+  }) : _versionResolver = versionResolver,
        _changelog = changelog,
        _log = log;
 
-  final PubDevClient _client;
+  final VersionResolver _versionResolver;
   final KeyedCache<ChangelogEntriesId, List<ChangelogEntry>> _changelog;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `get_changelog`.
   ///
-  /// Resolves the latest stable version via [PubDevClient.resolveLatestStable]
-  /// to include `resolvedVersion` in the success response. Resolves the full
+  /// Resolves the latest stable version via [VersionResolver] to include
+  /// `resolvedVersion` in the success response. Resolves the full
   /// [ChangelogEntry] list through `changelog`. Applies the `fromVersion`
   /// boundary and `versionLimit` cap on each call. Returns
   /// [CallToolResult.isError] `true` on any domain failure.
@@ -94,16 +94,13 @@ final class GetChangelogHandler {
     // `resolvedVersion` field correct and the control flow simple. Deriving the
     // version from the changelog instead would be unsound — the newest heading
     // may be a pre-release, not the latest stable.
-    // Resolve the latest stable version for the `resolvedVersion` field.
-    _log(LoggingLevel.info, 'get_changelog: resolving latest stable version for $name');
     final String resolvedVersion;
-    switch (await _client.resolveLatestStable(name)) {
+    switch (await _versionResolver.resolve(package: name, tool: 'get_changelog')) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         resolvedVersion = value;
     }
-    _log(LoggingLevel.debug, 'get_changelog: resolved version=$resolvedVersion');
 
     // `changelog` is keyed by package name only (no version segment): the full
     // changelog text covers every released version, so one cached parse serves
@@ -112,12 +109,12 @@ final class GetChangelogHandler {
     final List<ChangelogEntry> entries;
     switch (await _changelog.resolve((name: name))) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         entries = value;
     }
 
-    if (entries.isEmpty) return _domainError(_noDocumentation);
+    if (entries.isEmpty) return ToolResponse.error(_noDocumentation);
     return _applyFilters(entries, versionLimit, fromVersion, resolvedVersion);
   }
 
@@ -150,7 +147,7 @@ final class GetChangelogHandler {
 
     if (boundaryIdx < 0) {
       boundaryIdx = entries.indexWhere((e) => _isOlder(e.version, fromVersion));
-      if (boundaryIdx < 0) return _domainError(_invalidInput);
+      if (boundaryIdx < 0) return ToolResponse.error(_invalidInput);
     }
 
     return _success(
@@ -193,21 +190,10 @@ final class GetChangelogHandler {
   // ── Serialisation ──────────────────────────────────────────────────────────
 
   static CallToolResult _success(List<ChangelogEntry> entries, String resolvedVersion) =>
-      CallToolResult(
-        content: [
-          TextContent(
-            text: jsonEncode({
-              'resolvedVersion': resolvedVersion,
-              'entries': entries.map(_entryToJson).toList(),
-            }),
-          ),
-        ],
+      ToolResponse.ok(
+        {'entries': entries.map(_entryToJson).toList()},
+        resolvedVersion: resolvedVersion,
       );
-
-  static CallToolResult _domainError(DomainError error) => CallToolResult(
-    content: [TextContent(text: error.toJsonString())],
-    isError: true,
-  );
 
   static Map<String, Object?> _entryToJson(ChangelogEntry e) => {
     'version': e.version,

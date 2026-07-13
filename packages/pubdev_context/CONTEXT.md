@@ -26,7 +26,7 @@ The newest published version of a package that carries no pre-release segment (n
 _Avoid_: Latest version (ambiguous — could include pre-releases)
 
 **Resolved Version**:
-A top-level field in the JSON response of any tool that accepts a `version` parameter (whether the caller supplied it or the server auto-resolved it). Value is the exact semver string used (e.g. `"1.2.0"`). Not present on version-agnostic tools (`search_packages`, `list_package_source_files`) or on `compare_packages` (which already includes `version` per package in the Comparison Matrix).
+A top-level field in the JSON response of any tool that accepts a `version` parameter (whether the caller supplied it or the server auto-resolved it). Value is the exact semver string used (e.g. `"1.2.0"`). Not present on version-agnostic tools (`search_packages`) or on `compare_packages` (which already includes `version` per package in the Comparison Matrix).
 _Avoid_: Inferred version, effective version
 
 **Package Resource URI**:

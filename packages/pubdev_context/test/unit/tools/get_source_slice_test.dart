@@ -8,15 +8,14 @@ import 'package:archive/archive.dart';
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
+import 'package:pubdev_context/src/analysis/ast_access.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/get_source_slice.dart';
+import 'package:pubdev_context/src/tools/version_resolver.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -53,11 +52,6 @@ const Map<String, String> _files = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-http.Response _ok(String body) => http.Response(body, 200);
-http.Response _notFound() => http.Response('Not Found', 404);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
 Uint8List _buildTarGz(Map<String, String> files) {
   final archive = Archive();
   for (final entry in files.entries) {
@@ -68,7 +62,7 @@ Uint8List _buildTarGz(Map<String, String> files) {
 }
 
 void _stubTarball(
-  _MockHttpClient mock,
+  MockHttpClient mock,
   Map<String, String> files, {
   String name = 'foo',
   String version = '1.0.0',
@@ -87,7 +81,7 @@ void _stubTarball(
 }
 
 /// Stubs the package-info fetch used by `resolveLatestStable`.
-void _stubPackageInfo(_MockHttpClient mock, {String name = 'foo', String version = '2.0.0'}) {
+void _stubPackageInfo(MockHttpClient mock, {String name = 'foo', String version = '2.0.0'}) {
   final body = jsonEncode({
     'name': name,
     'latest': {'version': version},
@@ -106,7 +100,7 @@ void _stubPackageInfo(_MockHttpClient mock, {String name = 'foo', String version
       ),
       headers: any(named: 'headers'),
     ),
-  ).thenAnswer((_) async => _ok(body));
+  ).thenAnswer((_) async => ok(body));
 }
 
 CallToolRequest _request(Map<String, Object?> args) =>
@@ -125,28 +119,30 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
+  late VersionResolver versionResolver;
   late CacheRegistry registry;
   final loggedMessages = <(LoggingLevel, Object)>[];
 
   GetSourceSliceHandler buildHandler() => GetSourceSliceHandler(
-    client: client,
-    sourceFiles: registry.sourceFiles,
-    ast: registry.ast,
+    versionResolver: versionResolver,
+    astAccess: AstAccess(sourceFiles: registry.sourceFiles, ast: registry.ast),
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    registerFallbackValue(http.Request('GET', Uri.parse('https://pub.dev')));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    registry = CacheRegistry(client: client);
+    stack = TestStack();
+    mockHttp = stack.http;
+    versionResolver = VersionResolver(
+      client: stack.client,
+      log: (level, data) => loggedMessages.add((level, data)),
+    );
+    registry = stack.caches;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Line-range mode ───────────────────────────────────────────────────────
 
@@ -370,7 +366,7 @@ void main() {
     test('surfaces PACKAGE_NOT_FOUND when resolution fails', () async {
       when(
         () => mockHttp.get(any(), headers: any(named: 'headers')),
-      ).thenAnswer((_) async => _notFound());
+      ).thenAnswer((_) async => notFound());
 
       final result = await buildHandler().call(
         _request({'package': 'missing', 'file': 'lib/src/widget.dart'}),

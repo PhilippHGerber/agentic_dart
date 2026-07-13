@@ -51,15 +51,11 @@
 ///
 /// ## Caches
 ///
-/// Source files are resolved through the shared `sourceFiles` [KeyedCache]
-/// facade (from `CacheRegistry`), keyed by `(package, resolvedVersion)`. That
-/// facade is also shared by `get_throw_statements`, `list_package_source_files`,
-/// and the `pubspec` package resource.
-///
-/// AST snapshots are resolved through the shared `ast` [KeyedCache] facade,
-/// keyed by the file coordinate `(package, resolvedVersion, filepath)`.
-/// That facade is shared with `get_throw_statements`, so the same source file
-/// is never parsed twice across a single agent turn.
+/// Source files and their parsed ASTs are resolved through the shared
+/// `AstAccess`, which wraps the `sourceFiles` and `ast` `KeyedCache` facades
+/// (from `CacheRegistry`). Both facades are shared with `get_throw_statements`
+/// so a package's tarball is downloaded, and each of its files parsed, at
+/// most once across a single agent turn.
 ///
 /// ## Domain errors
 ///
@@ -69,43 +65,38 @@
 /// - `INVALID_ARGUMENT` (`file` missing, or path contains `..` segments)
 library;
 
-import 'dart:convert';
-
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/source/line_info.dart';
 import 'package:dart_mcp/server.dart';
 
-import '../cache/cache_registry.dart';
-import '../cache/keyed_cache.dart';
+import '../analysis/ast_access.dart';
 import '../data/domain_error.dart';
-import '../data/pub_client.dart';
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 /// Handles calls to the `get_source_slice` MCP tool.
 ///
-/// Source-file loading is resolved through the shared `sourceFiles`
-/// [KeyedCache] facade. The `ast` [KeyedCache] facade is shared with
-/// `GetThrowStatementsHandler`, so the same file is never parsed twice across
-/// a single agent turn.
+/// Source-file loading and AST parsing are resolved through the shared
+/// [AstAccess] — pass the same instance used by `GetThrowStatementsHandler`
+/// so the two handlers share both caches.
 final class GetSourceSliceHandler {
   /// Creates a [GetSourceSliceHandler].
   ///
-  /// [sourceFiles] and [ast] are the shared [KeyedCache] facades (from
-  /// `CacheRegistry`) — pass the same instances used by
+  /// [versionResolver] resolves the Resolved Version, falling back to the
+  /// Latest Stable Version when the caller omits one. [astAccess] resolves
+  /// source files and their parsed ASTs — pass the same instance used by
   /// `GetThrowStatementsHandler` so the two handlers share both caches.
   GetSourceSliceHandler({
-    required PubDevClient client,
-    required KeyedCache<SourceFilesId, Map<String, String>> sourceFiles,
-    required KeyedCache<AstSnapshotId, ParseStringResult> ast,
+    required VersionResolver versionResolver,
+    required AstAccess astAccess,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
-       _sourceFiles = sourceFiles,
-       _ast = ast,
+  }) : _versionResolver = versionResolver,
+       _astAccess = astAccess,
        _log = log;
 
-  final PubDevClient _client;
-  final KeyedCache<SourceFilesId, Map<String, String>> _sourceFiles;
-  final KeyedCache<AstSnapshotId, ParseStringResult> _ast;
+  final VersionResolver _versionResolver;
+  final AstAccess _astAccess;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `get_source_slice`.
@@ -123,7 +114,7 @@ final class GetSourceSliceHandler {
     // Validate: `file` is always required.
     final file = _normalizePath(rawFile);
     if (file == null || file.isEmpty) {
-      return _domainError(
+      return ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
           message: 'The `file` parameter is required and must not contain ".." segments.',
@@ -137,17 +128,15 @@ final class GetSourceSliceHandler {
 
     // Resolve effective version (S2).
     final String resolvedVersion;
-    if (suppliedVersion != null) {
-      resolvedVersion = suppliedVersion;
-    } else {
-      _log(LoggingLevel.info, 'get_source_slice: resolving latest stable version for $package');
-      switch (await _client.resolveLatestStable(package)) {
-        case PubDevFailure(:final error):
-          return _domainError(error);
-        case PubDevSuccess(:final value):
-          resolvedVersion = value;
-      }
-      _log(LoggingLevel.debug, 'get_source_slice: resolved version=$resolvedVersion');
+    switch (await _versionResolver.resolve(
+      package: package,
+      supplied: suppliedVersion,
+      tool: 'get_source_slice',
+    )) {
+      case PubDevFailure(:final error):
+        return ToolResponse.error(error);
+      case PubDevSuccess(:final value):
+        resolvedVersion = value;
     }
 
     _log(
@@ -156,36 +145,23 @@ final class GetSourceSliceHandler {
       '${symbolName != null ? 'symbol=$symbolName' : 'lines=$lineStart..$lineEnd'}',
     );
 
-    // Load the tarball (shared source cache).
-    final Map<String, String> files;
-    switch (await _loadSourceFiles(package, resolvedVersion)) {
+    // Symbol-bounded mode needs the parsed AST; line-range mode needs only the
+    // raw content, so each mode resolves through the matching AstAccess method.
+    if (symbolName != null) {
+      switch (await _astAccess.unit(package, resolvedVersion, file)) {
+        case PubDevFailure(:final error):
+          return ToolResponse.error(error);
+        case PubDevSuccess(:final value):
+          return _symbolBounded(package, resolvedVersion, file, value, symbolName, maxLines);
+      }
+    }
+
+    switch (await _astAccess.fileText(package, resolvedVersion, file)) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
-        files = value;
+        return _lineRange(resolvedVersion, package, file, value, lineStart, lineEnd);
     }
-
-    final content = files[file];
-    if (content == null) {
-      return _domainError(
-        DomainError(
-          code: DomainErrors.sourceFileNotFound,
-          message: 'Source file "$file" not found in $package $resolvedVersion.',
-          suggestion: _closestMatchSuggestion(file, files.keys),
-        ),
-      );
-    }
-
-    return symbolName != null
-        ? await _symbolBounded(
-            package,
-            resolvedVersion,
-            file,
-            content,
-            symbolName,
-            maxLines,
-          )
-        : _lineRange(resolvedVersion, package, file, content, lineStart, lineEnd);
   }
 
   // ─── Line-range mode ───────────────────────────────────────────────────────
@@ -244,18 +220,18 @@ final class GetSourceSliceHandler {
 
   // ─── Symbol-bounded mode ───────────────────────────────────────────────────
 
-  Future<CallToolResult> _symbolBounded(
+  CallToolResult _symbolBounded(
     String package,
     String resolvedVersion,
     String file,
-    String content,
+    ParseStringResult ast,
     String symbolName,
     int? maxLines,
-  ) async {
-    final ast = await _getOrParseAst(package, resolvedVersion, file, content);
+  ) {
+    final content = ast.content;
     final node = _findSymbol(ast.unit, symbolName);
     if (node == null) {
-      return _domainError(
+      return ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
           message: 'Symbol "$symbolName" was not found in $file.',
@@ -355,19 +331,18 @@ final class GetSourceSliceHandler {
   // ─── Symbol lookup ─────────────────────────────────────────────────────────
 
   /// Finds the AST node for [symbolName] within [unit], or `null` if absent.
-  static AstNode? _findSymbol(CompilationUnit unit, String symbolName) {
+  ///
+  /// A bare name matches a top-level declaration directly. A dotted name
+  /// (`Type.member`) delegates to [AstAccess.member] for the class-member
+  /// lookup and name normalization, taking the first match when an accessor
+  /// pair shares the member name.
+  AstNode? _findSymbol(CompilationUnit unit, String symbolName) {
     final dot = symbolName.indexOf('.');
     if (dot > 0) {
       final typeName = symbolName.substring(0, dot);
       final memberName = symbolName.substring(dot + 1);
-      for (final decl in unit.declarations) {
-        final members = _membersForDecl(decl, typeName);
-        if (members == null) continue;
-        final member = _findMember(members, memberName);
-        if (member != null) return member;
-        // Type found but member absent — keep scanning homonymous types.
-      }
-      return null;
+      final members = _astAccess.member(unit, typeName, memberName: memberName);
+      return members == null || members.isEmpty ? null : members.first;
     }
 
     for (final decl in unit.declarations) {
@@ -388,90 +363,6 @@ final class GetSourceSliceHandler {
       return decl.variables.variables.any((v) => v.name.lexeme == name);
     }
     return false;
-  }
-
-  /// Returns the class-member list for [decl] if it declares a type named
-  /// [className], or `null` when [decl] is not a matching type declaration.
-  static Iterable<ClassMember>? _membersForDecl(
-    CompilationUnitMember decl,
-    String className,
-  ) {
-    if (decl is ClassDeclaration) {
-      if (decl.namePart.typeName.lexeme != className) return null;
-      final body = decl.body;
-      return body is BlockClassBody ? body.members : const <ClassMember>[];
-    }
-    if (decl is MixinDeclaration) {
-      if (decl.name.lexeme != className) return null;
-      final body = decl.body;
-      return body is BlockClassBody ? body.members : const <ClassMember>[];
-    }
-    if (decl is ExtensionDeclaration) {
-      if (decl.name?.lexeme != className) return null;
-      final body = decl.body;
-      return body is BlockClassBody ? body.members : const <ClassMember>[];
-    }
-    if (decl is EnumDeclaration) {
-      if (decl.namePart.typeName.lexeme != className) return null;
-      return decl.body.members;
-    }
-    return null;
-  }
-
-  /// Finds the member named [name] among [members], or `null` when absent.
-  ///
-  /// `new` matches the unnamed constructor; `operator ==` and `==` both match
-  /// the `operator ==` node. Field declarations match on any of their variable
-  /// names.
-  static AstNode? _findMember(Iterable<ClassMember> members, String name) {
-    final normalized = _normalizeMemberName(name);
-    for (final member in members) {
-      if (member is MethodDeclaration && member.name.lexeme == normalized) return member;
-      if (member is ConstructorDeclaration && (member.name?.lexeme ?? '') == normalized) {
-        return member;
-      }
-      if (member is FieldDeclaration) {
-        if (member.fields.variables.any((v) => v.name.lexeme == name)) return member;
-      }
-    }
-    return null;
-  }
-
-  /// Normalises [name] to the lexeme used in the AST.
-  static String _normalizeMemberName(String name) {
-    if (name == 'new') return '';
-    const prefix = 'operator ';
-    if (name.startsWith(prefix)) return name.substring(prefix.length).trim();
-    return name;
-  }
-
-  // ─── Source file loading ───────────────────────────────────────────────────
-
-  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(String name, String version) =>
-      _sourceFiles.resolve((name: name, version: version));
-
-  // ─── AST parsing & caching ─────────────────────────────────────────────────
-
-  /// Returns the parsed AST for [filePath], resolving through the shared `ast`
-  /// facade so the same file is never parsed twice across a single agent turn.
-  Future<ParseStringResult> _getOrParseAst(
-    String package,
-    String version,
-    String filePath,
-    String content,
-  ) async {
-    final result = await _ast.resolve((
-      name: package,
-      version: version,
-      path: filePath,
-      content: content,
-    ));
-    return switch (result) {
-      PubDevSuccess(:final value) => value,
-      // The `ast` facade's fetch closure always returns PubDevSuccess — see
-      // CacheRegistry.ast.
-      PubDevFailure(:final error) => throw StateError('unexpected AST parse failure: $error'),
-    };
   }
 
   // ─── Utility helpers ───────────────────────────────────────────────────────
@@ -499,16 +390,6 @@ final class GetSourceSliceHandler {
     return segments.join('/');
   }
 
-  static String _closestMatchSuggestion(String path, Iterable<String> keys) {
-    final filename = path.split('/').last.toLowerCase();
-    final matches = keys.where((k) => k.split('/').last.toLowerCase() == filename).toList();
-    if (matches.isNotEmpty) {
-      final quoted = matches.take(3).map((p) => '"$p"').join(', ');
-      return 'Did you mean: $quoted?';
-    }
-    return 'Call list_package_source_files to browse available paths.';
-  }
-
   // ─── Result / error builders ───────────────────────────────────────────────
 
   static CallToolResult _success({
@@ -521,24 +402,14 @@ final class GetSourceSliceHandler {
     required bool truncated,
     required String content,
     String? symbolName,
-  }) => CallToolResult(
-    content: [
-      TextContent(
-        text: jsonEncode({
-          'resolvedVersion': resolvedVersion,
-          'package': package,
-          'file': file,
-          'mode': mode,
-          'symbolName': ?symbolName,
-          'lineStart': lineStart,
-          'effectiveLineEnd': effectiveLineEnd,
-          'truncated': truncated,
-          'content': content,
-        }),
-      ),
-    ],
-  );
-
-  static CallToolResult _domainError(DomainError error) =>
-      CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);
+  }) => ToolResponse.ok({
+    'package': package,
+    'file': file,
+    'mode': mode,
+    'symbolName': ?symbolName,
+    'lineStart': lineStart,
+    'effectiveLineEnd': effectiveLineEnd,
+    'truncated': truncated,
+    'content': content,
+  }, resolvedVersion: resolvedVersion);
 }

@@ -6,7 +6,7 @@
 /// `(name, version)`) after resolving its Latest Stable Version, so a prior
 /// `get_package` call for the same package and resolved version is reused
 /// rather than re-fetched. Requests for uncached packages are gated by the
-/// global concurrency limiter inside [PubDevClient], which caps the number of
+/// pub.dev client's global concurrency limiter, which caps the number of
 /// in-flight pub.dev requests across the whole server.
 ///
 /// Domain errors are returned as [CallToolResult] with [CallToolResult.isError]
@@ -18,70 +18,51 @@
 /// See `issues/pub-dev-mcp/08-compare-packages-tool.md`.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 /// Handles calls to the `compare_packages` MCP tool.
 ///
-/// Constructor dependencies are `client`, `packageDetail`, and `log`. The
-/// `packageDetail` facade should be the same [KeyedCache] instance shared with
-/// `GetPackageHandler` so that prior `get_package` calls are reused. Packages
-/// are fetched concurrently; the global concurrency limiter inside
-/// [PubDevClient] bounds the number of simultaneous pub.dev requests.
+/// Constructor dependencies are `versionResolver`, `packageDetail`, and `log`.
+/// The `packageDetail` facade should be the same [KeyedCache] instance shared
+/// with `GetPackageHandler` so that prior `get_package` calls are reused.
+/// Packages are fetched concurrently; the pub.dev client's global concurrency
+/// limiter bounds the number of simultaneous pub.dev requests.
 final class ComparePackagesHandler {
   /// Creates a [ComparePackagesHandler].
   ///
-  /// [client] is the pub.dev HTTP gateway, used for Latest Stable Version
-  /// resolution. [packageDetail] is the shared [KeyedCache] facade (same
-  /// instance as used by `GetPackageHandler`). [log] receives structured log
-  /// events at the appropriate [LoggingLevel].
+  /// [versionResolver] resolves each package's Resolved Version, falling back
+  /// to the Latest Stable Version. [packageDetail] is the shared [KeyedCache]
+  /// facade (same instance as used by `GetPackageHandler`). [log] receives
+  /// structured log events at the appropriate [LoggingLevel].
   const ComparePackagesHandler({
-    required PubDevClient client,
+    required VersionResolver versionResolver,
     required KeyedCache<PackageDetailId, PackageDetail> packageDetail,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
+  }) : _versionResolver = versionResolver,
        _packageDetail = packageDetail,
        _log = log;
 
-  final PubDevClient _client;
+  final VersionResolver _versionResolver;
   final KeyedCache<PackageDetailId, PackageDetail> _packageDetail;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `compare_packages`.
   ///
-  /// Validates that `names` contains between 2 and 5 entries. Fetches the
-  /// packages concurrently; the [PubDevClient] concurrency limiter bounds how
-  /// many requests are in flight at once. Returns [CallToolResult.isError]
-  /// `true` when all packages fail or when input validation fails.
+  /// `names` is capped at 2–5 entries by the tool's input schema. Fetches the
+  /// packages concurrently; the pub.dev client's concurrency limiter (reached
+  /// through `versionResolver` and `packageDetail`) bounds how many requests
+  /// are in flight at once. Returns [CallToolResult.isError] `true` when all
+  /// packages fail.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final names = ((args['names'] as List<Object?>?) ?? const []).whereType<String>().toList();
-
-    if (names.length < 2) {
-      return _domainError(
-        const DomainError(
-          code: DomainErrors.invalidArgument,
-          message: 'names must contain at least 2 package names.',
-          suggestion: 'Provide between 2 and 5 package names in the names array.',
-        ),
-      );
-    }
-    if (names.length > 5) {
-      return _domainError(
-        const DomainError(
-          code: DomainErrors.invalidArgument,
-          message: 'names must not exceed 5 package names.',
-          suggestion: 'Provide between 2 and 5 package names in the names array.',
-        ),
-      );
-    }
 
     _log(LoggingLevel.info, 'compare_packages: names=${names.join(',')}');
 
@@ -107,7 +88,7 @@ final class ComparePackagesHandler {
     }
 
     if (details.isEmpty) {
-      return _domainError(
+      return ToolResponse.error(
         const DomainError(
           code: DomainErrors.serviceUnavailable,
           message: 'All requested packages failed to load.',
@@ -116,12 +97,12 @@ final class ComparePackagesHandler {
       );
     }
 
-    return _success(
+    return ToolResponse.ok(
       _ComparisonMatrix(
         packages: names,
         errors: errors,
         matrix: _buildMatrix(details),
-      ),
+      ).toJson(),
     );
   }
 
@@ -135,13 +116,16 @@ final class ComparePackagesHandler {
   ///
   /// This handler fans out across [Future.wait]; an exception escaping here
   /// (e.g. a `TimeoutException` from the README fetch or a socket error not
-  /// caught by [PubDevClient]'s [RetryPolicy]) would abort the *entire*
+  /// caught by the pub.dev client's retry policy) would abort the *entire*
   /// comparison rather than demote a single package into the `errors` map.
   /// Guaranteeing a [PubDevResult] return keeps the documented
   /// graceful-degradation contract intact.
   Future<PubDevResult<PackageDetail>> _fetchPackage(String name) async {
     try {
-      final versionResult = await _client.resolveLatestStable(name);
+      final versionResult = await _versionResolver.resolve(
+        package: name,
+        tool: 'compare_packages',
+      );
       switch (versionResult) {
         case PubDevFailure(:final error):
           return PubDevFailure(error);
@@ -206,14 +190,6 @@ final class ComparePackagesHandler {
     if (publishedAt == null) return 0;
     return DateTime.now().difference(publishedAt).inDays;
   }
-
-  static CallToolResult _success(_ComparisonMatrix m) =>
-      CallToolResult(content: [TextContent(text: jsonEncode(m.toJson()))]);
-
-  static CallToolResult _domainError(DomainError error) => CallToolResult(
-    content: [TextContent(text: error.toJsonString())],
-    isError: true,
-  );
 }
 
 /// The result payload of the `compare_packages` tool.

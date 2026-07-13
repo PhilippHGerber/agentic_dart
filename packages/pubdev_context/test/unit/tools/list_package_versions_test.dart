@@ -2,42 +2,17 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
-import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
 import 'package:pubdev_context/src/data/domain_error.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/list_package_versions.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-http.Response _notFound() => http.Response('Not Found', 404);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
-void _stubUrl({
-  required _MockHttpClient mock,
-  required String urlFragment,
-  required http.Response response,
-}) {
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains(urlFragment))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => response);
-}
 
 /// Creates a [CallToolRequest] for `list_package_versions` with [name].
 CallToolRequest _request(String name) =>
@@ -65,8 +40,8 @@ List<String> _versions(CallToolResult result, String bucket) =>
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
   late CacheRegistry registry;
 
   ListPackageVersionsHandler buildHandler() => ListPackageVersionsHandler(
@@ -75,13 +50,12 @@ void main() {
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
-    registry = CacheRegistry(client: client);
+    stack = TestStack();
+    mockHttp = stack.http;
+    registry = stack.caches;
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
   // ─── Input validation ─────────────────────────────────────────────────────────
 
@@ -103,7 +77,7 @@ void main() {
 
   group('package not found', () {
     test('unknown package sets isError to true', () async {
-      _stubUrl(mock: mockHttp, urlFragment: '/api/packages/nope', response: _notFound());
+      stubUrl(mock: mockHttp, urlFragment: '/api/packages/nope', response: notFound());
 
       final result = await buildHandler().call(_request('nope'));
 
@@ -111,7 +85,7 @@ void main() {
     });
 
     test('unknown package returns PACKAGE_NOT_FOUND', () async {
-      _stubUrl(mock: mockHttp, urlFragment: '/api/packages/nope', response: _notFound());
+      stubUrl(mock: mockHttp, urlFragment: '/api/packages/nope', response: notFound());
 
       final result = await buildHandler().call(_request('nope'));
 
@@ -123,10 +97,10 @@ void main() {
 
   group('bucketing', () {
     setUp(() {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http',
-        response: _ok(_readFixture('package_versions.json')),
+        response: ok(readFixture('package_versions.json')),
       );
     });
 
@@ -176,10 +150,10 @@ void main() {
   group('ordering', () {
     test('buckets are sorted newest-first even when the source is oldest-first', () async {
       // The fixture lists versions oldest-first; the handler must reorder.
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http',
-        response: _ok(_readFixture('package_versions.json')),
+        response: ok(readFixture('package_versions.json')),
       );
 
       final result = await buildHandler().call(_request('http'));
@@ -208,7 +182,7 @@ void main() {
           {"version": "2.0.0-dev.1", "published": "2024-01-01T00:00:00.000Z", "retracted": true}
         ]
       }''';
-      _stubUrl(mock: mockHttp, urlFragment: '/api/packages/demo', response: _ok(body));
+      stubUrl(mock: mockHttp, urlFragment: '/api/packages/demo', response: ok(body));
 
       final result = await buildHandler().call(_request('demo'));
 
@@ -221,10 +195,10 @@ void main() {
 
   group('caching', () {
     test('does not issue a second HTTP request for a cached package', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http',
-        response: _ok(_readFixture('package_versions.json')),
+        response: ok(readFixture('package_versions.json')),
       );
       final handler = buildHandler();
 

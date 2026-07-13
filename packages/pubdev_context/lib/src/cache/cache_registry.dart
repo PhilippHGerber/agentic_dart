@@ -20,6 +20,36 @@ import '../trace/wire_trace.dart';
 import 'keyed_cache.dart';
 import 'memory_cache.dart';
 
+/// TTL applied to search-result entries.
+const Duration kSearchResultsTtl = Duration(minutes: 5);
+
+/// TTL applied to package version-list entries (parsed `PackageVersion` lists).
+///
+/// Matches [kPackageMetadataTtl]: both derive from `GET /api/packages/{name}`,
+/// so a newly published version becomes visible within the same short window.
+const Duration kPackageVersionsTtl = Duration(minutes: 15);
+
+/// TTL applied to changelog entries (parsed `ChangelogEntry` lists).
+const Duration kChangelogTtl = Duration(minutes: 15);
+
+/// TTL applied to API-documentation index (`index.json`) entries.
+const Duration kApiDocsTtl = Duration(hours: 1);
+
+/// TTL applied to README entries.
+const Duration kReadmeTtl = Duration(hours: 1);
+
+/// TTL applied to symbol documentation page entries.
+const Duration kSymbolDocTtl = Duration(hours: 1);
+
+/// TTL applied to source file map entries (path → content maps).
+const Duration kSourceFileTtl = Duration(hours: 1);
+
+/// TTL applied to AST snapshot entries (parsed `ParseStringResult` objects).
+const Duration kAstSnapshotTtl = Duration(hours: 1);
+
+/// TTL applied to meta-resource entries (scoring, SDK versions).
+const Duration kMetaResourcesTtl = Duration(hours: 24);
+
 /// Identity for a [PackageDetail] entry: a package `name` at a concrete
 /// `version`.
 ///

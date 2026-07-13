@@ -14,8 +14,10 @@ import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
 
+import 'analysis/ast_access.dart';
 import 'cache/cache_registry.dart';
 import 'config/config.dart';
+import 'data/domain_error.dart';
 import 'data/pub_client.dart';
 import 'resources/meta_resources.dart';
 import 'resources/package_resources.dart';
@@ -32,6 +34,8 @@ import 'tools/list_package_source_files.dart';
 import 'tools/list_package_versions.dart';
 import 'tools/search_packages.dart';
 import 'tools/tool_definitions.dart';
+import 'tools/tool_response.dart';
+import 'tools/version_resolver.dart';
 import 'trace/llm_boundary.dart';
 import 'trace/wire_trace.dart';
 import 'version.dart';
@@ -85,12 +89,23 @@ base class PubMcpServer extends MCPServer
          instructions: kServerInstructions,
        ) {
     loggingLevel = _toLoggingLevel(config.logLevel);
+    _versionResolver = VersionResolver(client: client, log: log);
+    _astAccess = AstAccess(sourceFiles: cacheRegistry.sourceFiles, ast: cacheRegistry.ast);
   }
 
   /// The central LLM-boundary tracer, or `null` when tracing is disabled.
   final LlmBoundaryTracer? _tracer;
   final PubDevClient _client;
   final CacheRegistry _cacheRegistry;
+
+  /// Resolves the Resolved Version for the 9 version-accepting tools that
+  /// delegate to it; constructed once alongside [_cacheRegistry].
+  late final VersionResolver _versionResolver;
+
+  /// Resolves source files and parsed ASTs for `get_source_slice` and
+  /// `get_throw_statements`; constructed once alongside [_cacheRegistry] so
+  /// both handlers share the same `sourceFiles`/`ast` cache entries.
+  late final AstAccess _astAccess;
 
   @override
   FutureOr<InitializeResult> initialize(InitializeRequest request) async {
@@ -189,14 +204,49 @@ base class PubMcpServer extends MCPServer
     );
   }
 
-  /// Registers [tool], wrapping [impl] with the LLM-boundary tracer when tracing
-  /// is enabled. When it is not, [impl] is registered unchanged.
+  /// Registers [tool], wrapping [impl] with the ADR-0006 argument-validation
+  /// wrapper and, when tracing is enabled, the LLM-boundary tracer.
+  ///
+  /// Ordering is tracer outermost, validation inside it, handler innermost —
+  /// so a schema-rejected call still appears in the Wire Trace with a
+  /// Correlation Id. [registerTool] is called with `validateArguments: false`:
+  /// `dart_mcp`'s own schema validation is disabled for every tool, since it
+  /// would reject violations as plain text and bypass the ADR-0002 envelope
+  /// [_validated] provides instead.
   void _registerTracedTool(
     Tool tool,
     FutureOr<CallToolResult> Function(CallToolRequest) impl,
   ) {
+    final validated = _validated(tool, impl);
     final tracer = _tracer;
-    registerTool(tool, tracer == null ? impl : tracer.wrapTool(impl));
+    registerTool(
+      tool,
+      tracer == null ? validated : tracer.wrapTool(validated),
+      validateArguments: false,
+    );
+  }
+
+  /// Wraps [impl] so a call's arguments are validated against [tool]'s input
+  /// schema before the handler runs (ADR-0006).
+  ///
+  /// A schema violation short-circuits to an ADR-0002 `INVALID_ARGUMENT` Tool
+  /// Error built via [ToolResponse.error], joining every [ValidationError]
+  /// into the error message. A valid call reaches [impl] unchanged.
+  static FutureOr<CallToolResult> Function(CallToolRequest) _validated(
+    Tool tool,
+    FutureOr<CallToolResult> Function(CallToolRequest) impl,
+  ) {
+    return (request) {
+      final errors = tool.inputSchema.validate(request.arguments ?? const <String, Object?>{});
+      if (errors.isEmpty) return impl(request);
+      return ToolResponse.error(
+        DomainError(
+          code: DomainErrors.invalidArgument,
+          message: errors.map((e) => e.toErrorString()).join('; '),
+          suggestion: "Check the arguments against the '${tool.name}' tool's input schema.",
+        ),
+      );
+    };
   }
 
   /// Adds [template], wrapping [handler] with the LLM-boundary tracer when
@@ -221,7 +271,7 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: search_packages');
 
     final getPackageHandler = GetPackageHandler(
-      client: _client,
+      versionResolver: _versionResolver,
       packageDetail: _cacheRegistry.packageDetail,
       log: log,
     );
@@ -229,7 +279,7 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: get_package');
 
     final getChangelogHandler = GetChangelogHandler(
-      client: _client,
+      versionResolver: _versionResolver,
       changelog: _cacheRegistry.changelog,
       log: log,
     );
@@ -237,7 +287,7 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: get_changelog');
 
     final comparePackagesHandler = ComparePackagesHandler(
-      client: _client,
+      versionResolver: _versionResolver,
       packageDetail: _cacheRegistry.packageDetail,
       log: log,
     );
@@ -252,7 +302,7 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: list_package_versions');
 
     final browseApiSymbolsHandler = BrowseApiSymbolsHandler(
-      client: _client,
+      versionResolver: _versionResolver,
       apiIndex: _cacheRegistry.apiIndex,
       log: log,
     );
@@ -260,7 +310,7 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: browse_api_symbols');
 
     final findSymbolsHandler = FindSymbolsHandler(
-      client: _client,
+      versionResolver: _versionResolver,
       apiIndex: _cacheRegistry.apiIndex,
       log: log,
     );
@@ -275,7 +325,7 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: get_api_diff');
 
     final getSymbolDocHandler = GetSymbolDocumentationHandler(
-      client: _client,
+      versionResolver: _versionResolver,
       apiIndex: _cacheRegistry.apiIndex,
       symbolDoc: _cacheRegistry.symbolDoc,
       log: log,
@@ -284,7 +334,7 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: get_symbol_documentation');
 
     final listSourceFilesHandler = ListPackageSourceFilesHandler(
-      client: _client,
+      versionResolver: _versionResolver,
       sourceFiles: _cacheRegistry.sourceFiles,
       log: log,
     );
@@ -292,18 +342,16 @@ base class PubMcpServer extends MCPServer
     log(LoggingLevel.debug, 'registered tool: list_package_source_files');
 
     final getSourceSliceHandler = GetSourceSliceHandler(
-      client: _client,
-      sourceFiles: _cacheRegistry.sourceFiles,
-      ast: _cacheRegistry.ast,
+      versionResolver: _versionResolver,
+      astAccess: _astAccess,
       log: log,
     );
     _registerTracedTool(getSourceSliceTool, getSourceSliceHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_source_slice');
 
     final getThrowStatementsHandler = GetThrowStatementsHandler(
-      client: _client,
-      sourceFiles: _cacheRegistry.sourceFiles,
-      ast: _cacheRegistry.ast,
+      versionResolver: _versionResolver,
+      astAccess: _astAccess,
       apiIndex: _cacheRegistry.apiIndex,
       log: log,
     );

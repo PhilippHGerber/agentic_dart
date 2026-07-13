@@ -2,63 +2,39 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dart_mcp/server.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:pubdev_context/src/cache/cache_registry.dart';
-import 'package:pubdev_context/src/data/domain_error.dart';
-import 'package:pubdev_context/src/data/pub_client.dart';
 import 'package:pubdev_context/src/tools/search_packages.dart';
 import 'package:test/test.dart';
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-class _MockHttpClient extends Mock implements http.Client {}
+import '../../support/harness.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _readFixture(String name) => File('test/fixtures/$name').readAsStringSync();
-
-http.Response _ok(String body) => http.Response(body, 200);
-
-RetryPolicy get _instant => RetryPolicy(delay: (_) async {});
-
-void _stubUrl({
-  required _MockHttpClient mock,
-  required String urlFragment,
-  required http.Response response,
-}) {
-  when(
-    () => mock.get(
-      any(that: predicate<Uri>((u) => u.toString().contains(urlFragment))),
-      headers: any(named: 'headers'),
-    ),
-  ).thenAnswer((_) async => response);
-}
 
 /// Stubs the three endpoints needed for a single-result search.
 ///
 /// `/api/search` returns one entry (`http`), then `/api/packages/http` and
 /// `/api/packages/http/score` return the test fixtures.
-void _stubSingleResult(_MockHttpClient mock) {
-  _stubUrl(
+void _stubSingleResult(MockHttpClient mock) {
+  stubUrl(
     mock: mock,
     urlFragment: '/api/search',
-    response: _ok('{"packages":[{"package":"http"}]}'),
+    response: ok('{"packages":[{"package":"http"}]}'),
   );
   // Register the less-specific stub first so the more-specific /score stub
-  // wins (mocktail resolves stubs LIFO — last registered takes priority).
-  _stubUrl(
+  // wins (see stubUrl for why order matters).
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/http',
-    response: _ok(_readFixture('package_info.json')),
+    response: ok(readFixture('package_info.json')),
   );
-  _stubUrl(
+  stubUrl(
     mock: mock,
     urlFragment: '/api/packages/http/score',
-    response: _ok(_readFixture('package_score.json')),
+    response: ok(readFixture('package_score.json')),
   );
 }
 
@@ -83,8 +59,8 @@ Map<String, Object?> _errorPayload(CallToolResult result) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 void main() {
-  late _MockHttpClient mockHttp;
-  late PubDevClient client;
+  late TestStack stack;
+  late MockHttpClient mockHttp;
   late DateTime fakeNow;
   late CacheRegistry registry;
   final loggedMessages = <(LoggingLevel, Object)>[];
@@ -95,33 +71,18 @@ void main() {
   );
 
   setUp(() {
-    mockHttp = _MockHttpClient();
-    registerFallbackValue(Uri.parse('https://pub.dev'));
-    client = PubDevClient(httpClient: mockHttp, retryPolicy: _instant);
     fakeNow = DateTime(2025, 5, 10);
-    registry = CacheRegistry(client: client, clock: () => fakeNow);
+    stack = TestStack(clock: () => fakeNow);
+    mockHttp = stack.http;
+    registry = stack.caches;
     loggedMessages.clear();
   });
 
-  tearDown(() => client.close());
+  tearDown(() => stack.close());
 
-  // ─── Limit validation ───────────────────────────────────────────────────────
-
-  group('limit greater than 20', () {
-    test('returns invalid_input domain error without calling the HTTP client', () async {
-      final result = await buildHandler().call(_request({'query': 'http', 'limit': 21}));
-
-      expect(result.isError, isTrue);
-      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
-      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
-    });
-
-    test('error payload contains a suggestion', () async {
-      final result = await buildHandler().call(_request({'query': 'http', 'limit': 21}));
-
-      expect(_errorPayload(result), contains('suggestion'));
-    });
-  });
+  // Limit validation (limit > 20) moved to server-owned schema validation
+  // (ADR-0006, ticket 02) — see test/unit/pub_mcp_test.dart's
+  // 'argument validation' group. The handler no longer checks `limit` itself.
 
   // ─── Cache hit ──────────────────────────────────────────────────────────────
 
@@ -210,20 +171,20 @@ void main() {
         'downloadCount30Days': 5000,
         'tags': ['sdk:dart', 'platform:web'],
       });
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/search',
-        response: _ok('{"packages":[{"package":"http"}]}'),
+        response: ok('{"packages":[{"package":"http"}]}'),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http/score',
-        response: _ok(scoreNoPublisher),
+        response: ok(scoreNoPublisher),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/http',
-        response: _ok(_readFixture('package_info.json')),
+        response: ok(readFixture('package_info.json')),
       );
 
       final result = await buildHandler().call(_request({'query': 'http'}));
@@ -236,7 +197,7 @@ void main() {
 
   group('client failure', () {
     test('returns a domain error when the search endpoint returns HTTP 404', () async {
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/search',
         response: http.Response('{}', 404),
@@ -249,7 +210,6 @@ void main() {
       expect(_errorPayload(result), contains('message'));
       expect(_errorPayload(result), contains('suggestion'));
     });
-
   });
 
   // ─── SDK filter ─────────────────────────────────────────────────────────────
@@ -351,20 +311,20 @@ void main() {
   group('default limit', () {
     test('returns at most 5 results when no limit is supplied', () async {
       final sixPackages = List.generate(6, (i) => '{"package":"pkg$i"}').join(',');
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/search',
-        response: _ok('{"packages":[$sixPackages]}'),
+        response: ok('{"packages":[$sixPackages]}'),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/api/packages/',
-        response: _ok(_readFixture('package_info.json')),
+        response: ok(readFixture('package_info.json')),
       );
-      _stubUrl(
+      stubUrl(
         mock: mockHttp,
         urlFragment: '/score',
-        response: _ok(_readFixture('package_score.json')),
+        response: ok(readFixture('package_score.json')),
       );
 
       final result = await buildHandler().call(_request({'query': 'pkg'}));

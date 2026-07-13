@@ -17,14 +17,13 @@
 /// See `issues/pubdev-context-v1/06-list-package-versions.md`.
 library;
 
-import 'dart:convert';
-
 import 'package:dart_mcp/server.dart';
 
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'tool_response.dart';
 
 // ─── Domain error constants ───────────────────────────────────────────────────
 
@@ -65,7 +64,7 @@ final class ListPackageVersionsHandler {
     final args = request.arguments ?? const {};
     final name = (args['name'] as String?) ?? '';
 
-    if (name.isEmpty) return _domainError(_missingName);
+    if (name.isEmpty) return ToolResponse.error(_missingName);
 
     _log(LoggingLevel.info, 'list_package_versions: name=$name');
 
@@ -75,7 +74,7 @@ final class ListPackageVersionsHandler {
           LoggingLevel.warning,
           'list_package_versions: failed name=$name error=${error.code}',
         );
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         return _success(name, value);
     }
@@ -109,18 +108,12 @@ final class ListPackageVersionsHandler {
     _sortNewestFirst(prerelease);
     _sortNewestFirst(retracted);
 
-    return CallToolResult(
-      content: [
-        TextContent(
-          text: jsonEncode({
-            'package': name,
-            'stable': stable.map(_toJson).toList(),
-            'prerelease': prerelease.map(_toJson).toList(),
-            'retracted': retracted.map(_toJson).toList(),
-          }),
-        ),
-      ],
-    );
+    return ToolResponse.ok({
+      'package': name,
+      'stable': stable.map(_toJson).toList(),
+      'prerelease': prerelease.map(_toJson).toList(),
+      'retracted': retracted.map(_toJson).toList(),
+    });
   }
 
   /// Sorts [list] newest-first by [PackageVersion.publishedAt].
@@ -144,9 +137,4 @@ final class ListPackageVersionsHandler {
     'version': v.version,
     if (v.publishedAt case final d?) 'publishedAt': d.toIso8601String(),
   };
-
-  static CallToolResult _domainError(DomainError error) => CallToolResult(
-    content: [TextContent(text: error.toJsonString())],
-    isError: true,
-  );
 }

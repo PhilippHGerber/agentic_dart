@@ -46,14 +46,11 @@
 ///
 /// ## Caches
 ///
-/// Source files are resolved through the shared `sourceFiles` [KeyedCache]
-/// facade (from `CacheRegistry`), keyed by `(package, resolvedVersion)`. That
-/// facade is also shared by `get_source_slice`, `list_package_source_files`,
-/// and the `pubspec` package resource.
-///
-/// AST snapshots are resolved through the shared `ast` [KeyedCache] facade,
-/// keyed by the file coordinate `(package, resolvedVersion, filepath)`.
-/// That facade is shared with `get_source_slice`.
+/// Source files and their parsed ASTs are resolved through the shared
+/// `AstAccess`, which wraps the `sourceFiles` and `ast` `KeyedCache` facades
+/// (from `CacheRegistry`). Both facades are shared with `get_source_slice` so
+/// a package's tarball is downloaded, and each of its files parsed, at most
+/// once across a single agent turn.
 ///
 /// The dartdoc symbol index is resolved through the shared `apiIndex`
 /// [KeyedCache] facade, keyed by `(package, resolvedVersion)` — the same
@@ -69,18 +66,18 @@
 /// - `AMBIGUOUS_SYMBOL` + `error.details.candidates` — multiple top-level functions match
 library;
 
-import 'dart:convert';
-
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/source/line_info.dart';
 import 'package:dart_mcp/server.dart';
 
+import '../analysis/ast_access.dart';
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
-import '../data/pub_client.dart';
+import 'tool_response.dart';
+import 'version_resolver.dart';
 
 // ─── Private types ────────────────────────────────────────────────────────────
 
@@ -99,27 +96,29 @@ typedef _MethodScanResult = ({CallToolResult? result, bool classFound});
 /// Handles calls to the `get_throw_statements` MCP tool.
 ///
 /// Source-file loading and AST parsing are resolved through the shared
-/// `sourceFiles` and `ast` [KeyedCache] facades — pass the same instances used
-/// by `GetSourceSliceHandler` so the two handlers share both caches. The
-/// dartdoc symbol index is resolved through the shared `apiIndex` facade — pass
-/// the same instance used by `browse_api_symbols` and its siblings.
+/// [AstAccess] — pass the same instance used by `GetSourceSliceHandler` so
+/// the two handlers share both caches. The dartdoc symbol index is resolved
+/// through the shared `apiIndex` facade — pass the same instance used by
+/// `browse_api_symbols` and its siblings.
 final class GetThrowStatementsHandler {
   /// Creates a [GetThrowStatementsHandler].
+  ///
+  /// [versionResolver] resolves the Resolved Version, falling back to the
+  /// Latest Stable Version when the caller omits one. [astAccess] resolves
+  /// source files and their parsed ASTs — pass the same instance used by
+  /// `GetSourceSliceHandler` so the two handlers share both caches.
   GetThrowStatementsHandler({
-    required PubDevClient client,
-    required KeyedCache<SourceFilesId, Map<String, String>> sourceFiles,
-    required KeyedCache<AstSnapshotId, ParseStringResult> ast,
+    required VersionResolver versionResolver,
+    required AstAccess astAccess,
     required KeyedCache<ApiIndexId, List<DartdocSymbol>> apiIndex,
     required void Function(LoggingLevel, Object) log,
-  }) : _client = client,
-       _sourceFiles = sourceFiles,
-       _ast = ast,
+  }) : _versionResolver = versionResolver,
+       _astAccess = astAccess,
        _apiIndex = apiIndex,
        _log = log;
 
-  final PubDevClient _client;
-  final KeyedCache<SourceFilesId, Map<String, String>> _sourceFiles;
-  final KeyedCache<AstSnapshotId, ParseStringResult> _ast;
+  final VersionResolver _versionResolver;
+  final AstAccess _astAccess;
   final KeyedCache<ApiIndexId, List<DartdocSymbol>> _apiIndex;
   final void Function(LoggingLevel, Object) _log;
 
@@ -143,25 +142,20 @@ final class GetThrowStatementsHandler {
 
     // Validate: at least one of class or method must be provided.
     if (className == null && method == null) {
-      return _domainError(_kScopeRequired);
+      return ToolResponse.error(_kScopeRequired);
     }
 
     // Resolve effective version.
     final String resolvedVersion;
-    if (version != null) {
-      resolvedVersion = version;
-    } else {
-      _log(
-        LoggingLevel.info,
-        'get_throw_statements: resolving latest stable version for $package',
-      );
-      switch (await _client.resolveLatestStable(package)) {
-        case PubDevFailure(:final error):
-          return _domainError(error);
-        case PubDevSuccess(:final value):
-          resolvedVersion = value;
-      }
-      _log(LoggingLevel.debug, 'get_throw_statements: resolved version=$resolvedVersion');
+    switch (await _versionResolver.resolve(
+      package: package,
+      supplied: version,
+      tool: 'get_throw_statements',
+    )) {
+      case PubDevFailure(:final error):
+        return ToolResponse.error(error);
+      case PubDevSuccess(:final value):
+        resolvedVersion = value;
     }
 
     return switch ((className, method)) {
@@ -173,7 +167,7 @@ final class GetThrowStatementsHandler {
       (null, final m?) => _scanTopLevelFunction(package, resolvedVersion, m),
       // Already rejected by the validation guard above; present so the switch
       // is exhaustive without a null-assertion.
-      (null, null) => _domainError(_kScopeRequired),
+      (null, null) => ToolResponse.error(_kScopeRequired),
     };
   }
 
@@ -185,9 +179,9 @@ final class GetThrowStatementsHandler {
     String className,
   ) async {
     final Map<String, String> files;
-    switch (await _loadSourceFiles(package, resolvedVersion)) {
+    switch (await _astAccess.sourceFiles(package, resolvedVersion)) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         files = value;
     }
@@ -199,13 +193,10 @@ final class GetThrowStatementsHandler {
     final aggregated = <Map<String, Object?>>[];
     var classWasFound = false;
     for (final filePath in _sortedDartPaths(files.keys)) {
-      final content = files[filePath];
-      if (content == null) continue;
       final partialResults = await _scanEntireClassInFile(
         package,
         resolvedVersion,
         filePath,
-        content,
         className,
       );
       if (partialResults != null) {
@@ -216,7 +207,7 @@ final class GetThrowStatementsHandler {
 
     return classWasFound
         ? _successJson(aggregated, resolvedVersion)
-        : _domainError(_classNotFoundError(className));
+        : ToolResponse.error(_classNotFoundError(className));
   }
 
   /// Scans [filePath] for [className] and collects throws from all its members.
@@ -231,36 +222,40 @@ final class GetThrowStatementsHandler {
     String package,
     String resolvedVersion,
     String filePath,
-    String content,
     String className,
   ) async {
-    final ast = await _getOrParseAst(package, resolvedVersion, filePath, content);
-
-    for (final decl in ast.unit.declarations) {
-      final members = _membersForDecl(decl, className);
-      if (members == null) continue;
-
-      // Class found — collect throws from every member (field declarations
-      // are skipped because _memberName returns null for them and they have
-      // no stable "method" name to include in the response).
-      final results = <Map<String, Object?>>[];
-      for (final member in members) {
-        final memberName = _memberName(member);
-        if (memberName == null) continue; // skip FieldDeclaration
-        _collectThrows(
-          member,
-          ast.lineInfo,
-          content,
-          filePath,
-          className,
-          memberName,
-          null,
-          results,
-        );
-      }
-      return results;
+    final ParseStringResult ast;
+    switch (await _astAccess.unit(package, resolvedVersion, filePath)) {
+      case PubDevFailure(:final error):
+        // filePath came from the sourceFiles map already loaded for this same
+        // (package, resolvedVersion) above, so unit() cannot fail here.
+        throw StateError('unexpected failure parsing an already-listed source file: $error');
+      case PubDevSuccess(:final value):
+        ast = value;
     }
-    return null;
+
+    final members = _astAccess.member(ast.unit, className);
+    if (members == null) return null;
+
+    // Class found — collect throws from every member (field declarations
+    // are skipped because _memberName returns null for them and they have
+    // no stable "method" name to include in the response).
+    final results = <Map<String, Object?>>[];
+    for (final member in members) {
+      final memberName = _memberName(member);
+      if (memberName == null) continue; // skip FieldDeclaration
+      _collectThrows(
+        member,
+        ast.lineInfo,
+        ast.content,
+        filePath,
+        className,
+        memberName,
+        null,
+        results,
+      );
+    }
+    return results;
   }
 
   // ─── Shape 2: one class method ─────────────────────────────────────────────
@@ -272,9 +267,9 @@ final class GetThrowStatementsHandler {
     String method,
   ) async {
     final Map<String, String> files;
-    switch (await _loadSourceFiles(package, resolvedVersion)) {
+    switch (await _astAccess.sourceFiles(package, resolvedVersion)) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         files = value;
     }
@@ -285,13 +280,10 @@ final class GetThrowStatementsHandler {
     // the requested method, ignoring the second class that does.
     var classWasFound = false;
     for (final filePath in _sortedDartPaths(files.keys)) {
-      final content = files[filePath];
-      if (content == null) continue;
       final (:result, :classFound) = await _scanClassMethodInFile(
         package,
         resolvedVersion,
         filePath,
-        content,
         className,
         method,
       );
@@ -300,7 +292,7 @@ final class GetThrowStatementsHandler {
     }
 
     return classWasFound
-        ? _domainError(
+        ? ToolResponse.error(
             DomainError(
               code: DomainErrors.symbolNotFound,
               message: 'Method "$method" was not found in class "$className".',
@@ -309,7 +301,7 @@ final class GetThrowStatementsHandler {
                   'Use get_symbol_documentation to inspect all members of this class.',
             ),
           )
-        : _domainError(_classNotFoundError(className));
+        : ToolResponse.error(_classNotFoundError(className));
   }
 
   /// Scans [filePath] for [className], then extracts throws from [method].
@@ -327,41 +319,33 @@ final class GetThrowStatementsHandler {
     String package,
     String resolvedVersion,
     String filePath,
-    String content,
     String className,
     String method,
   ) async {
-    final ast = await _getOrParseAst(package, resolvedVersion, filePath, content);
+    final ParseStringResult ast;
+    switch (await _astAccess.unit(package, resolvedVersion, filePath)) {
+      case PubDevFailure(:final error):
+        // filePath came from the sourceFiles map already loaded for this same
+        // (package, resolvedVersion) by the caller, so unit() cannot fail here.
+        throw StateError('unexpected failure parsing an already-listed source file: $error');
+      case PubDevSuccess(:final value):
+        ast = value;
+    }
 
-    for (final decl in ast.unit.declarations) {
-      final members = _membersForDecl(decl, className);
-      if (members == null) continue;
-
-      // Class found — collect all matching members for this lookup name.
-      final results = <Map<String, Object?>>[];
-      var matchedMember = false;
-      for (final member in members) {
-        if (!_memberNameMatches(member, method)) continue;
-        matchedMember = true;
-        _collectThrows(
-          member,
-          ast.lineInfo,
-          content,
-          filePath,
-          className,
-          method,
-          null,
-          results,
-        );
-      }
-      if (matchedMember) {
-        return (result: _successJson(results, resolvedVersion), classFound: true);
-      }
-
+    final matches = _astAccess.member(ast.unit, className, memberName: method);
+    if (matches == null) return (result: null, classFound: false);
+    if (matches.isEmpty) {
       // Class found but method absent in this file — signal to keep scanning.
       return (result: null, classFound: true);
     }
-    return (result: null, classFound: false);
+
+    // Collect throws from every matching member — an accessor pair (a getter
+    // and setter) can share `method`, and both must be scanned.
+    final results = <Map<String, Object?>>[];
+    for (final member in matches) {
+      _collectThrows(member, ast.lineInfo, ast.content, filePath, className, method, null, results);
+    }
+    return (result: _successJson(results, resolvedVersion), classFound: true);
   }
 
   // ─── Shape 3: top-level function ──────────────────────────────────────────
@@ -378,12 +362,12 @@ final class GetThrowStatementsHandler {
     final List<DartdocSymbol> symbols;
     switch (await _apiIndex.resolve((name: package, version: resolvedVersion))) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         symbols = value;
     }
 
-    if (symbols.isEmpty) return _domainError(_kNoDocumentation);
+    if (symbols.isEmpty) return ToolResponse.error(_kNoDocumentation);
 
     // Step 2: filter to functions matching `method` by qualifiedName suffix.
     //
@@ -403,7 +387,7 @@ final class GetThrowStatementsHandler {
     }).toList();
 
     if (candidates.isEmpty) {
-      return _domainError(
+      return ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
           message: 'Top-level function "$method" was not found in "$package".',
@@ -415,7 +399,7 @@ final class GetThrowStatementsHandler {
     }
 
     if (candidates.length > 1) {
-      return _domainError(
+      return ToolResponse.error(
         DomainError(
           code: DomainErrors.ambiguousSymbol,
           message: 'Function "$method" is ambiguous — ${candidates.length} candidates found.',
@@ -429,9 +413,9 @@ final class GetThrowStatementsHandler {
 
     // Step 3: load source files and locate the function.
     final Map<String, String> files;
-    switch (await _loadSourceFiles(package, resolvedVersion)) {
+    switch (await _astAccess.sourceFiles(package, resolvedVersion)) {
       case PubDevFailure(:final error):
-        return _domainError(error);
+        return ToolResponse.error(error);
       case PubDevSuccess(:final value):
         files = value;
     }
@@ -447,9 +431,15 @@ final class GetThrowStatementsHandler {
           ];
 
     for (final filePath in orderedPaths) {
-      final content = files[filePath];
-      if (content == null) continue;
-      final ast = await _getOrParseAst(package, resolvedVersion, filePath, content);
+      final ParseStringResult ast;
+      switch (await _astAccess.unit(package, resolvedVersion, filePath)) {
+        case PubDevFailure(:final error):
+          // filePath came from the sourceFiles map already loaded above for
+          // this same (package, resolvedVersion), so unit() cannot fail here.
+          throw StateError('unexpected failure parsing an already-listed source file: $error');
+        case PubDevSuccess(:final value):
+          ast = value;
+      }
       final funcDecl = _findTopLevelFunction(ast, unqualifiedName);
       if (funcDecl != null) {
         // Start traversal from the function body, not the FunctionDeclaration —
@@ -460,7 +450,7 @@ final class GetThrowStatementsHandler {
         _collectThrows(
           funcDecl.functionExpression.body,
           ast.lineInfo,
-          content,
+          ast.content,
           filePath,
           null,
           null,
@@ -471,7 +461,7 @@ final class GetThrowStatementsHandler {
       }
     }
 
-    return _domainError(
+    return ToolResponse.error(
       DomainError(
         code: DomainErrors.symbolNotFound,
         message: 'Function body for "$method" could not be located in the source files.',
@@ -482,67 +472,7 @@ final class GetThrowStatementsHandler {
     );
   }
 
-  // ─── Source file loading ───────────────────────────────────────────────────
-
-  Future<PubDevResult<Map<String, String>>> _loadSourceFiles(String package, String version) =>
-      _sourceFiles.resolve((name: package, version: version));
-
-  // ─── AST parsing & caching ─────────────────────────────────────────────────
-
-  /// Returns the parsed AST for [filePath], resolving through the shared `ast`
-  /// facade so the same file is never parsed twice across a single agent turn.
-  Future<ParseStringResult> _getOrParseAst(
-    String package,
-    String version,
-    String filePath,
-    String content,
-  ) async {
-    final result = await _ast.resolve((
-      name: package,
-      version: version,
-      path: filePath,
-      content: content,
-    ));
-    return switch (result) {
-      PubDevSuccess(:final value) => value,
-      // The `ast` facade's fetch closure always returns PubDevSuccess — see
-      // CacheRegistry.ast.
-      PubDevFailure(:final error) => throw StateError('unexpected AST parse failure: $error'),
-    };
-  }
-
   // ─── AST traversal helpers ────────────────────────────────────────────────
-
-  /// Returns the class-member list for [decl] if it declares a type named
-  /// [className], or `null` when [decl] is not a matching type declaration.
-  ///
-  /// Handles [ClassDeclaration], [MixinDeclaration], [ExtensionDeclaration],
-  /// and [EnumDeclaration].
-  static Iterable<ClassMember>? _membersForDecl(
-    CompilationUnitMember decl,
-    String className,
-  ) {
-    if (decl is ClassDeclaration) {
-      if (decl.namePart.typeName.lexeme != className) return null;
-      final body = decl.body;
-      return body is BlockClassBody ? body.members : const <ClassMember>[];
-    }
-    if (decl is MixinDeclaration) {
-      if (decl.name.lexeme != className) return null;
-      final body = decl.body;
-      return body is BlockClassBody ? body.members : const <ClassMember>[];
-    }
-    if (decl is ExtensionDeclaration) {
-      if (decl.name?.lexeme != className) return null;
-      final body = decl.body;
-      return body is BlockClassBody ? body.members : const <ClassMember>[];
-    }
-    if (decl is EnumDeclaration) {
-      if (decl.namePart.typeName.lexeme != className) return null;
-      return decl.body.members;
-    }
-    return null;
-  }
 
   /// Finds the first top-level function named [name] in [ast].
   static FunctionDeclaration? _findTopLevelFunction(
@@ -565,25 +495,6 @@ final class GetThrowStatementsHandler {
       return name ?? 'new';
     }
     return null;
-  }
-
-  /// Returns `true` when [member]'s name matches [method].
-  static bool _memberNameMatches(ClassMember member, String method) {
-    final normalized = _normalizeMethodName(method);
-    if (member is MethodDeclaration) return member.name.lexeme == normalized;
-    if (member is ConstructorDeclaration) {
-      final name = member.name?.lexeme ?? '';
-      return name == normalized;
-    }
-    return false;
-  }
-
-  /// Normalises [method] to the lexeme used in the AST.
-  static String _normalizeMethodName(String method) {
-    if (method == 'new') return '';
-    const prefix = 'operator ';
-    if (method.startsWith(prefix)) return method.substring(prefix.length).trim();
-    return method;
   }
 
   // ─── Throw collection ─────────────────────────────────────────────────────
@@ -802,14 +713,5 @@ final class GetThrowStatementsHandler {
   static CallToolResult _successJson(
     List<Map<String, Object?>> results,
     String resolvedVersion,
-  ) => CallToolResult(
-    content: [
-      TextContent(
-        text: jsonEncode({'resolvedVersion': resolvedVersion, 'throws': results}),
-      ),
-    ],
-  );
-
-  static CallToolResult _domainError(DomainError error) =>
-      CallToolResult(content: [TextContent(text: error.toJsonString())], isError: true);
+  ) => ToolResponse.ok({'throws': results}, resolvedVersion: resolvedVersion);
 }
