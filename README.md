@@ -14,11 +14,18 @@ constraints.
 Archived PoC material is intentionally historical and outdated. It remains
 available for reference, but it should not block new product decisions.
 
+**Naming:** the V1 product will ship as the `dart_pubdev_mcp` package /
+`dart-pubdev-explorer` MCP server identity, replacing `pubdev_context` (see
+`packages/pubdev_context/docs/adr/0006-rename-to-dart-pubdev-mcp.md`). The
+rename happens at V1 cutover — until then this repo still uses the
+`pubdev_context` name throughout.
+
 ## Current workspace
 
 - `archive/poc/pubdev_context/` contains the archived PoC narrative and
     decision trail.
-- `packages/pubdev_context/` PoC implementation as base for new code.
+- `packages/pubdev_context/` PoC implementation as base for new code
+    (pre-cutover name — will become `dart_pubdev_mcp` per ADR 0006).
 
 ## Working in this repository
 
