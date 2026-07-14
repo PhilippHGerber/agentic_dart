@@ -14,17 +14,15 @@ constraints.
 Archived PoC material is intentionally historical and outdated. It remains
 available for reference, but it should not block new product decisions.
 
-**Naming:** the V1 product will ship as the `dart_pubdev_mcp` package /
-`dart-pubdev-explorer` MCP server identity, replacing `pubdev_context` (see
-`packages/pubdev_context/docs/adr/0006-rename-to-dart-pubdev-mcp.md`). The
-rename happens at V1 cutover — until then this repo still uses the
-`pubdev_context` name throughout.
+**Naming:** the product ships as the `dart_pubdev_mcp` package /
+`dart-pubdev-explorer` MCP server identity, having replaced `pubdev_context`
+(see `packages/dart_pubdev_mcp/docs/adr/0006-rename-to-dart-pubdev-mcp.md`).
 
 ## Current workspace
 
 - `archive/poc/pubdev_context/` contains the archived PoC narrative and
     decision trail.
-- `packages/dart_pubdev_mcp/` PoC implementation as base for new code.
+- `packages/dart_pubdev_mcp/` implementation, based on the PoC.
 
 ## Working in this repository
 
@@ -36,7 +34,7 @@ A single `dart pub get` at the root resolves dependencies for all packages.
 ```bash
 dart pub get
 dart analyze
-dart test packages/pubdev_context
+dart test packages/dart_pubdev_mcp
 ```
 
 ## Repository structure
@@ -48,7 +46,7 @@ agentic_dart/
 │       └── pubdev_context/   ← archived PoC docs, ADRs, generated docs, issues
 ├── pubspec.yaml              ← Dart workspace root
 └── packages/
-        └── pubdev_context/       ← PoC base for new implementation
+        └── dart_pubdev_mcp/       ← implementation, based on the PoC
 ```
 
 

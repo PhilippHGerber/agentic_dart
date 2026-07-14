@@ -7,11 +7,11 @@ An MCP server that gives LLM agents structured, version-aware, token-efficient a
 ### Naming
 
 **Package Identifier**:
-The `pubspec.yaml` `name:` value and pub.dev listing name for this server. Constrained to `lowercase_with_underscores` — pub.dev rejects hyphens. Target for V1: `dart_pubdev_mcp` (see ADR 0006). Distinct from the MCP Server Identity below; the two need not match.
+The `pubspec.yaml` `name:` value and pub.dev listing name for this server. Constrained to `lowercase_with_underscores` — pub.dev rejects hyphens. Is `dart_pubdev_mcp` (see ADR 0006). Distinct from the MCP Server Identity below; the two need not match.
 _Avoid_: Package name (ambiguous with the "Package" distribution-unit term below)
 
 **MCP Server Identity**:
-The name this server presents to MCP clients: the `Implementation.name` sent in the handshake, the key under `mcpServers` in `.mcp.json`, and the CLI executable a user types. Unconstrained by Dart identifier rules — hyphens allowed. Target for V1: `dart-pubdev-explorer` (see ADR 0006).
+The name this server presents to MCP clients: the `Implementation.name` sent in the handshake, the key under `mcpServers` in `.mcp.json`, and the CLI executable a user types. Unconstrained by Dart identifier rules — hyphens allowed. Is `dart-pubdev-explorer` (see ADR 0006).
 _Avoid_: Display name, server name (use this term precisely — it spans handshake identity, config key, and executable together, not just one of them)
 
 ### Distribution units
@@ -38,6 +38,14 @@ _Avoid_: Latest version (ambiguous — could include pre-releases)
 **Resolved Version**:
 A top-level field in the JSON response of any tool that accepts a `version` parameter (whether the caller supplied it or the server auto-resolved it). Value is the exact semver string used (e.g. `"1.2.0"`). Not present on version-agnostic tools (`search_packages`) or on `compare_packages` (which already includes `version` per package in the Comparison Matrix).
 _Avoid_: Inferred version, effective version
+
+**Update Check**:
+The once-per-server-startup, rate-limited (~24h) background lookup of this server's own Latest Stable Version on pub.dev (package `dart_pubdev_mcp`), compared against the running executable's version. Reuses `PubDevClient`, the same fetch path every other tool uses — no separate HTTP client or dependency. Its result (and the timestamp it last ran) is persisted in the Tarball Disk Cache directory so a restart within the rate-limit window reuses the last known answer instead of re-querying pub.dev. Disableable via `--no-update-check` / `dart_pubdev_mcp_UPDATE_CHECK`. A failed check (offline, pub.dev unreachable) is swallowed silently, same as every other best-effort background operation in this server.
+_Avoid_: Version check, self-check (both ambiguous with Resolved Version resolution, which is a per-call, per-target-package concept, not a server-startup, self-directed one)
+
+**Update Notice**:
+The `dartPubdevMcpUpdate` object (`{ current, latest }`) piggybacked onto the first eligible successful tool response of a session, sent only when an Update Check found a newer Latest Stable Version than the running server. At most one per server process lifetime — never repeated, never attached to a Tool Error, and never attached to `search_packages`'s array-shaped response body (skips to the next eligible call instead). Chosen over an MCP `log()` notification or the `_meta` field on `InitializeResult`/`CallToolResult` because tool-call content is the only channel MCP guarantees reaches the model — `_meta` is explicitly reserved for protocol-level plumbing per spec, and `log()` visibility to the model is entirely client-dependent.
+_Avoid_: Update banner (jaspr_cli's term for its terminal-drawn box — this server has no terminal to draw one in), update warning (this is informational, not a Tool Error)
 
 **Package Resource URI**:
 The canonical address of a versioned package artifact served by this server, e.g. `pub://package/http@1.2.0/readme`. Always includes an explicit `@{version}` segment; `latest` is a legal version value and resolves to the Latest Stable Version. The versionless form is not supported. See ADR 0001.

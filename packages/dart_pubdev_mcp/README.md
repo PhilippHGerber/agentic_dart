@@ -1,138 +1,189 @@
-# pubdev_context
+# dart-pubdev-explorer
 
-`pubdev_context` is an archived proof of concept retained in this repository as
-reference code.
+[![Pub Version](https://img.shields.io/pub/v/dart_pubdev_mcp.svg)](https://pub.dev/packages/dart_pubdev_mcp)
+[![Pub Points](https://img.shields.io/pub/points/dart_pubdev_mcp.svg)](https://pub.dev/packages/dart_pubdev_mcp/score)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-The original package documentation was moved to
-`../../archive/poc/pubdev_context/packages/pubdev_context/README.md`.
+*Ships as the `dart_pubdev_mcp` package on pub.dev; the server and CLI
+identify themselves as `dart-pubdev-explorer`.*
 
-The associated ADRs, changelog, generated docs, and decision history were
-archived under `../../archive/poc/pubdev_context/`.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that gives
+AI coding agents structured, version-aware access to the pub.dev Dart and
+Flutter package registry. Instead of scraping HTML, guessing package names,
+or repeating stale advice from training data, an agent can search, compare,
+and read packages — down to an exact source line — the way a careful
+maintainer would.
 
-These materials are intentionally historical and outdated. They are available
-for reference, but they should not be treated as active constraints on the real
-product.
+## Why it exists
 
-## Wire Trace
+Agents without this server tend to guess package names, hallucinate APIs, or
+paste in stale advice from training data. `dart-pubdev-explorer` backs every
+answer with a live call to pub.dev, dartdoc, or the package tarball itself,
+so an agent's answer is grounded instead of guessed.
 
-The **Wire Trace** is an opt-in, human-readable diagnostic log of everything
-crossing the server's two boundaries — the **LLM boundary** (the tool calls and
-resource reads the agent makes, and the results it gets back) and the **pub.dev
-boundary** (the HTTP requests the server sends upstream and the responses it
-receives). It is written for "open it and understand," not for machine parsing.
-It is a separate subsystem from the MCP `log()` / `--log-level` channel, which is
-left completely untouched.
+## Features
 
-### Enabling it
+- **Find the right package.** `search_packages` ranks by relevance, likes,
+  pub points, or recency, filtered by SDK and platform.
+- **Read the real docs.** Full READMEs, examples, changelogs, and
+  `pubspec.yaml`, fetched at the exact version being targeted.
+- **Browse the API like a human would.** Search a package's public symbols
+  by name or keyword, then read full signatures, doc comments, and every
+  `throw` site.
+- **Read exact source.** Pull a file by line range or by symbol name —
+  resolved through the analyzer AST — without downloading and unpacking a
+  tarball by hand.
+- **Compare candidates side by side.** Score, platform support, and
+  maintenance signals for 2–5 packages in one call.
+- **Plan upgrades with confidence.** Structured changelog entries flagged
+  `breaking`, plus a symbol-level diff between any two versions.
 
-Add `--wire-trace` to the server invocation in your MCP client config (or set
-the environment variable). It is **off by default** — installing the server
-never writes files to disk unless you opt in.
+## Quick start
 
-```jsonc
+### 1. Install
+
+Requires the Dart SDK (`>=3.9.0`).
+
+```bash
+dart install dart_pubdev_mcp
+```
+
+This installs the `dart-pubdev-explorer` executable onto your `PATH`. Verify
+with:
+
+```bash
+dart-pubdev-explorer --version
+```
+
+To upgrade later, re-run `dart install dart_pubdev_mcp` (add `--overwrite` if
+another package has already claimed the `dart-pubdev-explorer` executable
+name).
+
+### 2. Configure your MCP client
+
+Add a stdio server entry pointing at the installed executable. For example,
+in Claude Code / Claude Desktop's `.mcp.json`:
+
+```json
 {
   "mcpServers": {
     "dart-pubdev-explorer": {
-      "command": "dart-pubdev-explorer",
-      "args": ["--wire-trace"]
+      "command": "dart-pubdev-explorer"
     }
   }
 }
 ```
 
-Equivalently: `dart_pubdev_mcp_WIRE_TRACE=1`.
+Any MCP client that speaks stdio works the same way — Cursor, Windsurf, Zed,
+and others follow the same shape, a bare command with no arguments required.
+Pass any of the [CLI flags](#configuration) below in `args` if you need
+non-default behavior.
 
-### Configuring it
+### 3. Try it
 
-For each knob a CLI flag wins over its environment variable, which wins over the
-default:
+Once connected, ask your agent something that needs live package data
+instead of training-data guesses, for example:
+
+> "Compare `dio` and `http` for a Flutter app that needs file uploads —
+> which has better platform support and is more actively maintained?"
+
+The agent resolves this itself: `search_packages` to confirm both names
+exist, `compare_packages` for the side-by-side score/platform/maintenance
+matrix, then `get_symbol_documentation` if it needs to check a specific API
+before recommending one.
+
+## Tools
+
+All tools return JSON. Every tool that accepts a package `version` omits it
+to resolve the latest stable release, and the response then carries a
+`resolvedVersion` field naming what was actually used.
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| `search_packages` | Find packages by keyword; the usual starting point. | `query` (required); `limit` (1–20, default 5); `page`; `sdk` (`dart`\|`flutter`); `platform` (`android`\|`ios`\|`web`\|`linux`\|`macos`\|`windows`); `sort` (`relevance`\|`likes`\|`pub_points`\|`updated`) |
+| `get_package` | Full metadata for one package — score, SDK constraints, dependency count. | `name` (required); `version` (omit for latest) |
+| `compare_packages` | Side-by-side score/platform/maintenance matrix for 2–5 candidates. | `names` (required, 2–5 entries) |
+| `list_package_versions` | All published versions, bucketed into stable/prerelease/retracted with publish dates. | `name` (required) |
+| `get_changelog` | Structured changelog entries with a `breaking` flag per entry. | `name` (required); `from_version` (skip already-known entries); `version_limit` (default 5) |
+| `get_api_diff` | Symbols added/removed between two versions (presence-based, not signature diffs). | `package`, `fromVersion`, `toVersion` (all required) |
+| `browse_api_symbols` | Search a package's dartdoc symbol index by name or keyword when the exact symbol name is unknown. | `package`, `query` (required); `type` (class/method/enum/etc.); `limit` (1–25, default 10); `version` |
+| `find_symbols` | Same symbol index as `browse_api_symbols`, substring + fuzzy matched, capped at 20 results. | `package`, `query` (required); `version` |
+| `get_symbol_documentation` | Full signature and doc comment for a known symbol (short name or qualified, e.g. `Client.send`). | `package`, `symbol` (required); `version` |
+| `get_throw_statements` | Every `throw` in a class or method, with surrounding control-flow context. | `package` (required); `class`; `method` (at least one of `class`/`method` required); `version` |
+| `get_source_slice` | Read source from one file — by line range, or by symbol name via the analyzer AST. | `package`, `file` (required); `version`; `lineStart`/`lineEnd`; `symbolName`; `maxLines` (collapse large symbols) |
+| `list_package_source_files` | Browse a package's file tree, filtered by directory prefix and/or extension. | `name` (required); `version`; `directory`; `fileExtension` |
+
+Errors from any tool carry a machine-readable `code` and a `suggestion`
+field describing the next step (e.g. `AMBIGUOUS_SYMBOL` includes candidate
+qualified names to retry with).
+
+### Typical flows
+
+- **Discovery:** `search_packages` → `get_package` → the `readme` resource
+  for full setup docs.
+- **API exploration:** `get_symbol_documentation` directly if the symbol name
+  is known, otherwise `browse_api_symbols` first → `get_throw_statements` →
+  `get_source_slice` if more implementation detail is needed.
+- **Upgrade analysis:** `get_changelog` with `from_version` set → check
+  `breaking` flags → `get_api_diff` for the precise symbol-level delta.
+- **Choosing between packages:** `search_packages` → `compare_packages` on
+  the top candidates.
+
+## Resources
+
+In addition to tools, the server exposes read-only MCP resources. Read
+`pub://meta/resources` first to get the full manifest as JSON.
+
+| URI | Content |
+|---|---|
+| `pub://meta/resources` | Manifest of every resource URI, MIME type, and description. |
+| `pub://meta/instructions` | The same server instructions sent during the MCP handshake — re-read it if a workflow feels off. |
+| `pub://meta/scoring` | Plain-text explainer of pub.dev's 160-point scoring rubric. |
+| `pub://meta/sdk-versions` | Current stable Dart and Flutter SDK versions as JSON. |
+| `pub://package/{name}@{version}/readme` | Full README (Markdown). |
+| `pub://package/{name}@{version}/example` | Working example code from the package's Example tab (Markdown). |
+| `pub://package/{name}@{version}/changelog` | Full raw changelog text (Markdown) — prefer the `get_changelog` tool for structured entries. |
+| `pub://package/{name}@{version}/api` | Raw dartdoc symbol index (JSON) — prefer `browse_api_symbols`/`find_symbols` for filtered lookup. |
+| `pub://package/{name}@{version}/pubspec` | Verbatim `pubspec.yaml` from the version's tarball. |
+
+Package resource URIs require an explicit `@{version}` segment; use
+`@latest` to resolve the latest stable release.
+
+## Configuration
+
+All settings are optional; CLI flags take precedence over environment
+variables, which take precedence over defaults.
 
 | Flag | Environment variable | Default | Purpose |
-| --- | --- | --- | --- |
-| `--wire-trace` | `dart_pubdev_mcp_WIRE_TRACE` | off | Enable the trace. |
-| `--wire-trace-dir <path>` | `dart_pubdev_mcp_WIRE_TRACE_DIR` | `<cache-dir>/wire-trace` | Directory the per-session files are written to. |
-| `--wire-trace-max-preview <bytes>` | `dart_pubdev_mcp_WIRE_TRACE_MAX_PREVIEW` | `2048` | Cap on each logged body preview. `0` = metadata-only (no bodies). |
+|---|---|---|---|
+| `--log-level <level>` | `dart_pubdev_mcp_LOG_LEVEL` | `warning` | Minimum log severity: `debug`\|`info`\|`warning`\|`error`. |
+| `--cache-dir <path>` | `dart_pubdev_mcp_CACHE_DIR` | `$XDG_CACHE_HOME/dart_pubdev_mcp` or `~/.cache/dart_pubdev_mcp` | Directory for the on-disk tarball cache. |
+| `--max-cache-size <size>` | `dart_pubdev_mcp_MAX_CACHE_SIZE` | `500 MiB` | Total cap on the tarball disk cache. Accepts bytes or `KB`/`MB`/`GB`/`KiB`/`MiB`/`GiB` suffixes. |
+| `--max-concurrent-requests <count>` | `dart_pubdev_mcp_MAX_CONCURRENT_REQUESTS` | `5` | Cap on simultaneous in-flight pub.dev HTTP requests (1–64). |
+| `--wire-trace` | `dart_pubdev_mcp_WIRE_TRACE` | off | Enable a human-readable diagnostic log of every outbound HTTP request/response. |
+| `--wire-trace-dir <path>` | `dart_pubdev_mcp_WIRE_TRACE_DIR` | `<cache-dir>/wire-trace` | Directory for per-session Wire Trace files. |
+| `--wire-trace-max-preview <bytes>` | `dart_pubdev_mcp_WIRE_TRACE_MAX_PREVIEW` | `2048` | Cap on each logged response body preview; `0` logs metadata only. |
 
-`<cache-dir>` is the tarball cache directory (`--cache-dir`), which itself
-defaults to `$XDG_CACHE_HOME/dart_pubdev_mcp` or `~/.cache/dart_pubdev_mcp`. So
-with no other configuration the trace lands in `~/.cache/dart_pubdev_mcp/wire-trace/`.
+Run `dart-pubdev-explorer --help` for the same reference from the CLI, or
+`dart-pubdev-explorer --version` to print the installed version.
 
-### Locating the files
+## How this compares
 
-Each server run writes its **own** file, named by timestamp and process id:
+The official Dart MCP server (`dart mcp-server`) ships a general
+`pub_dev_search` tool alongside its much broader Dart/Flutter tooling
+surface — running apps, analysis, DTD, and more. `dart-pubdev-explorer` is a
+focused, deeper tool for package research specifically: symbol-level API
+browsing, exact source reads, multi-version diffing, and side-by-side
+comparison, backed by an on-disk cache tuned for the repeated lookups a
+single research session tends to make. The two are complementary — run both.
 
-```
-wire-trace-20260709-140310-981-pid48213.log
-```
+## Contributing
 
-Because the name sorts chronologically, **the trace for the run you just did is
-simply the newest file**. Per-run files also keep concurrent server instances
-from interleaving into one log. Old files are pruned automatically — the **last
-10** are kept and the oldest beyond that are deleted. Lines are flushed as they
-are written, so `tail -f` shows activity live and a crash preserves the last
-line.
+Source, issues, and the changelog live in the
+[`agentic_dart`](https://github.com/PhilippHGerber/agentic_dart) monorepo,
+under `packages/dart_pubdev_mcp`. Bug reports and pull requests are welcome
+via the [issue tracker](https://github.com/PhilippHGerber/agentic_dart/issues).
 
-Tracing is strictly best-effort and never crashes the server: an unwritable
-directory produces a single stderr warning and then runs with tracing disabled.
+## License
 
-### Reading it
-
-Every file opens with a session header recording the server version, pid, start
-time, and effective config, followed by chronological event lines. Every line
-carries a **Correlation Id** (`#001`, `#002`, …, a per-session counter) so you
-can follow — or `grep` — one LLM request and all the pub.dev calls it triggered
-as a single story, even when concurrent requests interleave.
-
-```
-════════════════════════════════════════════════════════════════════════
- Wire Trace — dart-pubdev-explorer 0.5.0
- session started 2026-07-09 14:03:10.981   pid 48213
- config: max-preview=2048B  concurrency=5  cache=~/.cache/dart_pubdev_mcp
-════════════════════════════════════════════════════════════════════════
-
-14:03:11.204  #001  ← LLM   tools/call  search_packages
-                       args: {"query":"http client","limit":5}
-14:03:11.205  #001    → pub  GET /api/search?q=http+client  [cache miss]
-14:03:11.517  #001    ← pub  200 /api/search  (312 ms, 4.1 KB JSON)
-                       body: {"packages":[{"package":"http"},{"package":"dio"},…  (truncated, 4.1 KB total)
-14:03:11.518  #001    → pub  GET /api/packages/http  [cache miss]
-14:03:11.860  #001    ← pub  200 /api/packages/http  (342 ms, 8.7 KB JSON)
-14:03:12.010  #001  → LLM   result  search_packages   ok   (5 results, 806 ms, 6.2 KB)
-                       body: [{"name":"http","likes":1234,…  (truncated, 6.2 KB total)
-
-14:05:02.100  #002  ← LLM   tools/call  get_package
-                       args: {"name":"htp"}
-14:05:02.420  #002    ← pub  404 /api/packages/htp  (319 ms)
-14:05:02.421  #002  → LLM   result  get_package   ERROR PACKAGE_NOT_FOUND  (321 ms)
-                       error: {"code":"PACKAGE_NOT_FOUND","message":"Package not found on pub.dev.",…
-
-14:06:10.320  #003    ⚠ pub  503 /api/search  (318 ms) — retry 1/3 in 500 ms
-14:06:10.840  #003    → pub  GET /api/search?q=foo  [retry 1]
-
-14:07:00.001  #004    ⚡ cache hit  get_package:http   (age 12s, no pub.dev call)
-```
-
-How to read the markers and lines:
-
-- **`← LLM` / `→ LLM`** — a call coming in from the agent, and the result going
-  back to it. The result line shows `ok` or `ERROR <CODE>`, the duration, and the
-  result size.
-- **`→ pub` / `← pub`** — a request the server sent upstream, and the response.
-  A request is tagged `[cache miss]` when it followed a cache miss and `[retry N]`
-  when it is a retry; a response shows status, latency, byte size, and content
-  type.
-- **`⚡ cache hit`** — an answer served from cache with no pub.dev call, with the
-  entry's age. A cache **miss** is visible as the `→ pub` request that follows.
-- **`⚠`** — a transient pub.dev failure, showing the attempt number and the
-  backoff before the retry.
-- **`args:` / `body:` / `error:`** — continuation lines carrying the full
-  arguments, a truncated body preview, or the Tool Error payload. Previews over
-  the cap are cut and annotated `… (truncated, <size> total)`; a cap of `0`
-  omits bodies entirely.
-- **HTML endpoints** (docs, changelog, example) log the converted-markdown
-  preview only — never raw HTML — annotated with both sizes
-  (`… KB HTML → … KB md`). **Tarball** downloads are logged as metadata only
-  (size and extracted file count); archive bytes are never dumped.
-
-Autocomplete (completions) traffic is deliberately excluded so it does not bury
-the signal.
+MIT License — see [LICENSE](LICENSE).
