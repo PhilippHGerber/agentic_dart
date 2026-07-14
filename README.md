@@ -24,8 +24,7 @@ rename happens at V1 cutover — until then this repo still uses the
 
 - `archive/poc/pubdev_context/` contains the archived PoC narrative and
     decision trail.
-- `packages/pubdev_context/` PoC implementation as base for new code
-    (pre-cutover name — will become `dart_pubdev_mcp` per ADR 0006).
+- `packages/dart_pubdev_mcp/` PoC implementation as base for new code.
 
 ## Working in this repository
 
