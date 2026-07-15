@@ -39,6 +39,8 @@ import 'tools/tool_response.dart';
 import 'tools/version_resolver.dart';
 import 'trace/llm_boundary.dart';
 import 'trace/wire_trace.dart';
+import 'update/update_check_state_store.dart';
+import 'update/update_checker.dart';
 import 'version.dart';
 
 /// MCP server that exposes pub.dev package intelligence to LLM agents.
@@ -73,6 +75,15 @@ base class PubMcpServer extends MCPServer
   /// Id, records the inbound call and outbound result, and runs the handler
   /// inside a [Zone] carrying the id. When [trace] is null or disabled, no
   /// wrapper is installed and tracing costs nothing.
+  ///
+  /// When `config.updateCheck` is enabled, an [UpdateChecker] is constructed
+  /// — wired to an [UpdateCheckStateStore] rooted at `config.cacheDir`, the
+  /// same directory root the tarball cache uses, so its cross-restart
+  /// rate-limit state lives alongside it rather than in a second,
+  /// uncoordinated location — and fired, fire-and-forget, once [initialize]
+  /// completes (see [_runUpdateCheck]). When it is disabled, no
+  /// [UpdateChecker] is constructed at all — the Update Check is entirely
+  /// inert.
   PubMcpServer(
     super.channel, {
     required PubMcpConfig config,
@@ -82,6 +93,13 @@ base class PubMcpServer extends MCPServer
   }) : _tracer = trace != null && trace.isEnabled ? LlmBoundaryTracer(trace) : null,
        _client = client,
        _cacheRegistry = cacheRegistry,
+       _updateChecker = config.updateCheck
+           ? UpdateChecker(
+               client: client,
+               currentVersion: packageVersion,
+               stateStore: UpdateCheckStateStore(directoryPath: config.cacheDir),
+             )
+           : null,
        super.fromStreamChannel(
          implementation: Implementation(
            name: kMcpServerIdentity,
@@ -99,6 +117,26 @@ base class PubMcpServer extends MCPServer
   final PubDevClient _client;
   final CacheRegistry _cacheRegistry;
 
+  /// Runs the Update Check (see `CONTEXT.md`), or `null` when
+  /// `config.updateCheck` is disabled.
+  final UpdateChecker? _updateChecker;
+
+  /// The pending Update Notice for this session (see `CONTEXT.md`): `null`
+  /// until the Update Check resolves and finds a newer Latest Stable Version.
+  /// Set once by [_runUpdateCheck]; read and cleared by
+  /// [_insertUpdateNoticeIfEligible] on the first eligible tool response.
+  Map<String, Object?>? _pendingUpdateNotice;
+
+  /// Completes when this session's Update Check has finished — successfully
+  /// or not. `null` when the Update Check is disabled or has not been started
+  /// yet ([_runUpdateCheck] has not run). Exists solely so tests can
+  /// deterministically await the fire-and-forget background check before
+  /// asserting on the next tool-call response; production code never reads it.
+  Future<void>? _updateCheckComplete;
+
+  /// Test-only hook for [_updateCheckComplete] — see that field's doc.
+  Future<void>? get updateCheckComplete => _updateCheckComplete;
+
   /// Resolves the Resolved Version for the 9 version-accepting tools that
   /// delegate to it; constructed once alongside [_cacheRegistry].
   late final VersionResolver _versionResolver;
@@ -113,8 +151,27 @@ base class PubMcpServer extends MCPServer
     final result = await super.initialize(request);
     _registerTools();
     _registerResources();
+    _runUpdateCheck();
     log(LoggingLevel.info, '$kMcpServerIdentity server initialized');
     return result;
+  }
+
+  /// Fires the Update Check, fire-and-forget: [initialize] does not await
+  /// this, so a slow or failed check never delays the handshake or any tool
+  /// call. A no-op when `config.updateCheck` was disabled at construction
+  /// time ([_updateChecker] is `null`).
+  ///
+  /// When the check resolves with a newer Latest Stable Version,
+  /// [_pendingUpdateNotice] is set once so the next eligible tool response
+  /// carries it (see [_insertUpdateNoticeIfEligible]).
+  void _runUpdateCheck() {
+    final checker = _updateChecker;
+    if (checker == null) return;
+    _updateCheckComplete = checker.checkForUpdate().then((latest) {
+      if (latest != null) {
+        _pendingUpdateNotice = {'current': packageVersion, 'latest': latest};
+      }
+    });
   }
 
   @override
@@ -205,30 +262,80 @@ base class PubMcpServer extends MCPServer
     );
   }
 
-  /// Registers [tool], wrapping [impl] with the ADR-0006 argument-validation
-  /// wrapper and, when tracing is enabled, the LLM-boundary tracer.
+  /// Registers [tool], wrapping [impl] with the argument-validation wrapper,
+  /// the Update Notice layer, and — when tracing is enabled — the
+  /// LLM-boundary tracer.
   ///
-  /// Ordering is tracer outermost, validation inside it, handler innermost —
-  /// so a schema-rejected call still appears in the Wire Trace with a
-  /// Correlation Id. [registerTool] is called with `validateArguments: false`:
-  /// `dart_mcp`'s own schema validation is disabled for every tool, since it
-  /// would reject violations as plain text and bypass the ADR-0002 envelope
-  /// [_validated] provides instead.
+  /// Ordering, outermost to innermost: Update Notice layer, tracer, validation,
+  /// handler — so a schema-rejected call still appears in the Wire Trace with a
+  /// Correlation Id, and the Update Notice layer always sees the exact
+  /// [CallToolResult] about to be sent back to the client, whichever of the
+  /// inner layers produced it. [registerTool] is called with
+  /// `validateArguments: false`: `dart_mcp`'s own schema validation is
+  /// disabled for every tool, since it would reject violations as plain text
+  /// and bypass the ADR-0002 envelope [_validated] provides instead.
   void _registerTracedTool(
     Tool tool,
     FutureOr<CallToolResult> Function(CallToolRequest) impl,
   ) {
     final validated = _validated(tool, impl);
     final tracer = _tracer;
+    final traced = tracer == null ? validated : tracer.wrapTool(validated);
     registerTool(
       tool,
-      tracer == null ? validated : tracer.wrapTool(validated),
+      _withUpdateNotice(traced),
       validateArguments: false,
     );
   }
 
+  /// Wraps [impl] with the always-on Update Notice layer (see `CONTEXT.md`):
+  /// on the first eligible successful response after [_pendingUpdateNotice]
+  /// is set, inserts it into the response body and clears the pending state so
+  /// it is delivered at most once per session.
+  FutureOr<CallToolResult> Function(CallToolRequest) _withUpdateNotice(
+    FutureOr<CallToolResult> Function(CallToolRequest) impl,
+  ) {
+    return (request) async {
+      final result = await impl(request);
+      return _insertUpdateNoticeIfEligible(result);
+    };
+  }
+
+  /// Inserts [_pendingUpdateNotice] into [result] and clears it, when [result]
+  /// is eligible; returns [result] unchanged otherwise.
+  ///
+  /// Ineligible cases, per `CONTEXT.md`'s Update Notice entry:
+  ///   - No notice is pending.
+  ///   - [result] is a Tool Error (`isError: true`).
+  ///   - [result]'s body is not a single JSON object — covers
+  ///     `search_packages`'s bare JSON array, which defers to the next
+  ///     eligible call rather than dropping the notice.
+  CallToolResult _insertUpdateNoticeIfEligible(CallToolResult result) {
+    final notice = _pendingUpdateNotice;
+    if (notice == null || (result.isError ?? false)) return result;
+    if (result.content.length != 1) return result;
+    final content = result.content.single;
+    if (content is! TextContent) return result;
+
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(content.text);
+    } on FormatException {
+      return result;
+    }
+    if (decoded is! Map<String, Object?>) return result;
+
+    _pendingUpdateNotice = null;
+    return CallToolResult(
+      content: [
+        TextContent(text: jsonEncode({...decoded, 'dartPubdevMcpUpdate': notice})),
+      ],
+      isError: result.isError,
+    );
+  }
+
   /// Wraps [impl] so a call's arguments are validated against [tool]'s input
-  /// schema before the handler runs (ADR-0006).
+  /// schema before the handler runs.
   ///
   /// A schema violation short-circuits to an ADR-0002 `INVALID_ARGUMENT` Tool
   /// Error built via [ToolResponse.error], joining every [ValidationError]

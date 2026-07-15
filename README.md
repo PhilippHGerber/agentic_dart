@@ -15,8 +15,7 @@ Archived PoC material is intentionally historical and outdated. It remains
 available for reference, but it should not block new product decisions.
 
 **Naming:** the product ships as the `dart_pubdev_mcp` package /
-`dart-pubdev-explorer` MCP server identity, having replaced `pubdev_context`
-(see `packages/dart_pubdev_mcp/docs/adr/0006-rename-to-dart-pubdev-mcp.md`).
+`dart-pubdev-explorer` MCP server identity, having replaced `pubdev_context`.
 
 ## Current workspace
 

@@ -31,7 +31,7 @@ Future<void> main(List<String> args) async {
         'Usage: $kMcpServerIdentity [--log-level <level>] [--cache-dir <path>] '
         '[--max-cache-size <bytes|size>] [--max-concurrent-requests <count>] '
         '[--wire-trace] [--wire-trace-dir <path>] '
-        '[--wire-trace-max-preview <bytes>]',
+        '[--wire-trace-max-preview <bytes>] [--no-update-check]',
       )
       ..writeln('       $kMcpServerIdentity --version')
       ..writeln()
@@ -80,6 +80,12 @@ Future<void> main(List<String> args) async {
       ..writeln(
         '                       Env: dart_pubdev_mcp_WIRE_TRACE_MAX_PREVIEW '
         '[default: 2048]',
+      )
+      ..writeln(
+        '  --no-update-check    Disable the startup Update Check against pub.dev.',
+      )
+      ..writeln(
+        '                       Env: dart_pubdev_mcp_UPDATE_CHECK  [default: on]',
       )
       ..writeln('  --version            Print version and exit.')
       ..writeln('  --help               Print this help and exit.');

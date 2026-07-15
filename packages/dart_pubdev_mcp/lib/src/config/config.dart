@@ -61,7 +61,8 @@ enum LogLevel {
 /// `dart_pubdev_mcp_CACHE_DIR`. [maxCacheSizeBytes] is read from
 /// `--max-cache-size` or `dart_pubdev_mcp_MAX_CACHE_SIZE`.
 /// [maxConcurrentRequests] is read from `--max-concurrent-requests` or
-/// `dart_pubdev_mcp_MAX_CONCURRENT_REQUESTS`. CLI flags take strict
+/// `dart_pubdev_mcp_MAX_CONCURRENT_REQUESTS`. [updateCheck] is read from
+/// `--no-update-check` or `dart_pubdev_mcp_UPDATE_CHECK`. CLI flags take strict
 /// precedence over environment variables; environment variables take precedence
 /// over built-in defaults.
 /// No config file support in v0.x.
@@ -82,6 +83,7 @@ final class PubMcpConfig {
     this.wireTrace = false,
     this.wireTraceDir = '$_kDefaultRelativeCacheDir/wire-trace',
     this.wireTraceMaxPreview = kDefaultWireTraceMaxPreview,
+    this.updateCheck = true,
   });
 
   /// Constructs a [PubMcpConfig] from [args] and an optional [environment] map.
@@ -101,6 +103,7 @@ final class PubMcpConfig {
     String? wireTraceArg;
     String? wireTraceDirArg;
     String? wireTraceMaxPreviewArg;
+    String? noUpdateCheckArg;
 
     for (var i = 0; i < args.length; i++) {
       if (args[i] == '--log-level') {
@@ -163,6 +166,11 @@ final class PubMcpConfig {
         wireTraceMaxPreviewArg = args[i].substring(
           '--wire-trace-max-preview='.length,
         );
+      } else if (args[i] == '--no-update-check') {
+        // A bare presence flag: `--no-update-check` disables the check.
+        noUpdateCheckArg = 'true';
+      } else if (args[i].startsWith('--no-update-check=')) {
+        noUpdateCheckArg = args[i].substring('--no-update-check='.length);
       }
     }
 
@@ -176,6 +184,7 @@ final class PubMcpConfig {
         if (wireTraceArg != null) 'wire_trace=$wireTraceArg',
         if (wireTraceDirArg != null) 'wire_trace_dir=$wireTraceDirArg',
         if (wireTraceMaxPreviewArg != null) 'wire_trace_max_preview=$wireTraceMaxPreviewArg',
+        if (noUpdateCheckArg != null) 'no_update_check=$noUpdateCheckArg',
       ],
       environment: _remapEnvironment(env),
     );
@@ -193,6 +202,15 @@ final class PubMcpConfig {
     final wireTraceMaxPreviewRaw =
         config.optionalString('wire_trace_max_preview') ?? '$kDefaultWireTraceMaxPreview';
     final wireTraceMaxPreview = _parseWireTraceMaxPreview(wireTraceMaxPreviewRaw);
+    // Two keys, not one: the CLI flag (`no_update_check`) and the env var
+    // (`update_check`) are opposite polarity by design (see CONTEXT.md's
+    // Update Check entry), so they can't share a single `Config` key the way
+    // every other boolean option here does. Inverting the resolved bool below
+    // avoids re-parsing `no_update_check`'s raw string ourselves, which would
+    // otherwise duplicate cli_config's `boolStrings` synonym table.
+    final noUpdateCheck = config.optionalBool('no_update_check');
+    final updateCheckEnv = config.optionalBool('update_check');
+    final updateCheck = noUpdateCheck != null ? !noUpdateCheck : (updateCheckEnv ?? true);
 
     return PubMcpConfig(
       logLevel: LogLevel.parse(logLevelStr),
@@ -202,6 +220,7 @@ final class PubMcpConfig {
       wireTrace: wireTrace,
       wireTraceDir: wireTraceDir,
       wireTraceMaxPreview: wireTraceMaxPreview,
+      updateCheck: updateCheck,
     );
   }
 
@@ -229,6 +248,9 @@ final class PubMcpConfig {
   /// `0` produces a metadata-only trace with no bodies.
   final int wireTraceMaxPreview;
 
+  /// Whether the Update Check runs at server startup. On by default.
+  final bool updateCheck;
+
   static Map<String, String> _remapEnvironment(Map<String, String> env) => {
     'LOG_LEVEL': ?env['dart_pubdev_mcp_LOG_LEVEL'],
     'CACHE_DIR': ?env['dart_pubdev_mcp_CACHE_DIR'],
@@ -237,6 +259,7 @@ final class PubMcpConfig {
     'WIRE_TRACE': ?env['dart_pubdev_mcp_WIRE_TRACE'],
     'WIRE_TRACE_DIR': ?env['dart_pubdev_mcp_WIRE_TRACE_DIR'],
     'WIRE_TRACE_MAX_PREVIEW': ?env['dart_pubdev_mcp_WIRE_TRACE_MAX_PREVIEW'],
+    'UPDATE_CHECK': ?env['dart_pubdev_mcp_UPDATE_CHECK'],
   };
 
   static int _parseWireTraceMaxPreview(String raw) {

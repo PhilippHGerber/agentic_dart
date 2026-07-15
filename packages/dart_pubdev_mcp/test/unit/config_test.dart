@@ -76,6 +76,11 @@ void main() {
       expect(config.wireTraceMaxPreview, equals(kDefaultWireTraceMaxPreview));
       expect(config.wireTraceMaxPreview, equals(2048));
     });
+
+    test('updateCheck defaults to on', () {
+      final config = PubMcpConfig.fromArguments([], environment: {});
+      expect(config.updateCheck, isTrue);
+    });
   });
 
   group('PubMcpConfig CLI flags', () {
@@ -242,6 +247,22 @@ void main() {
         throwsA(isA<FormatException>()),
       );
     });
+
+    test('--no-update-check disables the update check as a bare presence flag', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--no-update-check'],
+        environment: {},
+      );
+      expect(config.updateCheck, isFalse);
+    });
+
+    test('--no-update-check=false keeps the update check enabled', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--no-update-check=false'],
+        environment: {},
+      );
+      expect(config.updateCheck, isTrue);
+    });
   });
 
   group('PubMcpConfig environment variables', () {
@@ -322,6 +343,17 @@ void main() {
         expect(config.wireTraceMaxPreview, equals(512));
       },
     );
+
+    test(
+      'dart_pubdev_mcp_UPDATE_CHECK=false disables the update check when no flag is present',
+      () {
+        final config = PubMcpConfig.fromArguments(
+          [],
+          environment: {'dart_pubdev_mcp_UPDATE_CHECK': 'false'},
+        );
+        expect(config.updateCheck, isFalse);
+      },
+    );
   });
 
   group('PubMcpConfig precedence', () {
@@ -394,6 +426,22 @@ void main() {
         expect(config.wireTraceMaxPreview, equals(99));
       },
     );
+
+    test('--no-update-check flag overrides dart_pubdev_mcp_UPDATE_CHECK=true env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--no-update-check'],
+        environment: {'dart_pubdev_mcp_UPDATE_CHECK': 'true'},
+      );
+      expect(config.updateCheck, isFalse);
+    });
+
+    test('--no-update-check=false flag overrides dart_pubdev_mcp_UPDATE_CHECK=false env var', () {
+      final config = PubMcpConfig.fromArguments(
+        ['--no-update-check=false'],
+        environment: {'dart_pubdev_mcp_UPDATE_CHECK': 'false'},
+      );
+      expect(config.updateCheck, isTrue);
+    });
   });
 
   group('PubMcpConfig const constructor', () {
@@ -426,6 +474,7 @@ void main() {
         wireTrace: true,
         wireTraceDir: '/wt',
         wireTraceMaxPreview: 64,
+        updateCheck: false,
       );
       expect(config.logLevel, equals(LogLevel.debug));
       expect(config.cacheDir, equals('/cache'));
@@ -434,12 +483,18 @@ void main() {
       expect(config.wireTrace, isTrue);
       expect(config.wireTraceDir, equals('/wt'));
       expect(config.wireTraceMaxPreview, equals(64));
+      expect(config.updateCheck, isFalse);
     });
 
     test('const constructor defaults wire trace off with a 2048-byte preview', () {
       const config = PubMcpConfig();
       expect(config.wireTrace, isFalse);
       expect(config.wireTraceMaxPreview, equals(kDefaultWireTraceMaxPreview));
+    });
+
+    test('const constructor defaults updateCheck to on', () {
+      const config = PubMcpConfig();
+      expect(config.updateCheck, isTrue);
     });
   });
 
@@ -465,6 +520,7 @@ void main() {
       expect(result.stdout.toString(), contains('--wire-trace'));
       expect(result.stdout.toString(), contains('--wire-trace-dir'));
       expect(result.stdout.toString(), contains('--wire-trace-max-preview'));
+      expect(result.stdout.toString(), contains('--no-update-check'));
     });
   });
 

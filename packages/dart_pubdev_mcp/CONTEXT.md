@@ -7,11 +7,11 @@ An MCP server that gives LLM agents structured, version-aware, token-efficient a
 ### Naming
 
 **Package Identifier**:
-The `pubspec.yaml` `name:` value and pub.dev listing name for this server. Constrained to `lowercase_with_underscores` — pub.dev rejects hyphens. Is `dart_pubdev_mcp` (see ADR 0006). Distinct from the MCP Server Identity below; the two need not match.
+The `pubspec.yaml` `name:` value and pub.dev listing name for this server. Constrained to `lowercase_with_underscores` — pub.dev rejects hyphens. Is `dart_pubdev_mcp`. Distinct from the MCP Server Identity below; the two need not match.
 _Avoid_: Package name (ambiguous with the "Package" distribution-unit term below)
 
 **MCP Server Identity**:
-The name this server presents to MCP clients: the `Implementation.name` sent in the handshake, the key under `mcpServers` in `.mcp.json`, and the CLI executable a user types. Unconstrained by Dart identifier rules — hyphens allowed. Is `dart-pubdev-explorer` (see ADR 0006).
+The name this server presents to MCP clients: the `Implementation.name` sent in the handshake, the key under `mcpServers` in `.mcp.json`, and the CLI executable a user types. Unconstrained by Dart identifier rules — hyphens allowed. Is `dart-pubdev-explorer`.
 _Avoid_: Display name, server name (use this term precisely — it spans handshake identity, config key, and executable together, not just one of them)
 
 ### Distribution units

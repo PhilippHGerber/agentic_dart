@@ -151,7 +151,7 @@ void main() {
   tearDown(() => stack.close());
 
   // names.length validation (2-5 entries) moved to server-owned schema
-  // validation (ADR-0006, ticket 02) — see test/unit/pub_mcp_test.dart's
+  // validation — see test/unit/pub_mcp_test.dart's
   // 'argument validation' group. The handler no longer checks `names.length`
   // itself; the tool's input schema already caps it via minItems/maxItems.
 

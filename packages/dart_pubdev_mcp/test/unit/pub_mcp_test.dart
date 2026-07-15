@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dart_mcp/client.dart';
 import 'package:dart_pubdev_mcp/src/cache/cache_registry.dart';
@@ -10,11 +11,14 @@ import 'package:dart_pubdev_mcp/src/config/config.dart';
 import 'package:dart_pubdev_mcp/src/data/pub_client.dart';
 import 'package:dart_pubdev_mcp/src/resources/package_resources.dart';
 import 'package:dart_pubdev_mcp/src/server.dart';
+import 'package:dart_pubdev_mcp/src/update/update_check_state_store.dart';
+import 'package:dart_pubdev_mcp/src/version.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:test/test.dart';
 
 import '../support/harness.dart';
+import '../support/pub_stubs.dart';
 
 // ─── In-memory channel pair ───────────────────────────────────────────────────
 
@@ -44,11 +48,19 @@ base class TestMcpClient extends MCPClient {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/// Builds a [PubMcpServer] wired to a real (unmocked) [PubDevClient].
+///
+/// Defaults to `updateCheck: false` when [config] is omitted: this helper's
+/// [PubDevClient] is a live one, so leaving the Update Check enabled would
+/// fire a real network call to pub.dev on every `initialize()` in this file's
+/// many server-behavior tests, none of which exercise the Update Check itself
+/// (see the dedicated `update notice` group below, which builds its own
+/// server against a mocked `TestStack`).
 PubMcpServer buildServer(StreamChannel<String> channel, {PubMcpConfig? config}) {
   final client = PubDevClient();
   return PubMcpServer(
     channel,
-    config: config ?? const PubMcpConfig(),
+    config: config ?? const PubMcpConfig(updateCheck: false),
     client: client,
     cacheRegistry: CacheRegistry(client: client),
   );
@@ -466,7 +478,11 @@ void main() {
       testClient = TestMcpClient();
       server = PubMcpServer(
         serverChannel,
-        config: const PubMcpConfig(),
+        // The Update Check would otherwise race the `clearInteractions` calls
+        // below and contaminate their `verifyNever(mockHttp.get(...))`
+        // assertions — this group doesn't exercise the Update Check itself
+        // (see the dedicated `update notice` group).
+        config: const PubMcpConfig(updateCheck: false),
         client: stack.client,
         cacheRegistry: stack.caches,
       );
@@ -548,7 +564,7 @@ void main() {
     );
   });
 
-  // ─── Argument validation (ADR-0006) ────────────────────────────────────────
+  // ─── Argument validation ────────────────────────────────────────
   //
   // The central `_validated` wrapper in `server.dart` runs `tool.inputSchema
   // .validate()` ahead of every handler. A schema violation short-circuits to
@@ -569,7 +585,10 @@ void main() {
       testClient = TestMcpClient();
       server = PubMcpServer(
         serverChannel,
-        config: const PubMcpConfig(),
+        // See the matching comment in the `handleComplete against warm
+        // facades` group above — this group's `verifyNever(mockHttp.get(...))`
+        // assertions would otherwise race the Update Check's background call.
+        config: const PubMcpConfig(updateCheck: false),
         client: stack.client,
         cacheRegistry: stack.caches,
       );
@@ -675,6 +694,281 @@ void main() {
       final decoded = decodeBody(result);
       expect(decoded['package'], equals('http'));
       expect(decoded, contains('stable'));
+    });
+  });
+
+  // ─── Update Notice ──────────────────────────────────────────────────────────
+  //
+  // See `CONTEXT.md`'s Update Check / Update Notice glossary entries. Every
+  // case drives real tool calls through the harness and asserts on the JSON
+  // response body — never on the checker's internals. `server
+  // .updateCheckComplete` is a test-only synchronization hook (see its doc in
+  // `server.dart`) that lets these tests deterministically await the
+  // fire-and-forget background check before asserting on the next tool-call
+  // response, without the production code path ever waiting on it.
+
+  group('update notice', () {
+    late Directory tempDir;
+    late TestStack stack;
+    late MockHttpClient mockHttp;
+    late TestMcpClient testClient;
+    late PubMcpServer server;
+    late ServerConnection serverConnection;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('dart_pubdev_mcp_update_notice_test_');
+      stack = TestStack();
+      mockHttp = stack.http;
+    });
+
+    tearDown(() async {
+      await testClient.shutdown();
+      await server.shutdown();
+      if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    });
+
+    /// Builds and initializes a [PubMcpServer] against [against] (defaults to
+    /// [stack]), rooted at [cacheDir] (defaults to this test's [tempDir] — the
+    /// Update Check's persisted rate-limit state lives here), then awaits the
+    /// session's Update Check before returning — so every test's first
+    /// `callTool` sees a resolved (or, for the opt-out case, never-started)
+    /// pending-notice state rather than racing the background check.
+    Future<void> startServer({
+      bool updateCheck = true,
+      TestStack? against,
+      String? cacheDir,
+    }) async {
+      final (clientChannel, serverChannel) = inProcessChannels();
+      testClient = TestMcpClient();
+      server = PubMcpServer(
+        serverChannel,
+        config: PubMcpConfig(updateCheck: updateCheck, cacheDir: cacheDir ?? tempDir.path),
+        client: (against ?? stack).client,
+        cacheRegistry: (against ?? stack).caches,
+      );
+      serverConnection = testClient.connectServer(clientChannel);
+      await serverConnection.initialize(
+        InitializeRequest(
+          protocolVersion: ProtocolVersion.latestSupported,
+          capabilities: testClient.capabilities,
+          clientInfo: testClient.implementation,
+        ),
+      );
+      serverConnection.notifyInitialized(InitializedNotification());
+      await server.initialized;
+      await server.updateCheckComplete;
+    }
+
+    /// Asserts [mock] was never called for `dart_pubdev_mcp`'s own
+    /// self-check endpoint.
+    void verifyNoSelfCheckCall(MockHttpClient mock) {
+      verifyNever(
+        () => mock.get(
+          any(that: predicate<Uri>((u) => u.toString().contains('/api/packages/dart_pubdev_mcp'))),
+          headers: any(named: 'headers'),
+        ),
+      );
+    }
+
+    Map<String, Object?> decodeBody(CallToolResult result) =>
+        jsonDecode((result.content.single as TextContent).text) as Map<String, Object?>;
+
+    Future<CallToolResult> listHttpVersions() => serverConnection.callTool(
+      CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+    );
+
+    test('appears on the first eligible response when a newer version exists', () async {
+      stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+      stubPackageInfo(mockHttp);
+      await startServer();
+
+      final result = await listHttpVersions();
+
+      expect(result.isError, isNull);
+      expect(
+        decodeBody(result)['dartPubdevMcpUpdate'],
+        equals({'current': packageVersion, 'latest': '999.0.0'}),
+      );
+    });
+
+    test('is absent when the server is already at the latest stable version', () async {
+      stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: packageVersion);
+      stubPackageInfo(mockHttp);
+      await startServer();
+
+      final result = await listHttpVersions();
+
+      expect(decodeBody(result), isNot(contains('dartPubdevMcpUpdate')));
+    });
+
+    test('appears at most once per session', () async {
+      stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+      stubPackageInfo(mockHttp);
+      await startServer();
+
+      final first = await listHttpVersions();
+      expect(decodeBody(first), contains('dartPubdevMcpUpdate'));
+
+      final second = await listHttpVersions();
+      expect(decodeBody(second), isNot(contains('dartPubdevMcpUpdate')));
+    });
+
+    test('a search_packages first call defers the notice to the next eligible call', () async {
+      stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/search',
+        response: ok(readFixture('search_result.json')),
+      );
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/',
+        response: ok(readFixture('package_info.json')),
+      );
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/score',
+        response: ok(readFixture('package_score.json')),
+      );
+      await startServer();
+
+      final searchResult = await serverConnection.callTool(
+        CallToolRequest(name: 'search_packages', arguments: {'query': 'http'}),
+      );
+      // search_packages' response body is a bare JSON array — not eligible.
+      final decodedArray = jsonDecode((searchResult.content.single as TextContent).text);
+      expect(decodedArray, isA<List<Object?>>());
+
+      stubPackageInfo(mockHttp);
+      final next = await listHttpVersions();
+
+      expect(decodeBody(next), contains('dartPubdevMcpUpdate'));
+    });
+
+    test('a Tool Error response never carries the notice', () async {
+      stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+      stubPackageInfo(mockHttp, packageName: 'missing-package', statusCode: 404);
+      await startServer();
+
+      final errorResult = await serverConnection.callTool(
+        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'missing-package'}),
+      );
+      expect(errorResult.isError, isTrue);
+      expect(decodeBody(errorResult), isNot(contains('dartPubdevMcpUpdate')));
+
+      // The notice is still pending — the next successful call carries it.
+      stubPackageInfo(mockHttp);
+      final next = await listHttpVersions();
+      expect(decodeBody(next), contains('dartPubdevMcpUpdate'));
+    });
+
+    test('the opt-out flag suppresses the check end-to-end', () async {
+      stubPackageInfo(mockHttp);
+      await startServer(updateCheck: false);
+
+      expect(server.updateCheckComplete, isNull);
+
+      final first = await listHttpVersions();
+      final second = await listHttpVersions();
+
+      expect(decodeBody(first), isNot(contains('dartPubdevMcpUpdate')));
+      expect(decodeBody(second), isNot(contains('dartPubdevMcpUpdate')));
+      verifyNoSelfCheckCall(mockHttp);
+    });
+
+    test('a network failure during the check never surfaces and never delays a call', () async {
+      stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', statusCode: 500);
+      stubPackageInfo(mockHttp);
+      await startServer();
+
+      final result = await listHttpVersions();
+
+      expect(result.isError, isNull);
+      expect(decodeBody(result), isNot(contains('dartPubdevMcpUpdate')));
+    });
+
+    // ─── Cross-restart persistence (ticket 03) ──────────────────────────────
+    //
+    // The rate-limit state lives in a small file inside `cacheDir` (see
+    // `UpdateCheckStateStore`). These cases drive the same MCP harness as the
+    // rest of this group — no new test seam — extended with a second server
+    // constructed against the same `tempDir`.
+
+    group('cross-restart persistence', () {
+      test(
+        'a second server sharing the cache directory reuses the persisted '
+        'result without a second HTTP call',
+        () async {
+          stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+          stubPackageInfo(mockHttp);
+          await startServer();
+
+          // Tear down the first server before constructing the second against
+          // the same cache directory.
+          await testClient.shutdown();
+          await server.shutdown();
+
+          final secondStack = TestStack();
+          addTearDown(secondStack.close);
+          stubPackageInfo(secondStack.http);
+          await startServer(against: secondStack);
+
+          final result = await listHttpVersions();
+
+          expect(result.isError, isNull);
+          expect(
+            decodeBody(result)['dartPubdevMcpUpdate'],
+            equals({'current': packageVersion, 'latest': '999.0.0'}),
+          );
+          verifyNoSelfCheckCall(secondStack.http);
+        },
+      );
+
+      test(
+        'a server whose persisted state is older than the rate-limit window performs a fresh check',
+        () async {
+          await UpdateCheckStateStore(directoryPath: tempDir.path).write(
+            UpdateCheckState(
+              checkedAt: DateTime.now().subtract(const Duration(hours: 25)),
+              latestVersion: '1.0.0',
+            ),
+          );
+          stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+          stubPackageInfo(mockHttp);
+          await startServer();
+
+          final result = await listHttpVersions();
+
+          expect(
+            decodeBody(result)['dartPubdevMcpUpdate'],
+            equals({'current': packageVersion, 'latest': '999.0.0'}),
+          );
+          verify(
+            () => mockHttp.get(
+              any(
+                that: predicate<Uri>((u) => u.toString().contains('/api/packages/dart_pubdev_mcp')),
+              ),
+              headers: any(named: 'headers'),
+            ),
+          ).called(1);
+        },
+      );
+
+      test('a corrupted persisted state file is treated as no persisted state', () async {
+        File(
+          '${tempDir.path}${Platform.pathSeparator}update-check.json',
+        ).writeAsStringSync('not json at all {{{');
+        stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+        stubPackageInfo(mockHttp);
+        await startServer();
+
+        final result = await listHttpVersions();
+
+        expect(
+          decodeBody(result)['dartPubdevMcpUpdate'],
+          equals({'current': packageVersion, 'latest': '999.0.0'}),
+        );
+      });
     });
   });
 }

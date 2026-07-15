@@ -81,7 +81,7 @@ void main() {
   tearDown(() => stack.close());
 
   // Limit validation (limit > 20) moved to server-owned schema validation
-  // (ADR-0006, ticket 02) — see test/unit/pub_mcp_test.dart's
+  //  — see test/unit/pub_mcp_test.dart's
   // 'argument validation' group. The handler no longer checks `limit` itself.
 
   // ─── Cache hit ──────────────────────────────────────────────────────────────

@@ -163,6 +163,7 @@ variables, which take precedence over defaults.
 | `--wire-trace` | `dart_pubdev_mcp_WIRE_TRACE` | off | Enable a human-readable diagnostic log of every outbound HTTP request/response. |
 | `--wire-trace-dir <path>` | `dart_pubdev_mcp_WIRE_TRACE_DIR` | `<cache-dir>/wire-trace` | Directory for per-session Wire Trace files. |
 | `--wire-trace-max-preview <bytes>` | `dart_pubdev_mcp_WIRE_TRACE_MAX_PREVIEW` | `2048` | Cap on each logged response body preview; `0` logs metadata only. |
+| `--no-update-check` | `dart_pubdev_mcp_UPDATE_CHECK` | on | Disable the startup Update Check against pub.dev for this server's own version. |
 
 Run `dart-pubdev-explorer --help` for the same reference from the CLI, or
 `dart-pubdev-explorer --version` to print the installed version.

@@ -111,7 +111,10 @@ void main() {
     final (clientChannel, serverChannel) = _inProcessChannels();
     server = PubMcpServer(
       serverChannel,
-      config: const PubMcpConfig(),
+      // Update Check off: this suite is about the pub.dev boundary, not the
+      // Update Notice, and an unstubbed background self-check would otherwise
+      // be an unrelated source of `stack.http` interactions in these tests.
+      config: const PubMcpConfig(updateCheck: false),
       client: stack.client,
       cacheRegistry: stack.caches,
       trace: trace,
