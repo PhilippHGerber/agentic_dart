@@ -3,6 +3,13 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.2]
+
+### Added
+
+- Self-update notice: the server checks pub.dev once per startup (rate-limited to ~24h across restarts) and, if a newer version exists, surfaces a `dartPubdevMcpUpdate` notice on the next tool-call response — at most once per session.
+- `--no-update-check` flag / `dart_pubdev_mcp_UPDATE_CHECK` env var to disable it (default: on).
+
 ## [0.5.1]
 
 ### Fixed
