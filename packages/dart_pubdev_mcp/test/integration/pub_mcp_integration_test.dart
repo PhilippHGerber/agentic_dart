@@ -284,7 +284,7 @@ void main() {
     late Map<String, Object?> detail;
 
     setUpAll(() async {
-      final result = await mcp.callTool('get_package', {'name': 'path'});
+      final result = await mcp.callTool('get_package', {'package': 'path'});
       detail = _content(result)! as Map<String, Object?>;
     });
 
@@ -317,7 +317,7 @@ void main() {
     late List<Object?> entries;
 
     setUpAll(() async {
-      final result = await mcp.callTool('get_changelog', {'name': 'path'});
+      final result = await mcp.callTool('get_changelog', {'package': 'path'});
       final payload = _content(result)! as Map<String, Object?>;
       entries = payload['entries']! as List<Object?>;
     });
@@ -417,7 +417,7 @@ void main() {
 
     setUpAll(() async {
       final result = await mcp.callTool('compare_packages', {
-        'names': ['http', 'path', 'dart_mcp'],
+        'packages': ['http', 'path', 'dart_mcp'],
       });
       payload = _content(result)! as Map<String, Object?>;
     });

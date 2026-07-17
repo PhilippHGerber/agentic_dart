@@ -270,19 +270,19 @@ void main() {
 
   // ─── Type filter ────────────────────────────────────────────────────────────
 
-  group('type filter', () {
-    test('narrows results to only the requested type', () async {
+  group('kind filter', () {
+    test('narrows results to only the requested kind', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'package': 'http', 'query': 'client', 'type': 'class'}),
+        _request({'package': 'http', 'query': 'client', 'kind': 'class'}),
       );
 
       expect(_symbols(result).every((s) => s['type'] == 'class'), isTrue);
     });
 
-    test('absent type returns all matching symbol kinds', () async {
+    test('absent kind returns all matching symbol kinds', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);
 
@@ -294,24 +294,24 @@ void main() {
       expect(types.length, greaterThan(1));
     });
 
-    test('unknown type string is accepted without returning a type-related error', () async {
+    test('unknown kind string is accepted without returning a kind-related error', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'package': 'http', 'query': 'client', 'type': 'widget'}),
+        _request({'package': 'http', 'query': 'client', 'kind': 'widget'}),
       );
 
-      // Should be no_results, not an error about the type being unrecognised
+      // Should be no_results, not an error about the kind being unrecognised
       expect(_errorPayload(result)['code'], equals(DomainErrors.noResults));
     });
 
-    test('type filter applied after ranking preserves rank order within the type', () async {
+    test('kind filter applied after ranking preserves rank order within the kind', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'package': 'http', 'query': 'http', 'type': 'class'}),
+        _request({'package': 'http', 'query': 'http', 'kind': 'class'}),
       );
 
       // query "http": name match = http (library), desc matches = BrowserClient, send, Abortable
@@ -375,13 +375,13 @@ void main() {
       expect(_errorPayload(result), contains('suggestion'));
     });
 
-    test('returns no_results when type filter eliminates all ranked matches', () async {
+    test('returns no_results when kind filter eliminates all ranked matches', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);
 
       // query "close" matches only the "close" method — filtering by "library" yields nothing
       final result = await buildHandler().call(
-        _request({'package': 'http', 'query': 'close', 'type': 'library'}),
+        _request({'package': 'http', 'query': 'close', 'kind': 'library'}),
       );
 
       expect(_errorPayload(result)['code'], equals(DomainErrors.noResults));

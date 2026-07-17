@@ -9,8 +9,10 @@ import 'package:dart_mcp/client.dart';
 import 'package:dart_pubdev_mcp/src/cache/cache_registry.dart';
 import 'package:dart_pubdev_mcp/src/config/config.dart';
 import 'package:dart_pubdev_mcp/src/data/pub_client.dart';
+import 'package:dart_pubdev_mcp/src/identity.dart';
 import 'package:dart_pubdev_mcp/src/resources/package_resources.dart';
 import 'package:dart_pubdev_mcp/src/server.dart';
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show listPackageVersionsTool;
 import 'package:dart_pubdev_mcp/src/update/update_check_state_store.dart';
 import 'package:dart_pubdev_mcp/src/version.dart';
 import 'package:mocktail/mocktail.dart';
@@ -19,6 +21,7 @@ import 'package:test/test.dart';
 
 import '../support/harness.dart';
 import '../support/pub_stubs.dart';
+import '../support/schema_conformance.dart';
 
 // ─── In-memory channel pair ───────────────────────────────────────────────────
 
@@ -172,6 +175,11 @@ void main() {
         expect(result.serverInfo.name, equals('dart-pubdev-explorer'));
       });
 
+      test('responds with a human-readable server title', () async {
+        final result = await doInitialize();
+        expect(result.serverInfo.title, equals(kMcpServerTitle));
+      });
+
       test('responds with the current package version', () async {
         final result = await doInitialize();
         expect(result.serverInfo.version, isNotEmpty);
@@ -234,11 +242,11 @@ void main() {
         expect(names, contains('get_package'));
       });
 
-      test('get_package input schema marks name as required', () async {
+      test('get_package input schema marks package as required', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_package');
-        expect(tool.inputSchema.required, contains('name'));
+        expect(tool.inputSchema.required, contains('package'));
       });
 
       test('lists get_changelog after initialization', () async {
@@ -248,11 +256,11 @@ void main() {
         expect(names, contains('get_changelog'));
       });
 
-      test('get_changelog input schema marks name as required', () async {
+      test('get_changelog input schema marks package as required', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_changelog');
-        expect(tool.inputSchema.required, contains('name'));
+        expect(tool.inputSchema.required, contains('package'));
       });
 
       test('lists get_symbol_documentation after initialization', () async {
@@ -276,11 +284,11 @@ void main() {
         expect(names, contains('list_package_versions'));
       });
 
-      test('list_package_versions input schema marks name as required', () async {
+      test('list_package_versions input schema marks package as required', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'list_package_versions');
-        expect(tool.inputSchema.required, contains('name'));
+        expect(tool.inputSchema.required, contains('package'));
       });
 
       test('lists get_source_slice after initialization', () async {
@@ -295,6 +303,69 @@ void main() {
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_source_slice');
         expect(tool.inputSchema.required, containsAll(['package', 'file']));
+      });
+
+      // All 12 tools this server registers — kept in sync with
+      // tool_definitions.dart. Used to assert every tool carries a title and
+      // truthful, read-only/open-world annotations.
+      const allToolNames = [
+        'search_packages',
+        'get_package',
+        'get_changelog',
+        'browse_api_symbols',
+        'find_symbols',
+        'get_symbol_documentation',
+        'get_source_slice',
+        'list_package_source_files',
+        'get_throw_statements',
+        'compare_packages',
+        'list_package_versions',
+        'get_api_diff',
+      ];
+
+      test('lists exactly the 12 expected tools', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toSet();
+        expect(names, equals(allToolNames.toSet()));
+      });
+
+      test('every tool has a non-empty, no-trailing-period title', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        for (final name in allToolNames) {
+          final tool = tools.tools.firstWhere((t) => t.name == name);
+          final title = tool.title;
+          expect(title, isNotNull, reason: '$name should have a title');
+          if (title == null) continue;
+          expect(title, isNotEmpty, reason: '$name title should be non-empty');
+          expect(
+            title.endsWith('.'),
+            isFalse,
+            reason: '$name title should not have a trailing period',
+          );
+        }
+      });
+
+      test('every tool declares readOnlyHint and openWorldHint as true', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        for (final name in allToolNames) {
+          final tool = tools.tools.firstWhere((t) => t.name == name);
+          final annotations = tool.toolAnnotations;
+          expect(annotations, isNotNull, reason: '$name should have annotations');
+          if (annotations == null) continue;
+          expect(
+            annotations.readOnlyHint,
+            isTrue,
+            reason: '$name should declare readOnlyHint: true',
+          );
+          expect(
+            annotations.openWorldHint,
+            isTrue,
+            reason: '$name should declare openWorldHint: true',
+          );
+        }
       });
     });
 
@@ -546,7 +617,7 @@ void main() {
         );
 
         await serverConnection.callTool(
-          CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+          CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
         );
         clearInteractions(mockHttp);
 
@@ -662,13 +733,13 @@ void main() {
     });
 
     test(
-      'a schema-violating names list on compare_packages is rejected before any fetch',
+      'a schema-violating packages list on compare_packages is rejected before any fetch',
       () async {
         final result = await serverConnection.callTool(
           CallToolRequest(
             name: 'compare_packages',
             arguments: {
-              'names': ['http'],
+              'packages': ['http'],
             },
           ),
         );
@@ -687,7 +758,7 @@ void main() {
       );
 
       final result = await serverConnection.callTool(
-        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+        CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
       );
 
       expect(result.isError, isNull);
@@ -774,7 +845,7 @@ void main() {
         jsonDecode((result.content.single as TextContent).text) as Map<String, Object?>;
 
     Future<CallToolResult> listHttpVersions() => serverConnection.callTool(
-      CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+      CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
     );
 
     test('appears on the first eligible response when a newer version exists', () async {
@@ -800,6 +871,21 @@ void main() {
 
       expect(decodeBody(result), isNot(contains('dartPubdevMcpUpdate')));
     });
+
+    test(
+      'never appears in structuredContent, which keeps conforming to outputSchema',
+      () async {
+        stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+        stubPackageInfo(mockHttp);
+        await startServer();
+
+        final result = await listHttpVersions();
+
+        expect(decodeBody(result), contains('dartPubdevMcpUpdate'));
+        expect(result.structuredContent, isNot(contains('dartPubdevMcpUpdate')));
+        expectConformsToOutputSchema(listPackageVersionsTool, result.structuredContent);
+      },
+    );
 
     test('appears at most once per session', () async {
       stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
@@ -851,7 +937,7 @@ void main() {
       await startServer();
 
       final errorResult = await serverConnection.callTool(
-        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'missing-package'}),
+        CallToolRequest(name: 'list_package_versions', arguments: {'package': 'missing-package'}),
       );
       expect(errorResult.isError, isTrue);
       expect(decodeBody(errorResult), isNot(contains('dartPubdevMcpUpdate')));

@@ -206,7 +206,7 @@ final class PackageResourcesHandler {
     name: 'Package changelog',
     description:
         'Read this for the complete, unstructured changelog text. '
-        'Prefer get_changelog when you need structured entries with from_version filtering and breaking flags. '
+        'Prefer get_changelog when you need structured entries with fromVersion filtering and breaking flags. '
         'Use this only when you need the full raw markdown.',
     mimeType: 'text/markdown',
   );

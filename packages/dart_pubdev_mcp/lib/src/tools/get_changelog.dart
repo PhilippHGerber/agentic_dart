@@ -35,9 +35,9 @@ const _noDocumentation = DomainError(
 
 const _invalidInput = DomainError(
   code: DomainErrors.invalidArgument,
-  message: 'The from_version value is older than all entries in the changelog.',
+  message: 'The fromVersion value is older than all entries in the changelog.',
   suggestion:
-      'Supply a from_version that appears in the changelog, or omit it '
+      'Supply a fromVersion that appears in the changelog, or omit it '
       'to retrieve the most recent entries.',
 );
 
@@ -79,14 +79,14 @@ final class GetChangelogHandler {
   /// [CallToolResult.isError] `true` on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
-    final name = (args['name'] as String?) ?? '';
-    final versionLimit = (args['version_limit'] as int?) ?? 5;
-    final fromVersion = args['from_version'] as String?;
+    final package = (args['package'] as String?) ?? '';
+    final versionLimit = (args['limit'] as int?) ?? 5;
+    final fromVersion = args['fromVersion'] as String?;
 
     _log(
       LoggingLevel.info,
-      'get_changelog: name=$name'
-      '${fromVersion != null ? ' from_version=$fromVersion' : ''}',
+      'get_changelog: package=$package'
+      '${fromVersion != null ? ' fromVersion=$fromVersion' : ''}',
     );
 
     // Trade-off: we resolve latest-stable up front on every call, even on a
@@ -95,7 +95,7 @@ final class GetChangelogHandler {
     // version from the changelog instead would be unsound — the newest heading
     // may be a pre-release, not the latest stable.
     final String resolvedVersion;
-    switch (await _versionResolver.resolve(package: name, tool: 'get_changelog')) {
+    switch (await _versionResolver.resolve(package: package, tool: 'get_changelog')) {
       case PubDevFailure(:final error):
         return ToolResponse.error(error);
       case PubDevSuccess(:final value):
@@ -104,10 +104,10 @@ final class GetChangelogHandler {
 
     // `changelog` is keyed by package name only (no version segment): the full
     // changelog text covers every released version, so one cached parse serves
-    // all `fromVersion`/`versionLimit` queries. `resolvedVersion` only labels
+    // all `fromVersion`/`limit` queries. `resolvedVersion` only labels
     // the response and must not narrow the identity.
     final List<ChangelogEntry> entries;
-    switch (await _changelog.resolve((name: name))) {
+    switch (await _changelog.resolve((name: package))) {
       case PubDevFailure(:final error):
         return ToolResponse.error(error);
       case PubDevSuccess(:final value):

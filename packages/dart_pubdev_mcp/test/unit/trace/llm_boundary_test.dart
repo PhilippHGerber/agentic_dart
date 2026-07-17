@@ -97,7 +97,7 @@ void main() {
         ),
       );
 
-      await wrapped(CallToolRequest(name: 'get_package', arguments: {'name': 'htp'}));
+      await wrapped(CallToolRequest(name: 'get_package', arguments: {'package': 'htp'}));
 
       expect(
         sink.lines.any(

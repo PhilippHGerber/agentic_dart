@@ -178,7 +178,7 @@ void main() {
     _stubGet(stack.http, '/api/packages/htp', _json('', status: 404));
 
     await serverConnection.callTool(
-      CallToolRequest(name: 'get_package', arguments: {'name': 'htp'}),
+      CallToolRequest(name: 'get_package', arguments: {'package': 'htp'}),
     );
 
     final lines = traceLines();

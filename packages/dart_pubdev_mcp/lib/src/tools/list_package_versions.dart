@@ -29,8 +29,8 @@ import 'tool_response.dart';
 
 const _missingName = DomainError(
   code: DomainErrors.invalidArgument,
-  message: 'name must be a non-empty package name.',
-  suggestion: 'Provide the package name as the name argument.',
+  message: 'package must be a non-empty package name.',
+  suggestion: 'Provide the package name as the package argument.',
 );
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -62,21 +62,21 @@ final class ListPackageVersionsHandler {
   /// failure — including [DomainErrors.packageNotFound] for unknown packages.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
-    final name = (args['name'] as String?) ?? '';
+    final package = (args['package'] as String?) ?? '';
 
-    if (name.isEmpty) return ToolResponse.error(_missingName);
+    if (package.isEmpty) return ToolResponse.error(_missingName);
 
-    _log(LoggingLevel.info, 'list_package_versions: name=$name');
+    _log(LoggingLevel.info, 'list_package_versions: package=$package');
 
-    switch (await _versionList.resolve((name: name))) {
+    switch (await _versionList.resolve((name: package))) {
       case PubDevFailure(:final error):
         _log(
           LoggingLevel.warning,
-          'list_package_versions: failed name=$name error=${error.code}',
+          'list_package_versions: failed package=$package error=${error.code}',
         );
         return ToolResponse.error(error);
       case PubDevSuccess(:final value):
-        return _success(name, value);
+        return _success(package, value);
     }
   }
 

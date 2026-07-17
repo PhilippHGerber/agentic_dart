@@ -11,6 +11,7 @@ import 'package:dart_pubdev_mcp/src/data/domain_error.dart';
 import 'package:dart_pubdev_mcp/src/data/models.dart';
 import 'package:dart_pubdev_mcp/src/tools/get_source_slice.dart';
 import 'package:dart_pubdev_mcp/src/tools/get_throw_statements.dart';
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show getThrowStatementsTool;
 import 'package:dart_pubdev_mcp/src/tools/version_resolver.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
@@ -18,6 +19,7 @@ import 'package:test/test.dart';
 
 import '../../support/harness.dart';
 import '../../support/pub_stubs.dart';
+import '../../support/schema_conformance.dart';
 
 // ─── Dart source fixtures ─────────────────────────────────────────────────────
 
@@ -344,6 +346,14 @@ void main() {
         expect(record, contains('thrown_type'));
         expect(record, contains('context'));
       }
+    });
+
+    test('structuredContent conforms to the declared outputSchema', () async {
+      final result = await buildHandler().call(
+        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+      );
+
+      expectConformsToOutputSchema(getThrowStatementsTool, result.structuredContent);
     });
 
     test('all records have class set to the scanned class name', () async {

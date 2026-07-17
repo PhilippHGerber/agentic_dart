@@ -103,6 +103,7 @@ base class PubMcpServer extends MCPServer
        super.fromStreamChannel(
          implementation: Implementation(
            name: kMcpServerIdentity,
+           title: kMcpServerTitle,
            version: packageVersion,
          ),
          instructions: kServerInstructions,
@@ -310,6 +311,12 @@ base class PubMcpServer extends MCPServer
   ///   - [result]'s body is not a single JSON object — covers
   ///     `search_packages`'s bare JSON array, which defers to the next
   ///     eligible call rather than dropping the notice.
+  ///
+  /// The notice is added to the text block only, never to
+  /// `structuredContent` — it is not part of any tool's declared
+  /// `outputSchema`, so folding it in would make `structuredContent` stop
+  /// conforming to that schema. [result]'s own `structuredContent` (if any)
+  /// is carried over unchanged.
   CallToolResult _insertUpdateNoticeIfEligible(CallToolResult result) {
     final notice = _pendingUpdateNotice;
     if (notice == null || (result.isError ?? false)) return result;
@@ -330,6 +337,7 @@ base class PubMcpServer extends MCPServer
       content: [
         TextContent(text: jsonEncode({...decoded, 'dartPubdevMcpUpdate': notice})),
       ],
+      structuredContent: result.structuredContent,
       isError: result.isError,
     );
   }

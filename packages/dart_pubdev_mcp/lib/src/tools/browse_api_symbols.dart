@@ -2,7 +2,7 @@
 ///
 /// Searches the dartdoc symbol index (`index.json`) of a pub.dev package for
 /// matching API symbols, ranking exact [DartdocSymbol.name] matches before
-/// [DartdocSymbol.desc]-only matches. An optional `type` filter is applied
+/// [DartdocSymbol.desc]-only matches. An optional `kind` filter is applied
 /// after ranking. Results are capped at `limit`.
 ///
 /// When `version` is omitted the handler resolves the latest stable version
@@ -17,7 +17,7 @@
 ///
 /// Domain errors:
 /// - `NO_DOCUMENTATION`: `index.json` is missing or empty for the package.
-/// - `NO_RESULTS`: the query or type filter yields zero matching symbols.
+/// - `NO_RESULTS`: the query or kind filter yields zero matching symbols.
 /// - `INVALID_ARGUMENT`: `limit` exceeds 25.
 ///
 /// See `issues/pub-dev-mcp/09-search-api-symbols-tool.md`.
@@ -61,7 +61,7 @@ final class BrowseApiSymbolsHandler {
   /// Resolves the version (via [VersionResolver] when absent) and resolves the
   /// dartdoc symbol index through `apiIndex`. Exact
   /// [DartdocSymbol.name] matches are ranked before [DartdocSymbol.desc]-only
-  /// matches; the optional `type` filter is applied after ranking. Returns
+  /// matches; the optional `kind` filter is applied after ranking. Returns
   /// [CallToolResult.isError] `true` with a structured JSON payload on any
   /// domain failure. `limit` is capped at 25 by the tool's input schema.
   Future<CallToolResult> call(CallToolRequest request) async {
@@ -69,7 +69,7 @@ final class BrowseApiSymbolsHandler {
 
     final package = (args['package'] as String?) ?? '';
     final query = (args['query'] as String?) ?? '';
-    final type = args['type'] as String?;
+    final kind = args['kind'] as String?;
     final limit = (args['limit'] as int?) ?? 10;
     final suppliedVersion = args['version'] as String?;
 
@@ -98,7 +98,7 @@ final class BrowseApiSymbolsHandler {
     final result = await _apiIndex.resolve((name: package, version: resolvedVersion));
 
     return switch (result) {
-      PubDevSuccess(:final value) => _buildResponse(value, query, type, limit, resolvedVersion),
+      PubDevSuccess(:final value) => _buildResponse(value, query, kind, limit, resolvedVersion),
       PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }
@@ -110,7 +110,7 @@ final class BrowseApiSymbolsHandler {
   CallToolResult _buildResponse(
     List<DartdocSymbol> symbols,
     String query,
-    String? type,
+    String? kind,
     int limit,
     String resolvedVersion,
   ) {
@@ -129,14 +129,14 @@ final class BrowseApiSymbolsHandler {
     }
 
     final ranked = [...nameMatches, ...descMatches];
-    final filtered = type != null ? ranked.where((s) => s.type == type).toList() : ranked;
+    final filtered = kind != null ? ranked.where((s) => s.type == kind).toList() : ranked;
 
     if (filtered.isEmpty) {
       return ToolResponse.error(
         const DomainError(
           code: DomainErrors.noResults,
-          message: 'No symbols matched the query or type filter.',
-          suggestion: 'Try a broader query, remove the type filter, or verify the package name.',
+          message: 'No symbols matched the query or kind filter.',
+          suggestion: 'Try a broader query, remove the kind filter, or verify the package name.',
         ),
       );
     }

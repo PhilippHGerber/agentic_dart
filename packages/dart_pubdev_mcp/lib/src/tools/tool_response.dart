@@ -27,6 +27,12 @@ abstract final class ToolResponse {
   /// invariant every version-accepting tool response carries. [payload] must
   /// be a `Map<String, Object?>` in that case. Omit [resolvedVersion] for the
   /// two version-agnostic tools, `search_packages` and `compare_packages`.
+  ///
+  /// When the resulting body is a `Map<String, Object?>`, it is also set as
+  /// `CallToolResult.structuredContent`, conforming to the tool's declared
+  /// `outputSchema` (every tool but `search_packages`, whose bare-array body
+  /// cannot be represented as `structuredContent`, which the spec types as an
+  /// object).
   static CallToolResult ok(Object payload, {String? resolvedVersion}) {
     final Object body;
     if (resolvedVersion == null) {
@@ -34,7 +40,10 @@ abstract final class ToolResponse {
     } else {
       body = {'resolvedVersion': resolvedVersion, ...payload as Map<String, Object?>};
     }
-    return CallToolResult(content: [TextContent(text: jsonEncode(body))]);
+    return CallToolResult(
+      content: [TextContent(text: jsonEncode(body))],
+      structuredContent: body is Map<String, Object?> ? body : null,
+    );
   }
 
   /// Builds an ADR-0002 Tool Error [CallToolResult] for [error].

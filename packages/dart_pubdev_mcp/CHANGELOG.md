@@ -3,6 +3,26 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0]
+
+### Changed
+
+- **Breaking:** unified parameter naming across the tool surface — package
+  name is now always `package`/`packages`, multi-word parameters use
+  camelCase, result caps are `limit`, and the symbol-kind filter is
+  `kind`. No aliases: old names now fail with `INVALID_ARGUMENT`.
+  - `get_package`, `get_changelog`, `list_package_versions`,
+    `list_package_source_files`: `name` → `package`
+  - `compare_packages`: `names` → `packages`
+  - `get_changelog`: `from_version` → `fromVersion`; `version_limit` → `limit`
+  - `browse_api_symbols`: `type` → `kind`
+
+### Added
+
+- Tool responses now include `structuredContent` matching each tool's new
+  `outputSchema` (all tools except `search_packages`), for clients that
+  want to validate results against a typed contract.
+
 ## [0.5.2]
 
 ### Added

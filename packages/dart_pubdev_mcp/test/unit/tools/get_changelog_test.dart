@@ -112,7 +112,7 @@ void main() {
     test('returns a JSON list without isError set', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(result.isError, isNull);
     });
@@ -120,7 +120,7 @@ void main() {
     test('returns three entries for the default changelog', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result), hasLength(3));
     });
@@ -128,7 +128,7 @@ void main() {
     test('first entry version is 2.0.0', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).first['version'], equals('2.0.0'));
     });
@@ -136,7 +136,7 @@ void main() {
     test('entries are ordered newest-first', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
       final versions = _entries(result).map((e) => e['version']).toList();
 
       expect(versions, equals(['2.0.0', '1.5.0', '1.0.0']));
@@ -145,7 +145,7 @@ void main() {
     test('breaking flag is true for an entry containing "breaking"', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).first['breaking'], isTrue);
     });
@@ -153,7 +153,7 @@ void main() {
     test('breaking flag is false for an entry without "breaking"', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result)[1]['breaking'], isFalse);
     });
@@ -162,7 +162,7 @@ void main() {
       const html = '<h2>1.0.0</h2><p>BREAKING CHANGE: new API.</p>';
       _stubSuccess(mockHttp, html: html);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).first['breaking'], isTrue);
     });
@@ -171,7 +171,7 @@ void main() {
       const html = '<h2>3.0.0</h2><p>Changes.</p>';
       _stubSuccess(mockHttp, html: html);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).first['version'], equals('3.0.0'));
     });
@@ -179,7 +179,7 @@ void main() {
     test('parses ## [1.2.3] bracketed heading format', () async {
       _stubSuccess(mockHttp, html: _bracketedChangelogHtml);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).first['version'], equals('2.0.0'));
     });
@@ -187,7 +187,7 @@ void main() {
     test('bracketed format strips the brackets from the version string', () async {
       _stubSuccess(mockHttp, html: _bracketedChangelogHtml);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
       final versions = _entries(result).map((e) => e['version']).toList();
 
       expect(versions, equals(['2.0.0', '1.0.0']));
@@ -200,7 +200,7 @@ void main() {
 ''';
       _stubSuccess(mockHttp, html: html);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
       final versions = _entries(result).map((e) => e['version']).toList();
 
       expect(versions, equals(['2.0.0', '1.0.0']));
@@ -209,7 +209,7 @@ void main() {
     test('each entry includes a changes field', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).every((e) => e.containsKey('changes')), isTrue);
     });
@@ -217,7 +217,7 @@ void main() {
     test('each entry includes a breaking field', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).every((e) => e.containsKey('breaking')), isTrue);
     });
@@ -229,7 +229,7 @@ void main() {
     test('is present and equals the resolved latest stable version', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_resolvedVersion(result), equals('1.6.0'));
     });
@@ -238,18 +238,18 @@ void main() {
       _stubSuccess(mockHttp);
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
       fakeNow = fakeNow.add(const Duration(minutes: 14));
-      final result = await handler.call(_request({'name': 'http'}));
+      final result = await handler.call(_request({'package': 'http'}));
 
       expect(_resolvedVersion(result), equals('1.6.0'));
     });
   });
 
-  // ─── version_limit ────────────────────────────────────────────────────────────
+  // ─── limit ────────────────────────────────────────────────────────────
 
-  group('version_limit', () {
-    test('defaults to 5 entries when version_limit is absent', () async {
+  group('limit', () {
+    test('defaults to 5 entries when limit is absent', () async {
       const html = '''
 <h2>5.0.0</h2><p>v5.</p>
 <h2>4.0.0</h2><p>v4.</p>
@@ -260,26 +260,26 @@ void main() {
 ''';
       _stubSuccess(mockHttp, html: html);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result), hasLength(5));
     });
 
-    test('caps entries at a custom version_limit', () async {
+    test('caps entries at a custom limit', () async {
       _stubSuccess(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'version_limit': 2}),
+        _request({'package': 'http', 'limit': 2}),
       );
 
       expect(_entries(result), hasLength(2));
     });
 
-    test('returns all entries when version_limit exceeds the changelog size', () async {
+    test('returns all entries when limit exceeds the changelog size', () async {
       _stubSuccess(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'version_limit': 100}),
+        _request({'package': 'http', 'limit': 100}),
       );
 
       expect(_entries(result), hasLength(3));
@@ -292,7 +292,7 @@ void main() {
     test('returns isError true when changelog has no version headings', () async {
       _stubSuccess(mockHttp, html: _noHeadingsHtml);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(result.isError, isTrue);
     });
@@ -300,7 +300,7 @@ void main() {
     test('error code is no_documentation when no headings found', () async {
       _stubSuccess(mockHttp, html: _noHeadingsHtml);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_errorPayload(result)['code'], equals(DomainErrors.noDocumentation));
     });
@@ -308,20 +308,20 @@ void main() {
     test('error payload contains a suggestion', () async {
       _stubSuccess(mockHttp, html: _noHeadingsHtml);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_errorPayload(result), contains('suggestion'));
     });
   });
 
-  // ─── from_version found ───────────────────────────────────────────────────────
+  // ─── fromVersion found ───────────────────────────────────────────────────────
 
-  group('from_version found in changelog', () {
+  group('fromVersion found in changelog', () {
     test('excludes the boundary version and returns newer entries', () async {
       _stubSuccess(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'from_version': '1.5.0'}),
+        _request({'package': 'http', 'fromVersion': '1.5.0'}),
       );
 
       expect(
@@ -334,7 +334,7 @@ void main() {
       _stubSuccess(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'from_version': '1.0.0'}),
+        _request({'package': 'http', 'fromVersion': '1.0.0'}),
       );
 
       expect(
@@ -343,18 +343,18 @@ void main() {
       );
     });
 
-    test('returns empty list when from_version is the newest entry', () async {
+    test('returns empty list when fromVersion is the newest entry', () async {
       _stubSuccess(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'from_version': '2.0.0'}),
+        _request({'package': 'http', 'fromVersion': '2.0.0'}),
       );
 
       expect(result.isError, isNull);
       expect(_entries(result), isEmpty);
     });
 
-    test('version_limit is applied after from_version boundary', () async {
+    test('limit is applied after fromVersion boundary', () async {
       const html = '''
 <h2>4.0.0</h2><p>v4.</p>
 <h2>3.0.0</h2><p>v3.</p>
@@ -364,7 +364,7 @@ void main() {
       _stubSuccess(mockHttp, html: html);
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'from_version': '1.0.0', 'version_limit': 2}),
+        _request({'package': 'http', 'fromVersion': '1.0.0', 'limit': 2}),
       );
 
       expect(
@@ -374,15 +374,15 @@ void main() {
     });
   });
 
-  // ─── from_version not found ───────────────────────────────────────────────────
+  // ─── fromVersion not found ───────────────────────────────────────────────────
 
-  group('from_version not found in changelog', () {
+  group('fromVersion not found in changelog', () {
     test('uses next-older heading as boundary', () async {
       _stubSuccess(mockHttp);
 
       // 1.7.0 not in list; next-older is 1.5.0 → exclude 1.5.0 and 1.0.0
       final result = await buildHandler().call(
-        _request({'name': 'http', 'from_version': '1.7.0'}),
+        _request({'package': 'http', 'fromVersion': '1.7.0'}),
       );
 
       expect(
@@ -396,7 +396,7 @@ void main() {
 
       // 0.1.0 is older than all entries
       final result = await buildHandler().call(
-        _request({'name': 'http', 'from_version': '0.1.0'}),
+        _request({'package': 'http', 'fromVersion': '0.1.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -407,7 +407,7 @@ void main() {
       _stubSuccess(mockHttp);
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'from_version': '0.1.0'}),
+        _request({'package': 'http', 'fromVersion': '0.1.0'}),
       );
 
       expect(_errorPayload(result), contains('suggestion'));
@@ -421,9 +421,9 @@ void main() {
       _stubSuccess(mockHttp);
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
       fakeNow = fakeNow.add(const Duration(minutes: 14));
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
 
       verify(
         () => mockHttp.get(
@@ -437,14 +437,14 @@ void main() {
       ).called(1);
     });
 
-    test('cache hit applies from_version filter to cached entries', () async {
+    test('cache hit applies fromVersion filter to cached entries', () async {
       _stubSuccess(mockHttp);
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
       fakeNow = fakeNow.add(const Duration(minutes: 14));
       final result = await handler.call(
-        _request({'name': 'http', 'from_version': '1.5.0'}),
+        _request({'package': 'http', 'fromVersion': '1.5.0'}),
       );
 
       expect(result.isError, isNull);
@@ -458,9 +458,9 @@ void main() {
       _stubSuccess(mockHttp, html: _noHeadingsHtml);
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
       fakeNow = fakeNow.add(const Duration(minutes: 14));
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
 
       verify(
         () => mockHttp.get(
@@ -481,12 +481,12 @@ void main() {
     test('logs an info HTTP-request message containing the package name', () async {
       _stubSuccess(mockHttp);
 
-      await buildHandler().call(_request({'name': 'http'}));
+      await buildHandler().call(_request({'package': 'http'}));
 
       final infoLogs = loggedMessages
           .where((m) => m.$1 == LoggingLevel.info)
           .map((m) => m.$2.toString());
-      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
+      expect(infoLogs.any((m) => m.contains('package=http')), isTrue);
     });
   });
 
@@ -513,7 +513,7 @@ void main() {
         response: notFound(),
       );
 
-      final result = await buildHandler().call(_request({'name': 'unknown'}));
+      final result = await buildHandler().call(_request({'package': 'unknown'}));
 
       expect(result.isError, isTrue);
     });
@@ -526,7 +526,7 @@ void main() {
         response: notFound(),
       );
 
-      final result = await buildHandler().call(_request({'name': 'unknown'}));
+      final result = await buildHandler().call(_request({'package': 'unknown'}));
 
       expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
@@ -540,8 +540,8 @@ void main() {
       );
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'unknown'}));
-      await handler.call(_request({'name': 'unknown'}));
+      await handler.call(_request({'package': 'unknown'}));
+      await handler.call(_request({'package': 'unknown'}));
 
       verify(
         () => mockHttp.get(
@@ -568,7 +568,7 @@ void main() {
     test('propagates package_not_found when version resolution returns 404', () async {
       stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: notFound());
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
@@ -577,7 +577,7 @@ void main() {
     test('does not fetch the changelog page when resolution fails', () async {
       stubUrl(mock: mockHttp, urlFragment: '/api/packages/http', response: notFound());
 
-      await buildHandler().call(_request({'name': 'http'}));
+      await buildHandler().call(_request({'package': 'http'}));
 
       verifyNever(
         () => mockHttp.get(

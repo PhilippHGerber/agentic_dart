@@ -56,6 +56,18 @@ void main() {
         ]),
       );
     });
+
+    test('sets structuredContent to the Map body, matching the text content', () {
+      final result = ToolResponse.ok({'package': 'http'}, resolvedVersion: '1.2.0');
+      expect(result.structuredContent, equals(jsonDecode(_text(result))));
+    });
+
+    test('leaves structuredContent null for a bare List payload', () {
+      final result = ToolResponse.ok([
+        {'name': 'http'},
+      ]);
+      expect(result.structuredContent, isNull);
+    });
   });
 
   group('ToolResponse.error', () {

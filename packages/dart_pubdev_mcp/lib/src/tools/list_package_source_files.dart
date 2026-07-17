@@ -38,7 +38,7 @@ final class ListPackageSourceFilesHandler {
   /// Handles a [CallToolRequest] for `list_package_source_files`.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
-    final name = (args['name'] as String?) ?? '';
+    final package = (args['package'] as String?) ?? '';
     final suppliedVersion = args['version'] as String?;
     final rawDirectory = args['directory'] as String?;
     final fileExtension = args['fileExtension'] as String?;
@@ -47,7 +47,7 @@ final class ListPackageSourceFilesHandler {
 
     final String resolvedVersion;
     switch (await _versionResolver.resolve(
-      package: name,
+      package: package,
       supplied: suppliedVersion,
       tool: 'list_package_source_files',
     )) {
@@ -59,13 +59,13 @@ final class ListPackageSourceFilesHandler {
 
     _log(
       LoggingLevel.info,
-      'list_package_source_files: name=$name version=$resolvedVersion'
+      'list_package_source_files: package=$package version=$resolvedVersion'
       '${rawDirectory != null ? ' directory=$rawDirectory' : ''}'
       '${fileExtension != null ? ' ext=$fileExtension' : ''}',
     );
 
     final Map<String, String> files;
-    switch (await _sourceFiles.resolve((name: name, version: resolvedVersion))) {
+    switch (await _sourceFiles.resolve((name: package, version: resolvedVersion))) {
       case PubDevFailure(:final error):
         return ToolResponse.error(error);
       case PubDevSuccess(:final value):
@@ -83,7 +83,7 @@ final class ListPackageSourceFilesHandler {
     }
 
     paths.sort();
-    return ToolResponse.ok({'name': name, 'files': paths}, resolvedVersion: resolvedVersion);
+    return ToolResponse.ok({'name': package, 'files': paths}, resolvedVersion: resolvedVersion);
   }
 
   static String? _normalizeDirectory(String? raw) {

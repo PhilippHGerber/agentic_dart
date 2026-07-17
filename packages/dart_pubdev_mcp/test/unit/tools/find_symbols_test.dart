@@ -9,12 +9,14 @@ import 'package:dart_pubdev_mcp/src/cache/keyed_cache.dart';
 import 'package:dart_pubdev_mcp/src/data/domain_error.dart';
 import 'package:dart_pubdev_mcp/src/data/models.dart';
 import 'package:dart_pubdev_mcp/src/tools/find_symbols.dart';
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show findSymbolsTool;
 import 'package:dart_pubdev_mcp/src/tools/version_resolver.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
 import '../../support/pub_stubs.dart';
+import '../../support/schema_conformance.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -148,6 +150,17 @@ void main() {
       );
       expect(match['kind'], equals('class'));
       expect(match['library'], equals('package:http/browser_client.dart'));
+    });
+
+    test('structuredContent conforms to the declared outputSchema', () async {
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'query': 'client'}),
+      );
+
+      expectConformsToOutputSchema(findSymbolsTool, result.structuredContent);
     });
 
     test('a class reports a null enclosedBy', () async {

@@ -72,7 +72,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -83,7 +83,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'version': '1.0.0'}),
       );
 
       final payload = _payload(result);
@@ -95,7 +95,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'version': '1.0.0'}),
       );
 
       final files = _files(result);
@@ -110,7 +110,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0', 'directory': 'lib/src/'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'directory': 'lib/src/'}),
       );
 
       for (final path in _files(result)) {
@@ -122,7 +122,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0', 'directory': 'lib/src'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'directory': 'lib/src'}),
       );
 
       expect(_files(result), hasLength(3));
@@ -132,7 +132,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0', 'directory': 'lib/src/server/'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'directory': 'lib/src/server/'}),
       );
 
       expect(_files(result), equals(['lib/src/server/server.dart']));
@@ -146,7 +146,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
       );
 
       for (final path in _files(result)) {
@@ -158,7 +158,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
-        _request({'name': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
       );
 
       expect(_files(result).any((p) => p.endsWith('.md')), isFalse);
@@ -177,7 +177,7 @@ void main() {
 
       final result = await buildHandler().call(
         _request({
-          'name': 'foo',
+          'package': 'foo',
           'version': '1.0.0',
           'directory': 'lib/src/',
           'fileExtension': '.dart',
@@ -196,7 +196,7 @@ void main() {
       stubTarball(mockHttp, _defaultFiles, version: '2.0.0');
 
       final result = await buildHandler().call(
-        _request({'name': 'foo'}),
+        _request({'package': 'foo'}),
       );
 
       expect(result.isError, isNull);
@@ -232,7 +232,7 @@ void main() {
     test('propagates package_not_found when resolution returns 404', () async {
       stubResolve404();
 
-      final result = await buildHandler().call(_request({'name': 'missing'}));
+      final result = await buildHandler().call(_request({'package': 'missing'}));
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
@@ -241,7 +241,7 @@ void main() {
     test('does not download the tarball when resolution fails', () async {
       stubResolve404();
 
-      await buildHandler().call(_request({'name': 'missing'}));
+      await buildHandler().call(_request({'package': 'missing'}));
 
       verifyNever(() => mockHttp.send(any()));
     });
@@ -262,7 +262,7 @@ void main() {
       ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 404));
 
       final result = await buildHandler().call(
-        _request({'name': 'missing', 'version': '1.0.0'}),
+        _request({'package': 'missing', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -293,7 +293,7 @@ void main() {
       );
 
       final result = await buildHandler().call(
-        _request({'name': 'too_big', 'version': '1.0.0'}),
+        _request({'package': 'too_big', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -308,8 +308,8 @@ void main() {
       stubTarball(mockHttp, _defaultFiles);
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
-      await handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
+      await handler.call(_request({'package': 'foo', 'version': '1.0.0'}));
+      await handler.call(_request({'package': 'foo', 'version': '1.0.0'}));
 
       verify(
         () => mockHttp.send(
@@ -342,8 +342,8 @@ void main() {
       // `_http.send` only AFTER it has written the in-flight Completer into the
       // cache; f2 therefore sees a cache hit and joins the same Future rather
       // than issuing its own HTTP request.
-      final f1 = handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
-      final f2 = handler.call(_request({'name': 'foo', 'version': '1.0.0'}));
+      final f1 = handler.call(_request({'package': 'foo', 'version': '1.0.0'}));
+      final f2 = handler.call(_request({'package': 'foo', 'version': '1.0.0'}));
 
       // Deliver the response now that both calls are suspended on the shared
       // future.

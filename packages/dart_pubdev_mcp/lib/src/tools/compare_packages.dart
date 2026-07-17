@@ -55,16 +55,18 @@ final class ComparePackagesHandler {
 
   /// Handles a [CallToolRequest] for `compare_packages`.
   ///
-  /// `names` is capped at 2–5 entries by the tool's input schema. Fetches the
-  /// packages concurrently; the pub.dev client's concurrency limiter (reached
-  /// through `versionResolver` and `packageDetail`) bounds how many requests
-  /// are in flight at once. Returns [CallToolResult.isError] `true` when all
-  /// packages fail.
+  /// `packages` is capped at 2–5 entries by the tool's input schema. Fetches
+  /// the packages concurrently; the pub.dev client's concurrency limiter
+  /// (reached through `versionResolver` and `packageDetail`) bounds how many
+  /// requests are in flight at once. Returns [CallToolResult.isError] `true`
+  /// when all packages fail.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
-    final names = ((args['names'] as List<Object?>?) ?? const []).whereType<String>().toList();
+    final packages = ((args['packages'] as List<Object?>?) ?? const [])
+        .whereType<String>()
+        .toList();
 
-    _log(LoggingLevel.info, 'compare_packages: names=${names.join(',')}');
+    _log(LoggingLevel.info, 'compare_packages: packages=${packages.join(',')}');
 
     final errors = <String, String>{};
     final details = <String, PackageDetail>{};
@@ -72,18 +74,18 @@ final class ComparePackagesHandler {
     // Fetch all packages concurrently; the PubDevClient concurrency limiter
     // bounds how many requests are actually in flight at any moment. Results
     // are folded back in request order so the response is deterministic.
-    final results = await Future.wait(names.map(_fetchPackage));
-    for (var i = 0; i < names.length; i++) {
-      final name = names[i];
+    final results = await Future.wait(packages.map(_fetchPackage));
+    for (var i = 0; i < packages.length; i++) {
+      final package = packages[i];
       switch (results[i]) {
         case PubDevSuccess(:final value):
-          details[name] = value;
+          details[package] = value;
         case PubDevFailure(:final error):
           _log(
             LoggingLevel.warning,
-            'compare_packages: failed name=$name error=${error.code}',
+            'compare_packages: failed package=$package error=${error.code}',
           );
-          errors[name] = error.code;
+          errors[package] = error.code;
       }
     }
 
@@ -99,7 +101,7 @@ final class ComparePackagesHandler {
 
     return ToolResponse.ok(
       _ComparisonMatrix(
-        packages: names,
+        packages: packages,
         errors: errors,
         matrix: _buildMatrix(details),
       ).toJson(),
@@ -120,10 +122,10 @@ final class ComparePackagesHandler {
   /// comparison rather than demote a single package into the `errors` map.
   /// Guaranteeing a [PubDevResult] return keeps the documented
   /// graceful-degradation contract intact.
-  Future<PubDevResult<PackageDetail>> _fetchPackage(String name) async {
+  Future<PubDevResult<PackageDetail>> _fetchPackage(String package) async {
     try {
       final versionResult = await _versionResolver.resolve(
-        package: name,
+        package: package,
         tool: 'compare_packages',
       );
       switch (versionResult) {
@@ -131,7 +133,7 @@ final class ComparePackagesHandler {
           return PubDevFailure(error);
         case PubDevSuccess(:final value):
           return await _packageDetail.resolve((
-            name: name,
+            name: package,
             version: value,
             pinned: false,
           ));
@@ -139,7 +141,7 @@ final class ComparePackagesHandler {
     } on Object catch (error) {
       _log(
         LoggingLevel.warning,
-        'compare_packages: unexpected error name=$name error=$error',
+        'compare_packages: unexpected error package=$package error=$error',
       );
       return const PubDevFailure(
         DomainError(

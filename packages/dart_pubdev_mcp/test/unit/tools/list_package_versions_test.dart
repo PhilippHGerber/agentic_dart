@@ -16,7 +16,7 @@ import '../../support/harness.dart';
 
 /// Creates a [CallToolRequest] for `list_package_versions` with [name].
 CallToolRequest _request(String name) =>
-    CallToolRequest(name: 'list_package_versions', arguments: {'name': name});
+    CallToolRequest(name: 'list_package_versions', arguments: {'package': name});
 
 /// Decodes the first content item of [result] as a JSON map.
 Map<String, Object?> _payload(CallToolResult result) =>

@@ -9,11 +9,13 @@ import 'package:dart_pubdev_mcp/src/cache/keyed_cache.dart';
 import 'package:dart_pubdev_mcp/src/data/domain_error.dart';
 import 'package:dart_pubdev_mcp/src/data/models.dart';
 import 'package:dart_pubdev_mcp/src/tools/get_package.dart';
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show getPackageTool;
 import 'package:dart_pubdev_mcp/src/tools/version_resolver.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/schema_conformance.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -111,7 +113,7 @@ void main() {
     test('returns a JSON object without isError set', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(result.isError, isNull);
     });
@@ -119,15 +121,23 @@ void main() {
     test('result contains the package name', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['name'], equals('http'));
+    });
+
+    test('structuredContent conforms to the declared outputSchema', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expectConformsToOutputSchema(getPackageTool, result.structuredContent);
     });
 
     test('result contains the version field', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['version'], equals('1.6.0'));
     });
@@ -135,7 +145,7 @@ void main() {
     test('result contains the description field', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['description'], isNotEmpty);
     });
@@ -143,7 +153,7 @@ void main() {
     test('result contains activeMaintenance field', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result), contains('activeMaintenance'));
     });
@@ -151,7 +161,7 @@ void main() {
     test('result contains likes from score', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['likes'], equals(8435));
     });
@@ -159,7 +169,7 @@ void main() {
     test('result contains pubPoints from score', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['pubPoints'], equals(160));
     });
@@ -167,7 +177,7 @@ void main() {
     test('result contains sdkConstraints with dart field', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
       final constraints = _detail(result)['sdkConstraints']! as Map<String, Object?>;
 
       expect(constraints, contains('dart'));
@@ -176,7 +186,7 @@ void main() {
     test('result contains platforms list', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['platforms'], isA<List<Object?>>());
     });
@@ -184,7 +194,7 @@ void main() {
     test('result contains dependencies map', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['dependencies'], isA<Map<String, Object?>>());
     });
@@ -192,7 +202,7 @@ void main() {
     test('result contains devDependencies map', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['devDependencies'], isA<Map<String, Object?>>());
     });
@@ -200,7 +210,7 @@ void main() {
     test('result contains versionsRecent as a list', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['versionsRecent'], isA<List<Object?>>());
     });
@@ -208,7 +218,7 @@ void main() {
     test('versionsRecent contains at most five entries', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
       final versions = _detail(result)['versionsRecent']! as List<Object?>;
 
       expect(versions.length, lessThanOrEqualTo(5));
@@ -217,7 +227,7 @@ void main() {
     test('versionsRecent is ordered newest-first', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
       final versions = (_detail(result)['versionsRecent']! as List<Object?>).cast<String>();
 
       expect(versions.first, equals('1.6.0'));
@@ -226,7 +236,7 @@ void main() {
     test('result contains publisher from score tags', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['publisher'], equals('dart.dev'));
     });
@@ -234,7 +244,7 @@ void main() {
     test('result contains license from score tags', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['license'], isNotNull);
     });
@@ -242,7 +252,7 @@ void main() {
     test('result contains isFlutterFavorite field', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result), contains('isFlutterFavorite'));
     });
@@ -250,7 +260,7 @@ void main() {
     test('result contains repository from pubspec', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['repository'], isNotNull);
     });
@@ -262,7 +272,7 @@ void main() {
     test('is absent when the docs page returns 404', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result).containsKey('readmeExcerpt'), isFalse);
     });
@@ -285,7 +295,7 @@ void main() {
         response: ok(readFixture('package_score.json')),
       );
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['readmeExcerpt'], isNotEmpty);
     });
@@ -297,7 +307,7 @@ void main() {
     test('fetches from the versions endpoint when version is supplied', () async {
       _stubVersionSuccess(mockHttp, '1.5.0');
 
-      await buildHandler().call(_request({'name': 'http', 'version': '1.5.0'}));
+      await buildHandler().call(_request({'package': 'http', 'version': '1.5.0'}));
 
       verify(
         () => mockHttp.get(
@@ -314,7 +324,7 @@ void main() {
     test('does not call the unversioned package endpoint when version is supplied', () async {
       _stubVersionSuccess(mockHttp, '1.5.0');
 
-      await buildHandler().call(_request({'name': 'http', 'version': '1.5.0'}));
+      await buildHandler().call(_request({'package': 'http', 'version': '1.5.0'}));
 
       verifyNever(
         () => mockHttp.get(
@@ -334,7 +344,7 @@ void main() {
     test('returns a valid result for a version-pinned request', () async {
       _stubVersionSuccess(mockHttp, '1.5.0');
 
-      final result = await buildHandler().call(_request({'name': 'http', 'version': '1.5.0'}));
+      final result = await buildHandler().call(_request({'package': 'http', 'version': '1.5.0'}));
 
       expect(result.isError, isNull);
       expect(_detail(result)['name'], equals('http'));
@@ -347,7 +357,7 @@ void main() {
     test('equals the resolved latest stable version when version is omitted', () async {
       _stubSuccess(mockHttp);
 
-      final result = await buildHandler().call(_request({'name': 'http'}));
+      final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_resolvedVersion(result), equals('1.6.0'));
     });
@@ -355,7 +365,7 @@ void main() {
     test('echoes the supplied version on a pinned request', () async {
       _stubVersionSuccess(mockHttp, '1.5.0');
 
-      final result = await buildHandler().call(_request({'name': 'http', 'version': '1.5.0'}));
+      final result = await buildHandler().call(_request({'package': 'http', 'version': '1.5.0'}));
 
       expect(_resolvedVersion(result), equals('1.5.0'));
     });
@@ -368,9 +378,9 @@ void main() {
       _stubSuccess(mockHttp);
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
       fakeNow = fakeNow.add(const Duration(minutes: 14));
-      await handler.call(_request({'name': 'http'}));
+      await handler.call(_request({'package': 'http'}));
 
       // First call: resolve (1) + getPackage (2) + score (3).
       // Second call: resolve (4) + cache hit (no fetch).
@@ -387,8 +397,8 @@ void main() {
       _stubVersionSuccess(mockHttp, '1.5.0');
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'http'}));
-      await handler.call(_request({'name': 'http', 'version': '1.5.0'}));
+      await handler.call(_request({'package': 'http'}));
+      await handler.call(_request({'package': 'http', 'version': '1.5.0'}));
 
       verify(
         () => mockHttp.get(
@@ -409,12 +419,12 @@ void main() {
     test('logs an info message containing the package name', () async {
       _stubSuccess(mockHttp);
 
-      await buildHandler().call(_request({'name': 'http'}));
+      await buildHandler().call(_request({'package': 'http'}));
 
       final infoLogs = loggedMessages
           .where((m) => m.$1 == LoggingLevel.info)
           .map((m) => m.$2.toString());
-      expect(infoLogs.any((m) => m.contains('name=http')), isTrue);
+      expect(infoLogs.any((m) => m.contains('package=http')), isTrue);
     });
   });
 
@@ -428,7 +438,7 @@ void main() {
         response: notFound(),
       );
 
-      final result = await buildHandler().call(_request({'name': 'unknown'}));
+      final result = await buildHandler().call(_request({'package': 'unknown'}));
 
       expect(result.isError, isTrue);
     });
@@ -440,7 +450,7 @@ void main() {
         response: notFound(),
       );
 
-      final result = await buildHandler().call(_request({'name': 'unknown'}));
+      final result = await buildHandler().call(_request({'package': 'unknown'}));
 
       expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
@@ -452,7 +462,7 @@ void main() {
         response: notFound(),
       );
 
-      final result = await buildHandler().call(_request({'name': 'unknown'}));
+      final result = await buildHandler().call(_request({'package': 'unknown'}));
 
       expect(_errorPayload(result), contains('suggestion'));
     });
@@ -465,8 +475,8 @@ void main() {
       );
       final handler = buildHandler();
 
-      await handler.call(_request({'name': 'unknown'}));
-      await handler.call(_request({'name': 'unknown'}));
+      await handler.call(_request({'package': 'unknown'}));
+      await handler.call(_request({'package': 'unknown'}));
 
       verify(
         () => mockHttp.get(
@@ -489,7 +499,7 @@ void main() {
       );
 
       final result = await buildHandler().call(
-        _request({'name': 'http', 'version': '9.9.9'}),
+        _request({'package': 'http', 'version': '9.9.9'}),
       );
 
       expect(result.isError, isTrue);

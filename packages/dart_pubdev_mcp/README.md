@@ -96,22 +96,25 @@ before recommending one.
 
 All tools return JSON. Every tool that accepts a package `version` omits it
 to resolve the latest stable release, and the response then carries a
-`resolvedVersion` field naming what was actually used.
+`resolvedVersion` field naming what was actually used. Every tool but
+`search_packages` also declares an `outputSchema` and returns a matching
+`structuredContent` block alongside its text response, for clients that
+validate against a typed contract.
 
 | Tool | Purpose | Key parameters |
 |---|---|---|
 | `search_packages` | Find packages by keyword; the usual starting point. | `query` (required); `limit` (1–20, default 5); `page`; `sdk` (`dart`\|`flutter`); `platform` (`android`\|`ios`\|`web`\|`linux`\|`macos`\|`windows`); `sort` (`relevance`\|`likes`\|`pub_points`\|`updated`) |
-| `get_package` | Full metadata for one package — score, SDK constraints, dependency count. | `name` (required); `version` (omit for latest) |
-| `compare_packages` | Side-by-side score/platform/maintenance matrix for 2–5 candidates. | `names` (required, 2–5 entries) |
-| `list_package_versions` | All published versions, bucketed into stable/prerelease/retracted with publish dates. | `name` (required) |
-| `get_changelog` | Structured changelog entries with a `breaking` flag per entry. | `name` (required); `from_version` (skip already-known entries); `version_limit` (default 5) |
+| `get_package` | Full metadata for one package — score, SDK constraints, dependency count. | `package` (required); `version` (omit for latest) |
+| `compare_packages` | Side-by-side score/platform/maintenance matrix for 2–5 candidates. | `packages` (required, 2–5 entries) |
+| `list_package_versions` | All published versions, bucketed into stable/prerelease/retracted with publish dates. | `package` (required) |
+| `get_changelog` | Structured changelog entries with a `breaking` flag per entry. | `package` (required); `fromVersion` (skip already-known entries); `limit` (default 5) |
 | `get_api_diff` | Symbols added/removed between two versions (presence-based, not signature diffs). | `package`, `fromVersion`, `toVersion` (all required) |
-| `browse_api_symbols` | Search a package's dartdoc symbol index by name or keyword when the exact symbol name is unknown. | `package`, `query` (required); `type` (class/method/enum/etc.); `limit` (1–25, default 10); `version` |
-| `find_symbols` | Same symbol index as `browse_api_symbols`, substring + fuzzy matched, capped at 20 results. | `package`, `query` (required); `version` |
+| `browse_api_symbols` | Substring lookup over the dartdoc symbol index, narrowable by `kind` (class/method/enum/etc.); use `find_symbols` for fuzzy, multi-token discovery. | `package`, `query` (required); `kind` (class/method/enum/etc.); `limit` (1–25, default 10); `version` |
+| `find_symbols` | Fuzzy, multi-token discovery over the same symbol index as `browse_api_symbols` (order-independent), capped at 20 results; no `kind` filter. | `package`, `query` (required); `version` |
 | `get_symbol_documentation` | Full signature and doc comment for a known symbol (short name or qualified, e.g. `Client.send`). | `package`, `symbol` (required); `version` |
 | `get_throw_statements` | Every `throw` in a class or method, with surrounding control-flow context. | `package` (required); `class`; `method` (at least one of `class`/`method` required); `version` |
 | `get_source_slice` | Read source from one file — by line range, or by symbol name via the analyzer AST. | `package`, `file` (required); `version`; `lineStart`/`lineEnd`; `symbolName`; `maxLines` (collapse large symbols) |
-| `list_package_source_files` | Browse a package's file tree, filtered by directory prefix and/or extension. | `name` (required); `version`; `directory`; `fileExtension` |
+| `list_package_source_files` | Browse a package's file tree, filtered by directory prefix and/or extension. | `package` (required); `version`; `directory`; `fileExtension` |
 
 Errors from any tool carry a machine-readable `code` and a `suggestion`
 field describing the next step (e.g. `AMBIGUOUS_SYMBOL` includes candidate
@@ -122,9 +125,10 @@ qualified names to retry with).
 - **Discovery:** `search_packages` → `get_package` → the `readme` resource
   for full setup docs.
 - **API exploration:** `get_symbol_documentation` directly if the symbol name
-  is known, otherwise `browse_api_symbols` first → `get_throw_statements` →
-  `get_source_slice` if more implementation detail is needed.
-- **Upgrade analysis:** `get_changelog` with `from_version` set → check
+  is known, otherwise `browse_api_symbols` or `find_symbols` to locate it →
+  `get_throw_statements` → `get_source_slice` if more implementation detail is
+  needed.
+- **Upgrade analysis:** `get_changelog` with `fromVersion` set → check
   `breaking` flags → `get_api_diff` for the precise symbol-level delta.
 - **Choosing between packages:** `search_packages` → `compare_packages` on
   the top candidates.

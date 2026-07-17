@@ -146,7 +146,7 @@ void main() {
     _stubGet(stack.http, '/api/packages/http', _jsonFile('package_info.json'));
 
     await serverConnection.callTool(
-      CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+      CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
     );
 
     final lines = traceLines();
@@ -181,11 +181,11 @@ void main() {
 
       // First call warms the cache (and produces pub lines under its own id).
       await serverConnection.callTool(
-        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+        CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
       );
       // Second call must be served from cache: a ⚡ cache hit and no new pub call.
       await serverConnection.callTool(
-        CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+        CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
       );
 
       final lines = traceLines();
@@ -237,10 +237,10 @@ void main() {
 
       await Future.wait([
         serverConnection.callTool(
-          CallToolRequest(name: 'list_package_versions', arguments: {'name': 'http'}),
+          CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
         ),
         serverConnection.callTool(
-          CallToolRequest(name: 'list_package_versions', arguments: {'name': 'dio'}),
+          CallToolRequest(name: 'list_package_versions', arguments: {'package': 'dio'}),
         ),
       ]);
 

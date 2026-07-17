@@ -44,7 +44,7 @@ The once-per-server-startup, rate-limited (~24h) background lookup of this serve
 _Avoid_: Version check, self-check (both ambiguous with Resolved Version resolution, which is a per-call, per-target-package concept, not a server-startup, self-directed one)
 
 **Update Notice**:
-The `dartPubdevMcpUpdate` object (`{ current, latest }`) piggybacked onto the first eligible successful tool response of a session, sent only when an Update Check found a newer Latest Stable Version than the running server. At most one per server process lifetime — never repeated, never attached to a Tool Error, and never attached to `search_packages`'s array-shaped response body (skips to the next eligible call instead). Chosen over an MCP `log()` notification or the `_meta` field on `InitializeResult`/`CallToolResult` because tool-call content is the only channel MCP guarantees reaches the model — `_meta` is explicitly reserved for protocol-level plumbing per spec, and `log()` visibility to the model is entirely client-dependent.
+The `dartPubdevMcpUpdate` object (`{ current, latest }`) piggybacked onto the first eligible successful tool response of a session, sent only when an Update Check found a newer Latest Stable Version than the running server. At most one per server process lifetime — never repeated, never attached to a Tool Error, and never attached to `search_packages`'s array-shaped response body (skips to the next eligible call instead). Chosen over an MCP `log()` notification or the `_meta` field on `InitializeResult`/`CallToolResult` because tool-call content is the only channel MCP guarantees reaches the model — `_meta` is explicitly reserved for protocol-level plumbing per spec, and `log()` visibility to the model is entirely client-dependent. Inserted into the `TextContent` body only — never into `structuredContent` — since it is not part of any tool's declared `outputSchema`; folding it in would make `structuredContent` stop conforming to that schema for the one response it lands on.
 _Avoid_: Update banner (jaspr_cli's term for its terminal-drawn box — this server has no terminal to draw one in), update warning (this is informational, not a Tool Error)
 
 **Package Resource URI**:
@@ -124,6 +124,10 @@ _Avoid_: Request id, trace id, span id (reserve those if OpenTelemetry is ever a
 **Comparison Matrix**:
 The fixed output of `compare_packages`: a JSON object mapping every available hard metric (scores, platforms, sdk constraints, dependency count, maintenance signals, license, publisher) to a per-package value map. No caller-supplied criteria filter — the full matrix is always returned; the LLM selects what is relevant. Metrics requiring tarball access (`api-surface`, `example-quality`) are post-V1.
 _Avoid_: Criteria matrix, filtered comparison
+
+**Non-Relevance Sort**:
+`search_packages`'s `sort` values other than the default `relevance` (`likes`, `pub_points`, `updated`) rank pub.dev's full catalog by that metric globally rather than by match to `query` — confirmed live (2026-07-17): `query: "csv", sort: "likes"` returned `font_awesome_flutter` as the top result, nothing CSV-related in the top five. Not a bug in this server — `sort` is forwarded to pub.dev's own `/api/search` verbatim (`pub_client.dart`); pub.dev itself appears to drop text-relevance filtering once a non-default sort is set. The `search_packages` tool description now carries this caveat directly (keep `relevance` whenever `query` is specific; only switch sort when browsing broadly). Discovered via a #06 transcript-based eval session — see `issues/mcp-prompt-surface/06-evaluation-pass.md`.
+_Avoid_: Sort bug, broken sort (the sort itself works correctly — it's the combination with a narrow query that's misleading)
 
 ---
 

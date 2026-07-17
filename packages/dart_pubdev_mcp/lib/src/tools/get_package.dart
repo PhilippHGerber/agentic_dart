@@ -58,19 +58,19 @@ final class GetPackageHandler {
   /// `true` on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
-    final name = (args['name'] as String?) ?? '';
+    final package = (args['package'] as String?) ?? '';
     final suppliedVersion = args['version'] as String?;
 
     _log(
       LoggingLevel.info,
-      'get_package: name=$name${suppliedVersion != null ? ' version=$suppliedVersion' : ''}',
+      'get_package: package=$package${suppliedVersion != null ? ' version=$suppliedVersion' : ''}',
     );
 
     // ── Resolve version ────────────────────────────────────────────────────────
 
     final String resolvedVersion;
     switch (await _versionResolver.resolve(
-      package: name,
+      package: package,
       supplied: suppliedVersion,
       tool: 'get_package',
     )) {
@@ -83,7 +83,7 @@ final class GetPackageHandler {
     // ── Resolve package detail ──────────────────────────────────────────────────
 
     final result = await _packageDetail.resolve((
-      name: name,
+      name: package,
       version: resolvedVersion,
       pinned: suppliedVersion != null,
     ));

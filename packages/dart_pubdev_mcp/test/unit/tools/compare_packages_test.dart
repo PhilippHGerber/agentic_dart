@@ -11,11 +11,13 @@ import 'package:dart_pubdev_mcp/src/data/domain_error.dart';
 import 'package:dart_pubdev_mcp/src/data/models.dart';
 import 'package:dart_pubdev_mcp/src/tools/compare_packages.dart';
 import 'package:dart_pubdev_mcp/src/tools/get_package.dart';
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show comparePackagesTool;
 import 'package:dart_pubdev_mcp/src/tools/version_resolver.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/schema_conformance.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +105,7 @@ void _stubNotFound(MockHttpClient mock, String name) {
 
 /// Creates a [CallToolRequest] for `compare_packages` with [names].
 CallToolRequest _request(List<String> names) =>
-    CallToolRequest(name: 'compare_packages', arguments: {'names': names});
+    CallToolRequest(name: 'compare_packages', arguments: {'packages': names});
 
 /// Decodes the first content item of [result] as a JSON map.
 Map<String, Object?> _payload(CallToolResult result) =>
@@ -357,6 +359,12 @@ void main() {
 
       expect(names, isNot(contains('unknown')));
     });
+
+    test('structuredContent conforms to the declared outputSchema', () async {
+      final result = await buildHandler().call(_request(['http', 'unknown']));
+
+      expectConformsToOutputSchema(comparePackagesTool, result.structuredContent);
+    });
   });
 
   // ─── All packages fail ────────────────────────────────────────────────────────
@@ -508,7 +516,7 @@ void main() {
         log: (level, data) {},
       );
       await getPackageHandler.call(
-        CallToolRequest(name: 'get_package', arguments: {'name': 'http'}),
+        CallToolRequest(name: 'get_package', arguments: {'package': 'http'}),
       );
 
       await buildHandler().call(_request(['http', 'dio']));
