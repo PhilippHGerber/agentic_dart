@@ -3,14 +3,13 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.6.1]
 
 ### Added
 
-- Two more delivery channels for the update check: `--version` now prints an
-  `Update available:` line when a newer version is known, and MCP clients
-  receive a one-time `notifications/message` log push when a newer version
-  is found (sent regardless of `--log-level`).
+- `--version` now prints an `Update available:` line when a newer version
+  is known, and MCP clients receive a one-time `notifications/message`
+  log push when a newer version is found (sent regardless of `--log-level`).
 
 ## [0.6.0]
 
