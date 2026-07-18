@@ -224,6 +224,53 @@ final class PubMcpConfig {
     );
   }
 
+  /// Best-effort resolution of just the cache directory and Update Check
+  /// opt-out from [args] and [environment] — the two config values the
+  /// Update Banner needs (see `CONTEXT.md`'s **Update Banner** glossary
+  /// entry) from the `--version` exit path, which exits before the full
+  /// [PubMcpConfig.fromArguments] parse runs.
+  ///
+  /// Every other flag in [args] is ignored, so a malformed unrelated flag
+  /// never affects this resolution. Unlike [PubMcpConfig.fromArguments],
+  /// this can throw [FormatException] on a malformed value for either of the
+  /// two keys it does read (e.g. an unparseable `--no-update-check=<value>`)
+  /// — callers on the "never fail loudly" `--version` path are expected to
+  /// catch and fall back rather than this method silently guessing.
+  static ({String cacheDir, bool updateCheck}) resolveUpdateBannerInputs(
+    List<String> args, {
+    Map<String, String>? environment,
+  }) {
+    String? cacheDirArg;
+    String? noUpdateCheckArg;
+    for (var i = 0; i < args.length; i++) {
+      if (args[i] == '--cache-dir') {
+        if (i + 1 < args.length) cacheDirArg = args[i + 1];
+      } else if (args[i].startsWith('--cache-dir=')) {
+        cacheDirArg = args[i].substring('--cache-dir='.length);
+      } else if (args[i] == '--no-update-check') {
+        noUpdateCheckArg = 'true';
+      } else if (args[i].startsWith('--no-update-check=')) {
+        noUpdateCheckArg = args[i].substring('--no-update-check='.length);
+      }
+    }
+
+    final env = environment ?? Platform.environment;
+    final config = Config(
+      commandLineDefines: [
+        if (cacheDirArg != null) 'cache_dir=$cacheDirArg',
+        if (noUpdateCheckArg != null) 'no_update_check=$noUpdateCheckArg',
+      ],
+      environment: _remapEnvironment(env),
+    );
+
+    final cacheDir = config.optionalString('cache_dir') ?? _defaultCacheDir(env);
+    final noUpdateCheck = config.optionalBool('no_update_check');
+    final updateCheckEnv = config.optionalBool('update_check');
+    final updateCheck = noUpdateCheck != null ? !noUpdateCheck : (updateCheckEnv ?? true);
+
+    return (cacheDir: cacheDir, updateCheck: updateCheck);
+  }
+
   /// The minimum severity level for log output.
   final LogLevel logLevel;
 

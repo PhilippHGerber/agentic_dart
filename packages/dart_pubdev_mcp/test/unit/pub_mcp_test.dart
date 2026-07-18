@@ -786,13 +786,24 @@ void main() {
     late PubMcpServer server;
     late ServerConnection serverConnection;
 
+    /// Collects every `LoggingMessageNotification` the server sends, from the
+    /// moment [startServer] connects onward. [ServerConnection.onLog] is a
+    /// broadcast stream that does not buffer past events, so this must be
+    /// subscribed before [_runUpdateCheck] can possibly fire — i.e. before
+    /// `initialize` — for the Update Log Notification tests below to be able
+    /// to observe it.
+    late List<LoggingMessageNotification> logNotifications;
+    late StreamSubscription<LoggingMessageNotification> logSubscription;
+
     setUp(() {
       tempDir = Directory.systemTemp.createTempSync('dart_pubdev_mcp_update_notice_test_');
       stack = TestStack();
       mockHttp = stack.http;
+      logNotifications = [];
     });
 
     tearDown(() async {
+      await logSubscription.cancel();
       await testClient.shutdown();
       await server.shutdown();
       if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
@@ -804,20 +815,34 @@ void main() {
     /// session's Update Check before returning — so every test's first
     /// `callTool` sees a resolved (or, for the opt-out case, never-started)
     /// pending-notice state rather than racing the background check.
+    ///
+    /// Also awaits a short additional delay after the Update Check resolves:
+    /// [PubMcpServer._runUpdateCheck] sends the Update Log Notification via a
+    /// direct `sendNotification` call in the same synchronous callback that
+    /// resolves [PubMcpServer.updateCheckComplete], but delivery to
+    /// [logNotifications] happens asynchronously over the in-process channel
+    /// — this delay lets it land before a test asserts on it without ever
+    /// making a tool call.
     Future<void> startServer({
       bool updateCheck = true,
       TestStack? against,
       String? cacheDir,
+      LogLevel logLevel = LogLevel.warning,
     }) async {
       final (clientChannel, serverChannel) = inProcessChannels();
       testClient = TestMcpClient();
       server = PubMcpServer(
         serverChannel,
-        config: PubMcpConfig(updateCheck: updateCheck, cacheDir: cacheDir ?? tempDir.path),
+        config: PubMcpConfig(
+          updateCheck: updateCheck,
+          cacheDir: cacheDir ?? tempDir.path,
+          logLevel: logLevel,
+        ),
         client: (against ?? stack).client,
         cacheRegistry: (against ?? stack).caches,
       );
       serverConnection = testClient.connectServer(clientChannel);
+      logSubscription = serverConnection.onLog.listen(logNotifications.add);
       await serverConnection.initialize(
         InitializeRequest(
           protocolVersion: ProtocolVersion.latestSupported,
@@ -828,6 +853,7 @@ void main() {
       serverConnection.notifyInitialized(InitializedNotification());
       await server.initialized;
       await server.updateCheckComplete;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
 
     /// Asserts [mock] was never called for `dart_pubdev_mcp`'s own
@@ -971,6 +997,60 @@ void main() {
 
       expect(result.isError, isNull);
       expect(decodeBody(result), isNot(contains('dartPubdevMcpUpdate')));
+    });
+
+    // ─── Update Log Notification (ticket 02) ────────────────────────────────
+    //
+    // Same trigger and eligibility as the in-band notice above, delivered
+    // instead as a `notifications/message` push — asserted here purely via
+    // `logNotifications`, populated from `serverConnection.onLog` (see
+    // `startServer`'s doc comment). No tool call is made in these tests: the
+    // point is that this channel reaches the client independent of any
+    // tool-call response.
+
+    group('Update Log Notification', () {
+      test('arrives when a newer version exists, independent of any tool call', () async {
+        stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+        await startServer();
+
+        expect(logNotifications, hasLength(1));
+        expect(
+          logNotifications.single.data,
+          equals(
+            'dart-pubdev-explorer: update available ($packageVersion → 999.0.0) — run '
+            '`dart install dart_pubdev_mcp --overwrite` to upgrade.',
+          ),
+        );
+      });
+
+      test('is absent when the server is already at the latest stable version', () async {
+        stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: packageVersion);
+        await startServer();
+
+        expect(logNotifications, isEmpty);
+      });
+
+      test('is absent when the Update Check is disabled', () async {
+        stubPackageInfo(mockHttp);
+        await startServer(updateCheck: false);
+
+        expect(logNotifications, isEmpty);
+        verifyNoSelfCheckCall(mockHttp);
+      });
+
+      test('still arrives when the configured log level is above info', () async {
+        stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
+        await startServer(logLevel: LogLevel.error);
+
+        expect(logNotifications, hasLength(1));
+        expect(
+          logNotifications.single.data,
+          equals(
+            'dart-pubdev-explorer: update available ($packageVersion → 999.0.0) — run '
+            '`dart install dart_pubdev_mcp --overwrite` to upgrade.',
+          ),
+        );
+      });
     });
 
     // ─── Cross-restart persistence (ticket 03) ──────────────────────────────

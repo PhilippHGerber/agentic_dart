@@ -17,11 +17,14 @@ import 'package:dart_pubdev_mcp/src/data/pub_client.dart';
 import 'package:dart_pubdev_mcp/src/identity.dart';
 import 'package:dart_pubdev_mcp/src/server.dart';
 import 'package:dart_pubdev_mcp/src/trace/wire_trace.dart';
+import 'package:dart_pubdev_mcp/src/update/update_check_state_store.dart';
+import 'package:dart_pubdev_mcp/src/update/version_compare.dart';
 import 'package:dart_pubdev_mcp/src/version.dart';
 
 Future<void> main(List<String> args) async {
   if (args.contains('--version')) {
     stdout.writeln('$kMcpServerIdentity $packageVersion');
+    await _printUpdateBannerIfAvailable(args);
     return;
   }
 
@@ -142,4 +145,29 @@ Future<void> main(List<String> args) async {
   await server.done;
   client.close();
   trace?.close();
+}
+
+/// Prints the Update Banner's second line (see `CONTEXT.md`) when this
+/// server's already-persisted Update Check state shows a newer Latest Stable
+/// Version than [packageVersion]. Never makes a pub.dev call — only reads
+/// whatever `UpdateCheckStateStore` already has on disk. Any failure while
+/// resolving the cache directory, reading the state file, or parsing it
+/// falls back to printing nothing, silently, so `--version` can never fail
+/// or change exit code because of this.
+Future<void> _printUpdateBannerIfAvailable(List<String> args) async {
+  try {
+    final resolved = PubMcpConfig.resolveUpdateBannerInputs(args);
+    if (!resolved.updateCheck) return;
+
+    final state = await UpdateCheckStateStore(directoryPath: resolved.cacheDir).read();
+    if (state == null) return;
+    if (!isNewerVersion(state.latestVersion, packageVersion)) return;
+
+    stdout.writeln(
+      'Update available: ${state.latestVersion} — run '
+      '`dart install dart_pubdev_mcp --overwrite` to upgrade.',
+    );
+  } on Object {
+    // Best-effort: never turn `--version` into a command that can fail.
+  }
 }

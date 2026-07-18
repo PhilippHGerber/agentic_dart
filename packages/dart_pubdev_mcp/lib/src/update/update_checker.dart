@@ -16,6 +16,7 @@ library;
 import '../data/domain_error.dart';
 import '../data/pub_client.dart';
 import 'update_check_state_store.dart';
+import 'version_compare.dart';
 
 /// The pub.dev Package Identifier this server publishes itself as (see
 /// `CONTEXT.md`). Distinct from `kMcpServerIdentity`, which is the
@@ -76,7 +77,7 @@ final class UpdateChecker {
         : await _resolveFresh(nowTime);
 
     if (latest == null) return null;
-    return _isNewer(latest, _currentVersion) ? latest : null;
+    return isNewerVersion(latest, _currentVersion) ? latest : null;
   }
 
   /// Resolves [kSelfPackageName]'s Latest Stable Version fresh from pub.dev
@@ -92,31 +93,5 @@ final class UpdateChecker {
     } on Object {
       return null;
     }
-  }
-
-  /// Whether [candidate] is a strictly newer dotted-numeric version than
-  /// [base]. Compares each `.`-separated segment numerically, treating a
-  /// missing trailing segment as `0`; a non-numeric segment falls back to
-  /// string comparison for that segment only. Sufficient here because
-  /// [PubDevClient.resolveLatestStable] already excludes pre-release suffixes
-  /// and the generated [_currentVersion] is always a plain `x.y.z` string —
-  /// full semver precedence rules are not needed.
-  static bool _isNewer(String candidate, String base) {
-    final candidateParts = candidate.split('.');
-    final baseParts = base.split('.');
-    final length = candidateParts.length > baseParts.length
-        ? candidateParts.length
-        : baseParts.length;
-    for (var i = 0; i < length; i++) {
-      final candidatePart = i < candidateParts.length ? candidateParts[i] : '0';
-      final basePart = i < baseParts.length ? baseParts[i] : '0';
-      final candidateNum = int.tryParse(candidatePart);
-      final baseNum = int.tryParse(basePart);
-      final comparison = (candidateNum != null && baseNum != null)
-          ? candidateNum.compareTo(baseNum)
-          : candidatePart.compareTo(basePart);
-      if (comparison != 0) return comparison > 0;
-    }
-    return false;
   }
 }

@@ -4,6 +4,9 @@ library;
 import 'dart:io';
 
 import 'package:dart_pubdev_mcp/src/config/config.dart';
+import 'package:dart_pubdev_mcp/src/identity.dart';
+import 'package:dart_pubdev_mcp/src/update/update_check_state_store.dart';
+import 'package:dart_pubdev_mcp/src/version.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -522,6 +525,95 @@ void main() {
       expect(result.stdout.toString(), contains('--wire-trace-max-preview'));
       expect(result.stdout.toString(), contains('--no-update-check'));
     });
+  });
+
+  group('Update Banner on --version', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('dart_pubdev_mcp_update_banner_test_');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    });
+
+    Future<ProcessResult> runVersion([List<String> extraArgs = const []]) => Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/dart_pubdev_mcp.dart',
+        '--version',
+        '--cache-dir',
+        tempDir.path,
+        ...extraArgs,
+      ],
+    );
+
+    test('prints the Update Banner when a newer version is persisted', () async {
+      await UpdateCheckStateStore(directoryPath: tempDir.path).write(
+        UpdateCheckState(checkedAt: DateTime.now(), latestVersion: '999.0.0'),
+      );
+
+      final result = await runVersion();
+
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('$kMcpServerIdentity $packageVersion'));
+      expect(
+        result.stdout,
+        contains(
+          'Update available: 999.0.0 — run `dart install dart_pubdev_mcp --overwrite` to upgrade.',
+        ),
+      );
+    });
+
+    test('omits the banner when the persisted version is not newer', () async {
+      await UpdateCheckStateStore(directoryPath: tempDir.path).write(
+        UpdateCheckState(checkedAt: DateTime.now(), latestVersion: '0.0.1'),
+      );
+
+      final result = await runVersion();
+
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('$kMcpServerIdentity $packageVersion'));
+      expect(result.stdout, isNot(contains('Update available:')));
+    });
+
+    test('omits the banner when no state has ever been persisted', () async {
+      final result = await runVersion();
+
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('$kMcpServerIdentity $packageVersion'));
+      expect(result.stdout, isNot(contains('Update available:')));
+    });
+
+    test('omits the banner and still exits 0 when the state file is corrupted', () async {
+      File(
+        '${tempDir.path}${Platform.pathSeparator}update-check.json',
+      ).writeAsStringSync('not json at all {{{');
+
+      final result = await runVersion();
+
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('$kMcpServerIdentity $packageVersion'));
+      expect(result.stdout, isNot(contains('Update available:')));
+    });
+
+    test(
+      'omits the banner when --no-update-check is set, even with a newer version persisted',
+      () async {
+        await UpdateCheckStateStore(directoryPath: tempDir.path).write(
+          UpdateCheckState(checkedAt: DateTime.now(), latestVersion: '999.0.0'),
+        );
+
+        final result = await runVersion(['--no-update-check']);
+
+        expect(result.exitCode, equals(0));
+        expect(result.stdout, isNot(contains('Update available:')));
+      },
+    );
   });
 
   group('binary bad-flag error handling', () {

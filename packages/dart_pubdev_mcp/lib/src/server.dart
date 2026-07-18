@@ -164,13 +164,28 @@ base class PubMcpServer extends MCPServer
   ///
   /// When the check resolves with a newer Latest Stable Version,
   /// [_pendingUpdateNotice] is set once so the next eligible tool response
-  /// carries it (see [_insertUpdateNoticeIfEligible]).
+  /// carries it (see [_insertUpdateNoticeIfEligible]), and the Update Log
+  /// Notification (see `CONTEXT.md`) is pushed to the client via a direct
+  /// [sendNotification] call — deliberately bypassing [log]'s own
+  /// `loggingLevel` gate, since this is a one-time informational push rather
+  /// than a diagnostic line the operator's `--log-level` was ever meant to
+  /// filter.
   void _runUpdateCheck() {
     final checker = _updateChecker;
     if (checker == null) return;
     _updateCheckComplete = checker.checkForUpdate().then((latest) {
       if (latest != null) {
         _pendingUpdateNotice = {'current': packageVersion, 'latest': latest};
+        sendNotification(
+          LoggingMessageNotification.methodName,
+          LoggingMessageNotification(
+            level: LoggingLevel.info,
+            data:
+                '$kMcpServerIdentity: update available '
+                '($packageVersion → $latest) — run '
+                '`dart install dart_pubdev_mcp --overwrite` to upgrade.',
+          ),
+        );
       }
     });
   }
