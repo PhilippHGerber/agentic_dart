@@ -3,6 +3,15 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.3]
+
+### Changed
+
+- The Update Notice (`dartPubdevMcpUpdate`) now includes a `message` field
+  that directly instructs the model to relay the pending update to the
+  user, alongside the existing `current`/`latest` fields — landing in the
+  model's context didn't guarantee the model would mention it unprompted.
+
 ## [0.6.2]
 
 ### Added
