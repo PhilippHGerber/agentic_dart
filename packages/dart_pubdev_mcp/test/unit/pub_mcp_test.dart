@@ -941,6 +941,19 @@ void main() {
       CallToolRequest(name: 'list_package_versions', arguments: {'package': 'http'}),
     );
 
+    /// Asserts [result]'s `dartPubdevMcpUpdate` object carries [latest] and a
+    /// `message` instructing the model to relay the update — not pinned to
+    /// exact wording, since that's prose, not a contract.
+    void expectUpdateNotice(CallToolResult result, {required String latest}) {
+      final notice = decodeBody(result)['dartPubdevMcpUpdate'];
+      if (notice is! Map<String, Object?>) {
+        fail('expected dartPubdevMcpUpdate to be a JSON object, got: $notice');
+      }
+      expect(notice['current'], packageVersion);
+      expect(notice['latest'], latest);
+      expect(notice['message'], allOf(isA<String>(), contains(packageVersion), contains(latest)));
+    }
+
     test('appears on the first eligible response when a newer version exists', () async {
       stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
       stubPackageInfo(mockHttp);
@@ -949,10 +962,7 @@ void main() {
       final result = await listHttpVersions();
 
       expect(result.isError, isNull);
-      expect(
-        decodeBody(result)['dartPubdevMcpUpdate'],
-        equals({'current': packageVersion, 'latest': '999.0.0'}),
-      );
+      expectUpdateNotice(result, latest: '999.0.0');
     });
 
     test('is absent when the server is already at the latest stable version', () async {
@@ -1149,10 +1159,7 @@ void main() {
           final result = await listHttpVersions();
 
           expect(result.isError, isNull);
-          expect(
-            decodeBody(result)['dartPubdevMcpUpdate'],
-            equals({'current': packageVersion, 'latest': '999.0.0'}),
-          );
+          expectUpdateNotice(result, latest: '999.0.0');
           verifyNoSelfCheckCall(secondStack.http);
         },
       );
@@ -1172,10 +1179,7 @@ void main() {
 
           final result = await listHttpVersions();
 
-          expect(
-            decodeBody(result)['dartPubdevMcpUpdate'],
-            equals({'current': packageVersion, 'latest': '999.0.0'}),
-          );
+          expectUpdateNotice(result, latest: '999.0.0');
           verify(
             () => mockHttp.get(
               any(
@@ -1197,10 +1201,7 @@ void main() {
 
         final result = await listHttpVersions();
 
-        expect(
-          decodeBody(result)['dartPubdevMcpUpdate'],
-          equals({'current': packageVersion, 'latest': '999.0.0'}),
-        );
+        expectUpdateNotice(result, latest: '999.0.0');
       });
     });
   });

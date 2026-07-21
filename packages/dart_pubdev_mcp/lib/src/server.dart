@@ -188,7 +188,15 @@ base class PubMcpServer extends MCPServer
     if (checker == null) return;
     _updateCheckComplete = checker.checkForUpdate().then((latest) {
       if (latest != null) {
-        _pendingUpdateNotice = {'current': packageVersion, 'latest': latest};
+        _pendingUpdateNotice = {
+          'current': packageVersion,
+          'latest': latest,
+          'message':
+              'A newer version of $kMcpServerIdentity is available '
+              '($packageVersion → $latest). Mention this to your user and '
+              'suggest running `dart install dart_pubdev_mcp --overwrite` '
+              'to upgrade.',
+        };
         sendNotification(
           LoggingMessageNotification.methodName,
           LoggingMessageNotification(
