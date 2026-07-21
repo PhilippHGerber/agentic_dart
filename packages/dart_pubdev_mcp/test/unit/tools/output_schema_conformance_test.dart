@@ -158,6 +158,81 @@ void main() {
       });
     });
 
+    test('get_sdk_source_slice (line-range mode)', () {
+      expectConformsToOutputSchema(getSdkSourceSliceTool, {
+        'resolvedVersion': '3.12.2',
+        'sdk': 'dart',
+        'library': 'core',
+        'file': 'list.dart',
+        'mode': 'line-range',
+        'lineStart': 1,
+        'effectiveLineEnd': 40,
+        'truncated': false,
+        'content': 'class List<E> {\n',
+      });
+    });
+
+    test('get_sdk_source_slice (flutter, line-range mode)', () {
+      expectConformsToOutputSchema(getSdkSourceSliceTool, {
+        'resolvedVersion': '3.35.1',
+        'sdk': 'flutter',
+        'package': 'flutter',
+        'file': 'src/widgets/framework.dart',
+        'mode': 'line-range',
+        'lineStart': 1,
+        'effectiveLineEnd': 40,
+        'truncated': false,
+        'content': 'abstract class Widget {\n',
+      });
+    });
+
+    test('get_sdk_source_slice (symbol mode)', () {
+      expectConformsToOutputSchema(getSdkSourceSliceTool, {
+        'resolvedVersion': '3.12.2',
+        'sdk': 'dart',
+        'library': 'core',
+        'file': 'list.dart',
+        'mode': 'symbol',
+        'symbolName': 'MyList',
+        'lineStart': 1,
+        'effectiveLineEnd': 40,
+        'truncated': true,
+        'content': 'class MyList {\n  // ... 38 lines omitted ...\n}',
+      });
+    });
+
+    test('get_sdk_source_slice (flutter, symbol mode)', () {
+      expectConformsToOutputSchema(getSdkSourceSliceTool, {
+        'resolvedVersion': '3.35.1',
+        'sdk': 'flutter',
+        'package': 'flutter',
+        'file': 'src/widgets/framework.dart',
+        'mode': 'symbol',
+        'symbolName': 'State.setState',
+        'lineStart': 40,
+        'effectiveLineEnd': 60,
+        'truncated': false,
+        'content': 'void setState(VoidCallback fn) {\n  fn();\n}',
+      });
+    });
+
+    test('list_sdk_source_files (dart, filtered)', () {
+      expectConformsToOutputSchema(listSdkSourceFilesTool, {
+        'resolvedVersion': '3.12.2',
+        'sdk': 'dart',
+        'library': 'core',
+        'files': ['lib/core/list.dart', 'lib/core/map.dart'],
+      });
+    });
+
+    test('list_sdk_source_files (flutter, unfiltered)', () {
+      expectConformsToOutputSchema(listSdkSourceFilesTool, {
+        'resolvedVersion': '3.35.1',
+        'sdk': 'flutter',
+        'files': ['packages/flutter/lib/src/widgets/framework.dart'],
+      });
+    });
+
     test('list_package_source_files', () {
       expectConformsToOutputSchema(listPackageSourceFilesTool, {
         'resolvedVersion': '1.2.0',
@@ -180,6 +255,39 @@ void main() {
           {
             'file': 'lib/src/utils.dart',
             'function': 'parseHeader',
+            'thrown_type': 'rethrow',
+            'context': 'rethrow;',
+          },
+        ],
+      });
+    });
+
+    test('get_sdk_throw_statements (dart)', () {
+      expectConformsToOutputSchema(getSdkThrowStatementsTool, {
+        'resolvedVersion': '3.12.2',
+        'sdk': 'dart',
+        'library': 'core',
+        'throws': [
+          {
+            'file': 'lib/core/list.dart',
+            'class': 'MyList',
+            'method': 'add',
+            'thrown_type': 'RangeError',
+            'context': 'if (full) {\n  throw RangeError("full");\n}',
+          },
+        ],
+      });
+    });
+
+    test('get_sdk_throw_statements (flutter, top-level function)', () {
+      expectConformsToOutputSchema(getSdkThrowStatementsTool, {
+        'resolvedVersion': '3.35.1',
+        'sdk': 'flutter',
+        'package': 'flutter',
+        'throws': [
+          {
+            'file': 'packages/flutter/lib/src/widgets/framework.dart',
+            'function': 'debugChecksAreDisabled',
             'thrown_type': 'rethrow',
             'context': 'rethrow;',
           },

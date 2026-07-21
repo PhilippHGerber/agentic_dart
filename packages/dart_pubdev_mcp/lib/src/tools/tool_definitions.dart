@@ -12,9 +12,13 @@ library;
 
 import 'package:dart_mcp/server.dart';
 
-/// Shared behavioural hints for every tool in this server: all 12 tools only
-/// read pub.dev and the local package cache (`readOnlyHint: true`) and call
-/// out over the network to an "open world" of packages (`openWorldHint:
+import 'tool_descriptions.dart';
+
+export 'tool_descriptions.dart' show kServerInstructions;
+
+/// Shared behavioural hints for every tool in this server: every tool only
+/// reads pub.dev/SDK sources and the local cache (`readOnlyHint: true`) and
+/// call out over the network to an "open world" of packages (`openWorldHint:
 /// true`, which matches the spec default — stated explicitly here to make
 /// the intent audit-proof). `destructiveHint` and `idempotentHint` are
 /// meaningful only when `readOnlyHint == false`, so they are left unset.
@@ -48,31 +52,6 @@ final StringSchema _kPackageNameSchema = Schema.string(
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
-/// Instructions passed to the MCP client during the initialize handshake.
-const kServerInstructions =
-    'This server gives read-only access to packages published on pub.dev — not the '
-    "user's local project, path/git dependencies, or private registries; it never "
-    'publishes or edits dependencies. '
-    'Never guess a package name — always call search_packages first when the exact name is uncertain. '
-    'Package discovery: search_packages → get_package → pub://package/{name}@{version}/readme. '
-    'API exploration: get_symbol_documentation directly when the symbol name is known; '
-    'otherwise browse_api_symbols or find_symbols to locate it, then get_throw_statements, '
-    'then get_source_slice for implementation detail. '
-    'Upgrade analysis: get_changelog with fromVersion set → inspect breaking flags → '
-    'get_api_diff for the symbol-level delta between two known versions. '
-    'Package comparison: search_packages → compare_packages on the top candidates. '
-    'Every error response carries a machine-readable code and a suggestion field — read suggestion before retrying. '
-    'Resources: read pub://meta/resources first to see all available URIs. '
-    'pub://meta/scoring — pub.dev 160-point scoring rubric. '
-    'pub://meta/sdk-versions — current stable Dart and Flutter SDK versions (JSON). '
-    'Package resource URIs require an explicit @{version} segment; use @latest for the Latest Stable Version. '
-    'Every package resource body begins with a [Resolved Version: x.y.z] header line. '
-    'pub://package/{name}@{version}/readme — full README for a package (text/markdown). '
-    'pub://package/{name}@{version}/example — working example code for a package (text/markdown). '
-    'pub://package/{name}@{version}/changelog — full raw changelog for a package (text/markdown). '
-    'pub://package/{name}@{version}/api — dartdoc symbol index for a package (JSON). '
-    'pub://package/{name}@{version}/pubspec — raw pubspec.yaml for a package (text/plain).';
-
 // ─── search_packages ──────────────────────────────────────────────────────────
 
 /// The `search_packages` [Tool] definition registered with the MCP server.
@@ -85,16 +64,7 @@ final searchPackagesTool = Tool(
   name: 'search_packages',
   title: 'Search pub.dev packages',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this first whenever you need a package name or want to discover packages for a use case. '
-      'Never guess a package name — always search first. '
-      'Each result is a package summary — name, description, and score/maintenance signals '
-      '(e.g. likes, pubPoints, popularity, daysSinceUpdate) — not the full metadata get_package returns '
-      '(dependencies, SDK constraints, README excerpt). '
-      'Pass the resulting names to get_package for full details, or to compare_packages to evaluate alternatives. '
-      "Set sdk and platform when the user's environment is known to avoid irrelevant results. "
-      'It never returns version lists or API symbols — use list_package_versions or '
-      'browse_api_symbols/find_symbols for those.',
+  description: kSearchPackagesDescription,
   inputSchema: ObjectSchema(
     required: ['query'],
     properties: {
@@ -144,13 +114,7 @@ final getPackageTool = Tool(
   name: 'get_package',
   title: 'Get package details',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this after search_packages to read full metadata for a specific package. '
-      "Check scores, SDK constraints, and dependency count to evaluate fitness for the user's project. "
-      'For the full README, read pub://package/{name}@{version}/readme (use @latest) — the excerpt here is truncated. '
-      'Do not call this with a guessed name — use search_packages first. '
-      'It never returns changelog entries or API symbols — use get_changelog and '
-      'browse_api_symbols/find_symbols for those.',
+  description: kGetPackageDescription,
   inputSchema: ObjectSchema(
     required: ['package'],
     properties: {
@@ -186,18 +150,24 @@ final getPackageTool = Tool(
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
       'name': _kPackageNameSchema,
-      'version': Schema.string(description: 'The package version described — equals resolvedVersion.'),
+      'version': Schema.string(
+        description: 'The package version described — equals resolvedVersion.',
+      ),
       'description': Schema.string(description: "The package's pub.dev listing description."),
       'verified': Schema.bool(description: "Whether the package's publisher domain is verified."),
       'publishedAt': Schema.string(
-        description: 'ISO 8601 publish timestamp of this version. Omitted when pub.dev does not report one.',
+        description:
+            'ISO 8601 publish timestamp of this version. Omitted when pub.dev does not report one.',
       ),
       'activeMaintenance': Schema.bool(
-        description: 'Whether the package has been updated recently enough to count as actively maintained.',
+        description:
+            'Whether the package has been updated recently enough to count as actively maintained.',
       ),
       'likes': Schema.int(description: 'Pub.dev like count.'),
       'pubPoints': Schema.int(description: 'Pub.dev pub points score (0–160).'),
-      'popularity': Schema.int(description: '30-day download count used for the pub.dev popularity score.'),
+      'popularity': Schema.int(
+        description: '30-day download count used for the pub.dev popularity score.',
+      ),
       'sdkConstraints': Schema.object(
         description: 'SDK version constraints declared in the pubspec environment.',
         required: ['dart'],
@@ -216,28 +186,37 @@ final getPackageTool = Tool(
         description: 'Pub.dev topic tags for this package.',
         items: Schema.string(),
       ),
-      'isFlutterFavorite': Schema.bool(description: 'Whether pub.dev has flagged this package a Flutter Favorite.'),
+      'isFlutterFavorite': Schema.bool(
+        description: 'Whether pub.dev has flagged this package a Flutter Favorite.',
+      ),
       'dependencies': Schema.object(
-        description: 'Runtime dependencies keyed by package name, with version constraint strings as values.',
+        description:
+            'Runtime dependencies keyed by package name, with version constraint strings as values.',
         additionalProperties: Schema.string(),
       ),
       'devDependencies': Schema.object(
-        description: 'Development dependencies keyed by package name, with version constraint strings as values.',
+        description:
+            'Development dependencies keyed by package name, with version constraint strings as values.',
         additionalProperties: Schema.string(),
       ),
       'versionsRecent': Schema.list(
         description: 'A short list of recently published version strings, newest first.',
         items: Schema.string(),
       ),
-      'publisher': Schema.string(description: 'The verified publisher domain. Omitted when unverified.'),
+      'publisher': Schema.string(
+        description: 'The verified publisher domain. Omitted when unverified.',
+      ),
       'license': Schema.string(
         description: 'The first SPDX license identifier reported by pub.dev. Omitted when unknown.',
       ),
       'readmeExcerpt': Schema.string(
-        description: 'A truncated excerpt of the README. Omitted when unavailable. '
+        description:
+            'A truncated excerpt of the README. Omitted when unavailable. '
             'Read pub://package/{name}@{version}/readme for the full text.',
       ),
-      'repository': Schema.string(description: 'The source repository URL. Omitted when not declared.'),
+      'repository': Schema.string(
+        description: 'The source repository URL. Omitted when not declared.',
+      ),
     },
   ),
 );
@@ -249,12 +228,7 @@ final getChangelogTool = Tool(
   name: 'get_changelog',
   title: 'Get structured changelog',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this when the user is upgrading a dependency or needs to check for breaking changes. '
-      'Set fromVersion to the currently installed version to skip entries you already know. '
-      'Check the breaking flag on each entry — flagged entries require code changes before upgrading. '
-      'For the full unstructured changelog text, read pub://package/{name}@{version}/changelog (use @latest) instead. '
-      'It does not detect API-level changes — pair with get_api_diff for a symbol-level diff.',
+  description: kGetChangelogDescription,
   inputSchema: ObjectSchema(
     required: ['package'],
     properties: {
@@ -305,14 +279,7 @@ final browseApiSymbolsTool = Tool(
   name: 'browse_api_symbols',
   title: 'Browse API symbols',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Use this only when you do not yet know the symbol name and want to narrow by symbol kind. '
-      'When the name is already known, call `get_symbol_documentation` directly. '
-      'Search for one symbol name at a time — multi-term queries like "PromptsSupport addPrompt" will not match. '
-      'Use kind to narrow results when you know the symbol kind (class, method, enum, etc.). '
-      'Prefer find_symbols instead for fuzzy, multi-token discovery across names and descriptions — '
-      'it shares the same dartdoc index, so switching costs no extra fetch, but find_symbols has no kind filter. '
-      'Call get_package first if you are not certain the package name is correct.',
+  description: kBrowseApiSymbolsDescription,
   inputSchema: ObjectSchema(
     required: ['package', 'query'],
     properties: {
@@ -358,7 +325,8 @@ final browseApiSymbolsTool = Tool(
               description: 'The fully-qualified name, suitable for get_symbol_documentation.',
             ),
             'href': Schema.string(
-              description: 'The dartdoc-relative link for this symbol, not a fetchable source file path.',
+              description:
+                  'The dartdoc-relative link for this symbol, not a fetchable source file path.',
             ),
             'type': Schema.string(
               description: 'The dartdoc symbol kind, e.g. "class", "method", "enum".',
@@ -380,18 +348,7 @@ final findSymbolsTool = Tool(
   name: 'find_symbols',
   title: 'Find API symbols',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      "Search a package's public API for symbols matching a query — the fuzzy, multi-token discovery "
-      'counterpart to browse_api_symbols, which does plain substring matching narrowable by kind. '
-      'Backed by the same dartdoc index as browse_api_symbols, so a warm index '
-      'serves both without an extra download. '
-      'Matching is a case-insensitive substring match on symbol names, falling back to a token-based '
-      'fuzzy match against descriptions (multi-word queries match regardless of token order); name '
-      'matches rank first. '
-      'Results are capped at 20; hasMore: true is returned when more matches exist. '
-      'Prefer browse_api_symbols instead when you know the symbol kind (class, method, enum, etc.) '
-      'and want to filter by it — this tool has no kind filter. '
-      'Call get_package first if you are not certain the package name is correct.',
+  description: kFindSymbolsDescription,
   inputSchema: ObjectSchema(
     required: ['package', 'query'],
     properties: {
@@ -415,12 +372,22 @@ final findSymbolsTool = Tool(
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
       'hasMore': Schema.bool(
-        description: 'Present and true only when more than 20 matches exist beyond the returned list.',
+        description:
+            'Present and true only when more than 20 matches exist beyond the returned list.',
       ),
       'symbols': Schema.list(
-        description: 'Matching symbols, name matches ranked before description-only matches, capped at 20.',
+        description:
+            'Matching symbols, name matches ranked before description-only matches, capped at 20.',
         items: Schema.object(
-          required: ['name', 'qualifiedName', 'kind', 'library', 'enclosedBy', 'description', 'href'],
+          required: [
+            'name',
+            'qualifiedName',
+            'kind',
+            'library',
+            'enclosedBy',
+            'description',
+            'href',
+          ],
           properties: {
             'name': Schema.string(description: "The symbol's short (unqualified) name."),
             'qualifiedName': Schema.string(
@@ -429,14 +396,19 @@ final findSymbolsTool = Tool(
             'kind': Schema.string(
               description: 'The dartdoc symbol kind, e.g. "class", "method", "enum".',
             ),
-            'library': Schema.string(description: 'The package: URI of the library this symbol belongs to.'),
+            'library': Schema.string(
+              description: 'The package: URI of the library this symbol belongs to.',
+            ),
             'enclosedBy': _nullableString(
               'The enclosing container name (e.g. a class name) for methods, constructors, and '
               'accessors; null for top-level symbols.',
             ),
-            'description': Schema.string(description: "The symbol's dartdoc description, possibly empty."),
+            'description': Schema.string(
+              description: "The symbol's dartdoc description, possibly empty.",
+            ),
             'href': Schema.string(
-              description: 'The dartdoc-relative link for this symbol, not a fetchable source file path.',
+              description:
+                  'The dartdoc-relative link for this symbol, not a fetchable source file path.',
             ),
           },
         ),
@@ -452,15 +424,7 @@ final getSymbolDocumentationTool = Tool(
   name: 'get_symbol_documentation',
   title: 'Get symbol documentation',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this to read the full signature and doc comment for a known symbol. '
-      'Pass the short name ("Client") or a qualified name ("Client.send") — the server resolves it automatically. '
-      'Use browse_api_symbols first only when the symbol name is unknown. '
-      'Use this to understand parameter types, return types, and usage notes for an API symbol. '
-      'If the result is AMBIGUOUS_SYMBOL, pick a qualifiedName from error.details.candidates and retry. '
-      'If the doc comment does not cover thrown exceptions, call get_throw_statements next. '
-      'If you still need broader implementation details or the canonical file and line numbers, '
-      'call get_source_slice next.',
+  description: kGetSymbolDocumentationDescription,
   inputSchema: ObjectSchema(
     required: ['package', 'symbol'],
     properties: {
@@ -502,23 +466,7 @@ final getSourceSliceTool = Tool(
   name: 'get_source_slice',
   title: 'Read package source',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this to read Dart source from a single package file, in one of two modes. '
-      'Line-range mode: provide file with optional lineStart/lineEnd (1-based, inclusive) '
-      'to read an exact range with no truncation; omit both bounds to read the whole file. '
-      'Symbol-bounded mode: provide file and symbolName to extract a named declaration '
-      'located via the analyzer AST — a top-level class, mixin, enum, extension, function, '
-      'typedef, or variable by bare name (e.g. "Client"), or a member by "ClassName.member" '
-      '(e.g. "Client.send"; use "new" for the unnamed constructor). '
-      'Pass maxLines to cap a large symbol: the response is collapsed to the signature, '
-      'opening brace, an omission comment, and closing brace, with truncated=true. '
-      'effectiveLineEnd always reports the true last line of the region, even when truncated, '
-      'so you can drill in with a follow-up line-range read. '
-      'Derive the file path from the href returned by browse_api_symbols or find_symbols. '
-      'On SOURCE_FILE_NOT_FOUND, read the suggestion field — it lists the closest filename matches. '
-      'If the suggestion is not sufficient, call list_package_source_files to browse the full file tree. '
-      "For a symbol's rendered signature and doc comment instead of raw source, "
-      'use get_symbol_documentation.',
+  description: kGetSourceSliceDescription,
   inputSchema: ObjectSchema(
     required: ['package', 'file'],
     properties: {
@@ -561,7 +509,16 @@ final getSourceSliceTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'package', 'file', 'mode', 'lineStart', 'effectiveLineEnd', 'truncated', 'content'],
+    required: [
+      'resolvedVersion',
+      'package',
+      'file',
+      'mode',
+      'lineStart',
+      'effectiveLineEnd',
+      'truncated',
+      'content',
+    ],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
       'package': _kPackageNameSchema,
@@ -580,9 +537,189 @@ final getSourceSliceTool = Tool(
             'truncated — so callers can drill in with a follow-up line-range request.',
       ),
       'truncated': Schema.bool(
-        description: 'Whether content was collapsed to signature + omission comment + closing brace.',
+        description:
+            'Whether content was collapsed to signature + omission comment + closing brace.',
       ),
       'content': Schema.string(description: 'The extracted Dart source.'),
+    },
+  ),
+);
+
+// ─── get_sdk_source_slice ─────────────────────────────────────────────────────
+
+/// The `get_sdk_source_slice` [Tool] definition registered with the MCP server.
+final getSdkSourceSliceTool = Tool(
+  name: 'get_sdk_source_slice',
+  title: 'Read Dart or Flutter SDK source',
+  annotations: kReadOnlyOpenWorldAnnotations,
+  description: kGetSdkSourceSliceDescription,
+  inputSchema: ObjectSchema(
+    required: ['sdk', 'file'],
+    properties: {
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK to read from.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description:
+            'Dart only (sdk: "dart"): the dart: library name (e.g. "core", "async", "io") — '
+            "selects the SDK's lib/<library>/ directory. Required for sdk: \"dart\"; omit for "
+            'Flutter.',
+      ),
+      'package': Schema.string(
+        description:
+            'Flutter only (sdk: "flutter"): the Flutter package name (e.g. "flutter", '
+            '"flutter_test", "flutter_driver") — selects the packages/<package>/lib/ '
+            'directory. Required for sdk: "flutter"; omit for Dart.',
+      ),
+      'file': Schema.string(
+        description:
+            "File path relative to the selected library's or package's lib/ directory "
+            '(e.g. "list.dart" for dart:core\'s List implementation, or '
+            '"src/widgets/framework.dart" for package:flutter). '
+            'Leading slash is stripped automatically. ".." segments are rejected.',
+      ),
+      'version': Schema.string(
+        description:
+            'A Dart or Flutter tag or commit SHA (e.g. "3.12.2"), matching sdk. '
+            "Omit to auto-detect: the running server's Dart SDK version, or the local "
+            "Flutter install's framework version.",
+      ),
+      'lineStart': Schema.int(
+        description:
+            'Line-range mode: 1-based inclusive first line. '
+            'Omit with lineEnd to return the full file.',
+      ),
+      'lineEnd': Schema.int(
+        description: 'Line-range mode: 1-based inclusive last line.',
+      ),
+      'symbolName': Schema.string(
+        description:
+            'Symbol-bounded mode: the declaration to extract. '
+            'A bare name (e.g. "State") matches a top-level declaration; '
+            '"ClassName.member" (e.g. "State.setState") matches a class member. '
+            'Use "new" for the unnamed constructor; "==" or "operator ==" for operators. '
+            'When provided, lineStart/lineEnd are ignored.',
+      ),
+      'maxLines': Schema.int(
+        description:
+            'Symbol-bounded mode: truncate the symbol to signature + closing brace '
+            'when it spans more than this many lines. Omit for the full symbol body.',
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: [
+      'resolvedVersion',
+      'sdk',
+      'file',
+      'mode',
+      'lineStart',
+      'effectiveLineEnd',
+      'truncated',
+      'content',
+    ],
+    properties: {
+      'resolvedVersion': Schema.string(
+        description:
+            'The exact SDK ref this response describes — the caller-supplied version, or the '
+            'auto-detected Dart/Flutter SDK version when version was omitted.',
+      ),
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK this response describes.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description: 'The dart: library name, as given. Present only for sdk: "dart".',
+      ),
+      'package': Schema.string(
+        description: 'The Flutter package name, as given. Present only for sdk: "flutter".',
+      ),
+      'file': Schema.string(
+        description:
+            "The file path relative to the library's or package's lib/ directory, as given.",
+      ),
+      'mode': UntitledSingleSelectEnumSchema(
+        description: 'Which mode produced this response.',
+        values: ['line-range', 'symbol'],
+      ),
+      'symbolName': Schema.string(
+        description: 'The resolved symbol name. Present only in symbol-bounded mode.',
+      ),
+      'lineStart': Schema.int(description: '1-based inclusive first line of the returned region.'),
+      'effectiveLineEnd': Schema.int(
+        description:
+            "The true last line of the region — the symbol's real end line even when "
+            'truncated — so callers can drill in with a follow-up line-range request.',
+      ),
+      'truncated': Schema.bool(
+        description:
+            'Whether content was collapsed to signature + omission comment + closing brace. '
+            'Always false in line-range mode.',
+      ),
+      'content': Schema.string(description: 'The extracted Dart source.'),
+    },
+  ),
+);
+
+// ─── list_sdk_source_files ────────────────────────────────────────────────────
+
+/// The `list_sdk_source_files` [Tool] definition registered with the MCP server.
+final listSdkSourceFilesTool = Tool(
+  name: 'list_sdk_source_files',
+  title: 'List Dart or Flutter SDK source files',
+  annotations: kReadOnlyOpenWorldAnnotations,
+  description: kListSdkSourceFilesDescription,
+  inputSchema: ObjectSchema(
+    required: ['sdk'],
+    properties: {
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK to list files from.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description:
+            'Dart only (sdk: "dart"): restrict the listing to this dart: library '
+            '(e.g. "core", "async", "io"). Omit to list every file in the SDK.',
+      ),
+      'package': Schema.string(
+        description:
+            'Flutter only (sdk: "flutter"): restrict the listing to this Flutter package '
+            '(e.g. "flutter", "flutter_test", "flutter_driver"). '
+            'Omit to list every file across every Flutter package.',
+      ),
+      'version': Schema.string(
+        description:
+            'A Dart or Flutter tag or commit SHA (e.g. "3.12.2"), matching sdk. '
+            "Omit to auto-detect: the running server's Dart SDK version, or the local "
+            "Flutter install's framework version.",
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: ['resolvedVersion', 'sdk', 'files'],
+    properties: {
+      'resolvedVersion': Schema.string(
+        description:
+            'The exact SDK ref this response describes — the caller-supplied version, or the '
+            'auto-detected Dart/Flutter SDK version when version was omitted.',
+      ),
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK this response describes.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description: 'The dart: library filter, as given. Present only when supplied.',
+      ),
+      'package': Schema.string(
+        description: 'The Flutter package filter, as given. Present only when supplied.',
+      ),
+      'files': Schema.list(
+        description:
+            'Matching file paths within the SDK source tree, sorted alphabetically, in '
+            "installed-style shape (e.g. 'lib/core/list.dart', 'packages/flutter/lib/src/...').",
+        items: Schema.string(),
+      ),
     },
   ),
 );
@@ -594,11 +731,7 @@ final listPackageSourceFilesTool = Tool(
   name: 'list_package_source_files',
   title: 'List package source files',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this only when get_source_slice returns SOURCE_FILE_NOT_FOUND and the suggestion does not name the right file. '
-      'Set directory and fileExtension to narrow the listing before reading individual files. '
-      'Select a path from the result and pass it to get_source_slice. '
-      'It never returns file contents — pass a chosen path to get_source_slice for that.',
+  description: kListPackageSourceFilesDescription,
   inputSchema: ObjectSchema(
     required: ['package'],
     properties: {
@@ -641,18 +774,7 @@ final getThrowStatementsTool = Tool(
   name: 'get_throw_statements',
   title: 'Find throw statements',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this to find every `throw` expression in a class or function — '
-      'each result includes the thrown type and the surrounding control-flow context. '
-      'Use when you need to answer "what can this throw?" without loading entire source files. '
-      'Provide `class` to scan all methods in a class; '
-      'provide `class` + `method` to scan one method; '
-      'provide only `method` to scan a top-level function. '
-      'At least one of `class` or `method` is required. '
-      'On AMBIGUOUS_SYMBOL for a top-level function, '
-      'pick a qualifiedName from error.details.candidates and pass it as `method`. '
-      'This is a static scan of throw expressions in source — it does not execute the code '
-      'or report exceptions actually raised at runtime.',
+  description: kGetThrowStatementsDescription,
   inputSchema: ObjectSchema(
     required: ['package'],
     properties: {
@@ -693,16 +815,120 @@ final getThrowStatementsTool = Tool(
           properties: {
             'file': Schema.string(description: 'The source file the throw was found in.'),
             'class': Schema.string(
-              description: 'The enclosing class, mixin, enum, or extension name. Omitted for top-level functions.',
+              description:
+                  'The enclosing class, mixin, enum, or extension name. Omitted for top-level functions.',
             ),
             'method': Schema.string(
-              description: 'The enclosing method name. Omitted for top-level functions or class-wide scans.',
+              description:
+                  'The enclosing method name. Omitted for top-level functions or class-wide scans.',
             ),
             'function': Schema.string(
               description: 'The enclosing top-level function name. Omitted for class members.',
             ),
             'thrown_type': Schema.string(
-              description: 'The static type of the thrown expression, or "rethrow" for a bare rethrow statement.',
+              description:
+                  'The static type of the thrown expression, or "rethrow" for a bare rethrow statement.',
+            ),
+            'context': Schema.string(
+              description: 'A short source snippet (up to 3 lines) surrounding the throw.',
+            ),
+          },
+        ),
+      ),
+    },
+  ),
+);
+
+// ─── get_sdk_throw_statements ──────────────────────────────────────────────────
+
+/// The `get_sdk_throw_statements` [Tool] definition registered with the MCP server.
+final getSdkThrowStatementsTool = Tool(
+  name: 'get_sdk_throw_statements',
+  title: 'Find throw statements in Dart or Flutter SDK source',
+  annotations: kReadOnlyOpenWorldAnnotations,
+  description: kGetSdkThrowStatementsDescription,
+  inputSchema: ObjectSchema(
+    required: ['sdk'],
+    properties: {
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK to scan.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description:
+            'Dart only (sdk: "dart"): the dart: library name (e.g. "core", "async", "io") — '
+            'scopes the scan to the SDK\'s lib/<library>/ directory. Required for sdk: "dart"; '
+            'omit for Flutter.',
+      ),
+      'package': Schema.string(
+        description:
+            'Flutter only (sdk: "flutter"): the Flutter package name (e.g. "flutter", '
+            '"flutter_test", "flutter_driver") — scopes the scan to the '
+            'packages/<package>/lib/ directory. Required for sdk: "flutter"; omit for Dart.',
+      ),
+      'class': Schema.string(
+        description:
+            'The class, mixin, enum, or extension name to scan. '
+            'Omit to scan a top-level function instead. '
+            'Provide without `method` to scan all throws in the entire class.',
+      ),
+      'method': Schema.string(
+        description:
+            'The method or top-level function name to scan. '
+            'When combined with `class`, scans that specific method only. '
+            'For operators, pass either "==" or "operator ==". '
+            'For the default (unnamed) constructor, pass "new". '
+            'For named constructors, pass only the constructor suffix (e.g. "fromJson"). '
+            'When `class` is omitted, treats this as a top-level function name. '
+            'On AMBIGUOUS_SYMBOL, inspect error.details.candidates (file paths) and retry with '
+            'a narrower scope, e.g. via get_sdk_source_slice.',
+      ),
+      'version': Schema.string(
+        description:
+            'A Dart or Flutter tag or commit SHA (e.g. "3.12.2"), matching sdk. '
+            "Omit to auto-detect: the running server's Dart SDK version, or the local "
+            "Flutter install's framework version.",
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: ['resolvedVersion', 'sdk', 'throws'],
+    properties: {
+      'resolvedVersion': Schema.string(
+        description:
+            'The exact SDK ref this response describes — the caller-supplied version, or the '
+            'auto-detected Dart/Flutter SDK version when version was omitted.',
+      ),
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK this response describes.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description: 'The dart: library name, as given. Present only for sdk: "dart".',
+      ),
+      'package': Schema.string(
+        description: 'The Flutter package name, as given. Present only for sdk: "flutter".',
+      ),
+      'throws': Schema.list(
+        description: 'Every throw or rethrow expression found, in source order.',
+        items: Schema.object(
+          required: ['file', 'thrown_type', 'context'],
+          properties: {
+            'file': Schema.string(description: 'The source file the throw was found in.'),
+            'class': Schema.string(
+              description:
+                  'The enclosing class, mixin, enum, or extension name. Omitted for top-level functions.',
+            ),
+            'method': Schema.string(
+              description:
+                  'The enclosing method name. Omitted for top-level functions or class-wide scans.',
+            ),
+            'function': Schema.string(
+              description: 'The enclosing top-level function name. Omitted for class members.',
+            ),
+            'thrown_type': Schema.string(
+              description:
+                  'The static type of the thrown expression, or "rethrow" for a bare rethrow statement.',
             ),
             'context': Schema.string(
               description: 'A short source snippet (up to 3 lines) surrounding the throw.',
@@ -721,15 +947,7 @@ final comparePackagesTool = Tool(
   name: 'compare_packages',
   title: 'Compare packages',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this after search_packages when the user is choosing between multiple candidates. '
-      'Pass the top 2–5 names from search results directly. '
-      'Returns a comparison matrix — one row per field (score, platform support, SDK constraints, '
-      'dependency count, maintenance signals such as license, publisher, and days since last update) '
-      'mapped to a value per package — for scanning candidates side by side. '
-      'Failed packages appear in errors and are excluded from the matrix — do not retry them. '
-      'It never compares API surfaces or README content — use get_symbol_documentation/get_api_diff '
-      'or the readme resource for that level of detail.',
+  description: kComparePackagesDescription,
   inputSchema: ObjectSchema(
     required: ['packages'],
     properties: {
@@ -775,14 +993,7 @@ final listPackageVersionsTool = Tool(
   name: 'list_package_versions',
   title: 'List package versions',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this to list every published version of a package, split into '
-      'stable, prerelease, and retracted buckets — each sorted newest-first. '
-      'Each entry carries the version string and its publish date. '
-      'Use it to inspect release cadence, find the newest stable or prerelease '
-      'version, or spot retracted versions to avoid depending on. '
-      'It carries no changelog content or API information — pair it with get_changelog or get_api_diff '
-      'for that; get_api_diff requires two concrete version strings, which this tool is the source of.',
+  description: kListPackageVersionsDescription,
   inputSchema: ObjectSchema(
     required: ['package'],
     properties: {
@@ -804,7 +1015,8 @@ final listPackageVersionsTool = Tool(
         items: _kVersionEntrySchema,
       ),
       'retracted': Schema.list(
-        description: 'Retracted versions (stable or pre-release), newest first. '
+        description:
+            'Retracted versions (stable or pre-release), newest first. '
             'Retraction takes precedence over the prerelease/stable split.',
         items: _kVersionEntrySchema,
       ),
@@ -831,16 +1043,7 @@ final getApiDiffTool = Tool(
   name: 'get_api_diff',
   title: 'Diff public API between versions',
   annotations: kReadOnlyOpenWorldAnnotations,
-  description:
-      'Call this when the user is upgrading (or downgrading) between two known versions and needs '
-      'to see what changed in the public API surface. '
-      'Returns two sets — added and removed — each bucketed into libraries, classes, methods, and fields. '
-      'The diff is purely presence-based (a symbol is in one version but not the other); '
-      'it does NOT detect signature changes such as renamed parameters, changed return types, or nullability. '
-      'Both fromVersion and toVersion are required — obtain concrete versions from list_package_versions. '
-      'On DOCUMENTATION_NOT_FOUND, one version lacks dartdoc output; '
-      'fall back to browse_api_symbols per version as the error suggests. '
-      'For narrative release notes rather than a symbol-level diff, use get_changelog instead.',
+  description: kGetApiDiffDescription,
   inputSchema: ObjectSchema(
     required: ['package', 'fromVersion', 'toVersion'],
     properties: {
@@ -888,7 +1091,8 @@ ObjectSchema _kApiDiffBucketsSchema(String description) => ObjectSchema(
       items: Schema.string(),
     ),
     'methods': Schema.list(
-      description: 'Added or removed method, function, and constructor qualifiedNames, alphabetically sorted.',
+      description:
+          'Added or removed method, function, and constructor qualifiedNames, alphabetically sorted.',
       items: Schema.string(),
     ),
     'fields': Schema.list(

@@ -14,6 +14,7 @@ import 'package:dart_pubdev_mcp/src/cache/memory_cache.dart';
 import 'package:dart_pubdev_mcp/src/cache/tarball_disk_cache.dart';
 import 'package:dart_pubdev_mcp/src/config/config.dart';
 import 'package:dart_pubdev_mcp/src/data/pub_client.dart';
+import 'package:dart_pubdev_mcp/src/data/sdk_client.dart';
 import 'package:dart_pubdev_mcp/src/identity.dart';
 import 'package:dart_pubdev_mcp/src/server.dart';
 import 'package:dart_pubdev_mcp/src/trace/wire_trace.dart';
@@ -132,7 +133,11 @@ Future<void> main(List<String> args) async {
     trace: trace,
   );
 
-  final cacheRegistry = CacheRegistry(client: client, trace: trace);
+  // Shares tarballCache with `client` so SDK and pub.dev tarballs live in one
+  // on-disk cache directory (ADR 0006).
+  final sdkClient = SdkClient(tarballCache: tarballCache);
+
+  final cacheRegistry = CacheRegistry(client: client, sdkClient: sdkClient, trace: trace);
 
   final server = PubMcpServer(
     stdioChannel(input: stdin, output: stdout),
@@ -144,6 +149,7 @@ Future<void> main(List<String> args) async {
 
   await server.done;
   client.close();
+  sdkClient.close();
   trace?.close();
 }
 

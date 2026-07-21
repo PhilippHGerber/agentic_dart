@@ -58,6 +58,19 @@ abstract final class DomainErrors {
   /// No handler yet — registered for future use by the tarball disk cache (S4).
   static const packageTooLarge = 'PACKAGE_TOO_LARGE';
 
+  /// No SDK release matches the resolved or explicitly-supplied version —
+  /// covers an unparseable auto-detected version and a typo'd `version`
+  /// override alike, for either `sdk: 'dart'` or `sdk: 'flutter'`
+  /// (`details.sdk` distinguishes which). See ADR 0006.
+  static const sdkVersionNotFound = 'SDK_VERSION_NOT_FOUND';
+
+  /// No local Flutter install could be located via `FLUTTER_ROOT` or a
+  /// `flutter` executable on `PATH`, and no explicit `version` override was
+  /// supplied. Distinct from [sdkVersionNotFound]: this is a failure to
+  /// determine a default version locally, not an upstream lookup miss, and
+  /// never falls back to spawning `flutter --version`. See ADR 0006.
+  static const sdkNotDetected = 'SDK_NOT_DETECTED';
+
   /// Codes for which [DomainError.retryable] is `true`.
   static const Set<String> _retryable = {rateLimited, serviceUnavailable, requestTimeout};
 }

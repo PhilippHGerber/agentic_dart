@@ -66,12 +66,12 @@
 library;
 
 import 'package:analyzer/dart/analysis/results.dart';
-import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/source/line_info.dart';
 import 'package:dart_mcp/server.dart';
 
 import '../analysis/ast_access.dart';
 import '../data/domain_error.dart';
+import 'line_range_slice.dart';
+import 'symbol_bounded_slice.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -174,47 +174,16 @@ final class GetSourceSliceHandler {
     int? lineStart,
     int? lineEnd,
   ) {
-    final lineInfo = LineInfo.fromContent(content);
-    final lastLine = _lastLineNumber(content, lineInfo);
-
-    // Both bounds omitted → whole file, verbatim.
-    if (lineStart == null && lineEnd == null) {
-      return _success(
-        resolvedVersion: resolvedVersion,
-        package: package,
-        file: file,
-        mode: 'line-range',
-        lineStart: 1,
-        effectiveLineEnd: lastLine,
-        truncated: false,
-        content: content,
-      );
-    }
-
-    var start = lineStart ?? 1;
-    var end = lineEnd ?? lastLine;
-    if (start < 1) start = 1;
-    if (start > lastLine) start = lastLine;
-    if (end > lastLine) end = lastLine;
-    if (end < start) end = start;
-
-    final startOffset = lineInfo.getOffsetOfLine(start - 1);
-    final endOffset = end < lineInfo.lineCount ? lineInfo.getOffsetOfLine(end) : content.length;
-    var slice = content.substring(startOffset, endOffset);
-    // Strip the single trailing line terminator that separates the last
-    // requested line from the following line.
-    if (slice.endsWith('\n')) slice = slice.substring(0, slice.length - 1);
-    if (slice.endsWith('\r')) slice = slice.substring(0, slice.length - 1);
-
+    final slice = sliceLineRange(content, lineStart, lineEnd);
     return _success(
       resolvedVersion: resolvedVersion,
       package: package,
       file: file,
       mode: 'line-range',
-      lineStart: start,
-      effectiveLineEnd: end,
+      lineStart: slice.lineStart,
+      effectiveLineEnd: slice.effectiveLineEnd,
       truncated: false,
-      content: slice,
+      content: slice.content,
     );
   }
 
@@ -228,9 +197,8 @@ final class GetSourceSliceHandler {
     String symbolName,
     int? maxLines,
   ) {
-    final content = ast.content;
-    final node = _findSymbol(ast.unit, symbolName);
-    if (node == null) {
+    final slice = sliceSymbol(_astAccess, ast, symbolName, maxLines: maxLines);
+    if (slice == null) {
       return ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
@@ -244,137 +212,20 @@ final class GetSourceSliceHandler {
       );
     }
 
-    final lineInfo = ast.lineInfo;
-    final startLine = lineInfo.getLocation(node.offset).lineNumber;
-    final endOffset = node.end > node.offset ? node.end - 1 : node.end;
-    final endLine = lineInfo.getLocation(endOffset).lineNumber;
-    final nodeLineCount = endLine - startLine + 1;
-    final fullSource = content.substring(node.offset, node.end);
-
-    // No truncation requested, or the node already fits.
-    if (maxLines == null || nodeLineCount <= maxLines) {
-      return _success(
-        resolvedVersion: resolvedVersion,
-        package: package,
-        file: file,
-        mode: 'symbol',
-        symbolName: symbolName,
-        lineStart: startLine,
-        effectiveLineEnd: endLine,
-        truncated: false,
-        content: fullSource,
-      );
-    }
-
-    final truncatedSource = _truncateToSignature(content, node, lineInfo, startLine, endLine);
-    // If there was no brace body to elide, fall back to returning the full
-    // source untruncated rather than an arbitrary line cut.
-    if (truncatedSource == null) {
-      return _success(
-        resolvedVersion: resolvedVersion,
-        package: package,
-        file: file,
-        mode: 'symbol',
-        symbolName: symbolName,
-        lineStart: startLine,
-        effectiveLineEnd: endLine,
-        truncated: false,
-        content: fullSource,
-      );
-    }
-
     return _success(
       resolvedVersion: resolvedVersion,
       package: package,
       file: file,
       mode: 'symbol',
       symbolName: symbolName,
-      lineStart: startLine,
-      effectiveLineEnd: endLine,
-      truncated: true,
-      content: truncatedSource,
+      lineStart: slice.lineStart,
+      effectiveLineEnd: slice.effectiveLineEnd,
+      truncated: slice.truncated,
+      content: slice.content,
     );
   }
 
-  /// Collapses [node]'s body to signature + opening brace + omission comment +
-  /// closing brace. Returns `null` when the node has no brace-delimited body on
-  /// a line strictly before its last line (nothing meaningful to elide).
-  static String? _truncateToSignature(
-    String content,
-    AstNode node,
-    LineInfo lineInfo,
-    int startLine,
-    int endLine,
-  ) {
-    final braceIdx = content.indexOf('{', node.offset);
-    if (braceIdx < 0 || braceIdx >= node.end) return null;
-
-    final braceLine = lineInfo.getLocation(braceIdx).lineNumber;
-    final omittedCount = endLine - braceLine - 1;
-    if (omittedCount <= 0) return null;
-
-    // Signature: node start through the end of the opening-brace line.
-    final sigEndOffset = braceLine < lineInfo.lineCount
-        ? lineInfo.getOffsetOfLine(braceLine)
-        : content.length;
-    final signature = content.substring(node.offset, sigEndOffset).trimRight();
-
-    // Closing: the whole last line of the node (leading indent preserved).
-    final closing = content.substring(lineInfo.getOffsetOfLine(endLine - 1), node.end).trimRight();
-    final closingIndent = closing.substring(0, closing.length - closing.trimLeft().length);
-
-    return '$signature\n'
-        '$closingIndent  // ... $omittedCount lines omitted ...\n'
-        '$closing';
-  }
-
-  // ─── Symbol lookup ─────────────────────────────────────────────────────────
-
-  /// Finds the AST node for [symbolName] within [unit], or `null` if absent.
-  ///
-  /// A bare name matches a top-level declaration directly. A dotted name
-  /// (`Type.member`) delegates to [AstAccess.member] for the class-member
-  /// lookup and name normalization, taking the first match when an accessor
-  /// pair shares the member name.
-  AstNode? _findSymbol(CompilationUnit unit, String symbolName) {
-    final dot = symbolName.indexOf('.');
-    if (dot > 0) {
-      final typeName = symbolName.substring(0, dot);
-      final memberName = symbolName.substring(dot + 1);
-      final members = _astAccess.member(unit, typeName, memberName: memberName);
-      return members == null || members.isEmpty ? null : members.first;
-    }
-
-    for (final decl in unit.declarations) {
-      if (_declMatches(decl, symbolName)) return decl;
-    }
-    return null;
-  }
-
-  /// Whether top-level [decl] declares a symbol named [name].
-  static bool _declMatches(CompilationUnitMember decl, String name) {
-    if (decl is ClassDeclaration) return decl.namePart.typeName.lexeme == name;
-    if (decl is MixinDeclaration) return decl.name.lexeme == name;
-    if (decl is EnumDeclaration) return decl.namePart.typeName.lexeme == name;
-    if (decl is ExtensionDeclaration) return decl.name?.lexeme == name;
-    if (decl is FunctionDeclaration) return decl.name.lexeme == name;
-    if (decl is TypeAlias) return decl.name.lexeme == name;
-    if (decl is TopLevelVariableDeclaration) {
-      return decl.variables.variables.any((v) => v.name.lexeme == name);
-    }
-    return false;
-  }
-
   // ─── Utility helpers ───────────────────────────────────────────────────────
-
-  /// The 1-based line number of the last content character.
-  ///
-  /// Ignores the phantom trailing empty line produced when [content] ends with
-  /// a newline, so a file of N text lines reports N.
-  static int _lastLineNumber(String content, LineInfo lineInfo) {
-    if (content.isEmpty) return 1;
-    return lineInfo.getLocation(content.length - 1).lineNumber;
-  }
 
   static int? _asInt(Object? value) {
     if (value is int) return value;

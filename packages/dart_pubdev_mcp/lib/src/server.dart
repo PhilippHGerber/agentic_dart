@@ -28,11 +28,14 @@ import 'tools/find_symbols.dart';
 import 'tools/get_api_diff.dart';
 import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
+import 'tools/get_sdk_source_slice.dart';
+import 'tools/get_sdk_throw_statements.dart';
 import 'tools/get_source_slice.dart';
 import 'tools/get_symbol_documentation.dart';
 import 'tools/get_throw_statements.dart';
 import 'tools/list_package_source_files.dart';
 import 'tools/list_package_versions.dart';
+import 'tools/list_sdk_source_files.dart';
 import 'tools/search_packages.dart';
 import 'tools/tool_definitions.dart';
 import 'tools/tool_response.dart';
@@ -66,9 +69,12 @@ base class PubMcpServer extends MCPServer
   /// `list_package_versions` and the `{version}` autocomplete handler),
   /// `changelog` (`get_changelog`), `readme` (the package resource handler's
   /// `readme`, `example`, and `changelog` resources), `symbolDoc` (the
-  /// symbol-documentation handler), and `meta` (the `pub://meta/` resource
-  /// handler). This is the server's sole cache dependency — every
-  /// handler-layer store flows through the registry.
+  /// symbol-documentation handler), `meta` (the `pub://meta/` resource
+  /// handler), and `sdkSourceFiles`/`sdkAst` (shared by `get_sdk_source_slice`,
+  /// `list_sdk_source_files`, and `get_sdk_throw_statements`, distinct from
+  /// `sourceFiles`/`ast` since they read GitHub tarballs rather than pub.dev
+  /// ones). This is the server's sole
+  /// cache dependency — every handler-layer store flows through the registry.
   ///
   /// When an enabled [trace] is supplied, every tool call and resource-template
   /// read is wrapped by a central LLM-boundary tracer that assigns a Correlation
@@ -111,6 +117,7 @@ base class PubMcpServer extends MCPServer
     loggingLevel = _toLoggingLevel(config.logLevel);
     _versionResolver = VersionResolver(client: client, log: log);
     _astAccess = AstAccess(sourceFiles: cacheRegistry.sourceFiles, ast: cacheRegistry.ast);
+    _sdkAstAccess = AstAccess(sourceFiles: cacheRegistry.sdkSourceFiles, ast: cacheRegistry.sdkAst);
   }
 
   /// The central LLM-boundary tracer, or `null` when tracing is disabled.
@@ -146,6 +153,12 @@ base class PubMcpServer extends MCPServer
   /// `get_throw_statements`; constructed once alongside [_cacheRegistry] so
   /// both handlers share the same `sourceFiles`/`ast` cache entries.
   late final AstAccess _astAccess;
+
+  /// Resolves SDK source files and parsed ASTs for `get_sdk_source_slice`,
+  /// `list_sdk_source_files`, and `get_sdk_throw_statements`, distinct from
+  /// [_astAccess] — wired over `CacheRegistry.sdkSourceFiles`/`sdkAst` rather
+  /// than the pub.dev-package caches.
+  late final AstAccess _sdkAstAccess;
 
   @override
   FutureOr<InitializeResult> initialize(InitializeRequest request) async {
@@ -488,6 +501,27 @@ base class PubMcpServer extends MCPServer
     );
     _registerTracedTool(getThrowStatementsTool, getThrowStatementsHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_throw_statements');
+
+    final getSdkSourceSliceHandler = GetSdkSourceSliceHandler(
+      astAccess: _sdkAstAccess,
+      log: log,
+    );
+    _registerTracedTool(getSdkSourceSliceTool, getSdkSourceSliceHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_sdk_source_slice');
+
+    final listSdkSourceFilesHandler = ListSdkSourceFilesHandler(
+      astAccess: _sdkAstAccess,
+      log: log,
+    );
+    _registerTracedTool(listSdkSourceFilesTool, listSdkSourceFilesHandler.call);
+    log(LoggingLevel.debug, 'registered tool: list_sdk_source_files');
+
+    final getSdkThrowStatementsHandler = GetSdkThrowStatementsHandler(
+      astAccess: _sdkAstAccess,
+      log: log,
+    );
+    _registerTracedTool(getSdkThrowStatementsTool, getSdkThrowStatementsHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_sdk_throw_statements');
   }
 
   void _registerResources() {

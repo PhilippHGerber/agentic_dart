@@ -45,6 +45,8 @@ Fields:
 | `EXAMPLE_NOT_FOUND` | no | Package example page is absent or empty |
 | `SOURCE_FILE_NOT_FOUND` | no | Requested path is not present in the package tarball |
 | `PACKAGE_TOO_LARGE` | no | Tarball download exceeded the per-package size limit |
+| `SDK_VERSION_NOT_FOUND` | no | No SDK release matches the resolved or supplied version (`details.sdk`: `dart`/`flutter`) |
+| `SDK_NOT_DETECTED` | no | No local Flutter install found via `FLUTTER_ROOT`/`PATH` and no explicit `version` override given (`details.sdk`) |
 
 ## Considered options
 

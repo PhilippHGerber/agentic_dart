@@ -13,6 +13,7 @@ import 'package:dart_pubdev_mcp/src/identity.dart';
 import 'package:dart_pubdev_mcp/src/resources/package_resources.dart';
 import 'package:dart_pubdev_mcp/src/server.dart';
 import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show listPackageVersionsTool;
+import 'package:dart_pubdev_mcp/src/tools/tool_descriptions.dart' show kServerInstructions;
 import 'package:dart_pubdev_mcp/src/update/update_check_state_store.dart';
 import 'package:dart_pubdev_mcp/src/version.dart';
 import 'package:mocktail/mocktail.dart';
@@ -305,7 +306,47 @@ void main() {
         expect(tool.inputSchema.required, containsAll(['package', 'file']));
       });
 
-      // All 12 tools this server registers — kept in sync with
+      test('lists get_sdk_source_slice after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('get_sdk_source_slice'));
+      });
+
+      test('get_sdk_source_slice input schema marks sdk and file as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'get_sdk_source_slice');
+        expect(tool.inputSchema.required, containsAll(['sdk', 'file']));
+      });
+
+      test(
+        'get_sdk_source_slice input schema declares library and package as optional '
+        '(the per-sdk selector is validated by the handler, not the schema)',
+        () async {
+          await doInitialize();
+          final tools = await serverConnection.listTools(ListToolsRequest());
+          final tool = tools.tools.firstWhere((t) => t.name == 'get_sdk_source_slice');
+          expect(tool.inputSchema.required, isNot(contains('library')));
+          expect(tool.inputSchema.required, isNot(contains('package')));
+        },
+      );
+
+      test('lists list_sdk_source_files after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('list_sdk_source_files'));
+      });
+
+      test('list_sdk_source_files input schema marks only sdk as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'list_sdk_source_files');
+        expect(tool.inputSchema.required, equals(['sdk']));
+      });
+
+      // All 15 tools this server registers — kept in sync with
       // tool_definitions.dart. Used to assert every tool carries a title and
       // truthful, read-only/open-world annotations.
       const allToolNames = [
@@ -321,13 +362,39 @@ void main() {
         'compare_packages',
         'list_package_versions',
         'get_api_diff',
+        'get_sdk_source_slice',
+        'list_sdk_source_files',
+        'get_sdk_throw_statements',
       ];
 
-      test('lists exactly the 12 expected tools', () async {
+      test('lists exactly the 15 expected tools', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final names = tools.tools.map((t) => t.name).toSet();
         expect(names, equals(allToolNames.toSet()));
+      });
+
+      test('every registered tool is named in kServerInstructions', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        for (final name in tools.tools.map((t) => t.name)) {
+          expect(
+            kServerInstructions,
+            contains(name),
+            reason: '$name should be named in kServerInstructions',
+          );
+        }
+      });
+
+      test('every registered tool has a row in README.md', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final readme = File(
+          '${Directory.current.path}/README.md',
+        ).readAsStringSync();
+        for (final name in tools.tools.map((t) => t.name)) {
+          expect(readme, contains(name), reason: '$name should have a row in README.md');
+        }
       });
 
       test('every tool has a non-empty, no-trailing-period title', () async {

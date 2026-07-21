@@ -15,6 +15,7 @@ import '../data/changelog_parser.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
+import '../data/sdk_client.dart';
 import '../resources/scoring_content.dart';
 import '../trace/wire_trace.dart';
 import 'keyed_cache.dart';
@@ -182,28 +183,40 @@ final class CacheRegistry {
   /// is the HTTP client the `meta` facade uses for the two Google Storage SDK-
   /// version endpoints — a separate boundary from [client]'s pub.dev calls.
   /// Supply it in tests to mock those endpoints; production callers may omit
-  /// it and get an internally-created client that [dispose] closes.
+  /// it and get an internally-created client that [dispose] closes. [sdkClient]
+  /// is the `codeload.github.com` gateway `sdkSourceFiles` fetches through —
+  /// pass the same instance wired to [client]'s `TarballDiskCache` so SDK and
+  /// pub.dev tarballs share one on-disk cache directory (ADR 0006); production
+  /// callers may omit it and get an internally-created client that [dispose]
+  /// closes.
   factory CacheRegistry({
     required PubDevClient client,
     WireTrace? trace,
     Clock? clock,
     http.Client? metaHttpClient,
+    SdkClient? sdkClient,
   }) => CacheRegistry._(
     client: client,
     trace: trace,
     clock: clock,
     metaHttpClient: metaHttpClient ?? http.Client(),
     metaHttpOwned: metaHttpClient == null,
+    sdkClient: sdkClient ?? SdkClient(),
+    sdkClientOwned: sdkClient == null,
   );
 
   CacheRegistry._({
     required PubDevClient client,
     required http.Client metaHttpClient,
     required bool metaHttpOwned,
+    required SdkClient sdkClient,
+    required bool sdkClientOwned,
     WireTrace? trace,
     Clock? clock,
   }) : _metaHttpClient = metaHttpClient,
        _metaHttpOwned = metaHttpOwned,
+       _sdkClient = sdkClient,
+       _sdkClientOwned = sdkClientOwned,
        packageDetail = KeyedCache<PackageDetailId, PackageDetail>(
          keyOf: (id) => 'package:${id.name}:${id.version}',
          ttl: kPackageMetadataTtl,
@@ -248,6 +261,42 @@ final class CacheRegistry {
        ),
        ast = KeyedCache<AstSnapshotId, ParseStringResult>(
          keyOf: (id) => 'ast:${id.name}:${id.version}:${id.path}',
+         ttl: kAstSnapshotTtl,
+         fetch: (id) async => PubDevSuccess(
+           parseString(content: id.content, path: id.path, throwIfDiagnostics: false),
+         ),
+         clock: clock,
+         trace: trace,
+       ),
+       // `id.name` is the fixed per-SDK cache name ('dart_sdk' / 'flutter_sdk')
+       // every handler passes — see ADR 0006's cache-key scheme.
+       sdkSourceFiles = KeyedCache<SourceFilesId, Map<String, String>>(
+         keyOf: (id) => 'sdk_source:${id.name}:${id.version}',
+         ttl: kSourceFileTtl,
+         fetch: (id) async {
+           final isFlutter = id.name == 'flutter_sdk';
+           final result = await sdkClient.getSourceFiles(
+             sdkId: isFlutter ? 'flutter' : 'dart',
+             cacheName: id.name,
+             owner: isFlutter ? 'flutter' : 'dart-lang',
+             repo: isFlutter ? 'flutter' : 'sdk',
+             ref: id.version,
+           );
+           return switch (result) {
+             // The Flutter tag tarball's packages/<name>/lib/... layout
+             // already matches the installed layout — no stripping needed,
+             // unlike the Dart SDK's sdk/ wrapper (see ADR 0006).
+             PubDevSuccess(:final value) => PubDevSuccess(
+               isFlutter ? value : _stripDartSdkRepoPrefix(value),
+             ),
+             PubDevFailure() => result,
+           };
+         },
+         clock: clock,
+         trace: trace,
+       ),
+       sdkAst = KeyedCache<AstSnapshotId, ParseStringResult>(
+         keyOf: (id) => 'sdk_ast:${id.name}:${id.version}:${id.path}',
          ttl: kAstSnapshotTtl,
          fetch: (id) async => PubDevSuccess(
            parseString(content: id.content, path: id.path, throwIfDiagnostics: false),
@@ -328,6 +377,12 @@ final class CacheRegistry {
   /// [dispose].
   final bool _metaHttpOwned;
 
+  final SdkClient _sdkClient;
+
+  /// Whether [_sdkClient] was created internally and must be closed by
+  /// [dispose].
+  final bool _sdkClientOwned;
+
   /// Resolves [PackageDetail] by `(name, version)`.
   ///
   /// Shared by `get_package` and `compare_packages`, so the same package's
@@ -362,6 +417,17 @@ final class CacheRegistry {
   /// fails in a cache sense, so the fetch closure always returns
   /// [PubDevSuccess].
   final KeyedCache<AstSnapshotId, ParseStringResult> ast;
+
+  /// Resolves an extracted SDK source-file map by `(cacheName, ref)` — either
+  /// `dart_sdk` or `flutter_sdk`.
+  ///
+  /// Shared by every SDK-source tool handler, mirroring [sourceFiles]'s role
+  /// for pub.dev packages.
+  final KeyedCache<SourceFilesId, Map<String, String>> sdkSourceFiles;
+
+  /// Resolves a parsed-AST snapshot for SDK source by the file coordinate
+  /// (`name`, `version`, `path`), mirroring [ast]'s role for pub.dev packages.
+  final KeyedCache<AstSnapshotId, ParseStringResult> sdkAst;
 
   /// Resolves a search-results page by the full query tuple.
   ///
@@ -398,15 +464,35 @@ final class CacheRegistry {
   /// `scoring` and `sdk-versions` meta resources.
   final KeyedCache<MetaId, String> meta;
 
-  /// Closes the `meta` facade's HTTP client if it was created internally (no
-  /// `metaHttpClient` was supplied at construction).
+  /// Closes the `meta` facade's HTTP client and [_sdkClient] if either was
+  /// created internally (no `metaHttpClient`/`sdkClient` was supplied at
+  /// construction).
   ///
   /// Call when the registry is no longer needed — e.g. from
   /// `PubMcpServer.shutdown` — so a server that never received an explicit
-  /// `metaHttpClient` still closes the connection it opened.
+  /// `metaHttpClient`/`sdkClient` still closes the connections it opened.
   void dispose() {
     if (_metaHttpOwned) _metaHttpClient.close();
+    if (_sdkClientOwned) _sdkClient.close();
   }
+}
+
+// ─── sdkSourceFiles: Dart SDK path normalization ──────────────────────────────
+
+/// Normalizes a `dart-lang/sdk` repo-relative source-file map to the
+/// installed-style shape `get_sdk_source_slice` addresses: strips the raw
+/// tarball's `sdk/` top-level prefix (`sdk/lib/core/list.dart` →
+/// `lib/core/list.dart`) and drops every entry outside that subtree (`tests/`,
+/// `docs/`, `tools/`, …) — content an installed Dart SDK never contains, so
+/// it is never a valid `get_sdk_source_slice` lookup target. See ADR 0006.
+Map<String, String> _stripDartSdkRepoPrefix(Map<String, String> files) {
+  const prefix = 'sdk/';
+  final stripped = <String, String>{};
+  for (final entry in files.entries) {
+    if (!entry.key.startsWith(prefix)) continue;
+    stripped[entry.key.substring(prefix.length)] = entry.value;
+  }
+  return stripped;
 }
 
 // ─── meta: SDK-versions fetch ────────────────────────────────────────────────

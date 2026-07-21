@@ -121,3 +121,40 @@ void stubTarball(
         : http.StreamedResponse(const Stream.empty(), statusCode),
   );
 }
+
+/// Builds an in-memory gzipped tarball from [files] (path → content),
+/// wrapping every entry under [wrapperDir]/ the way a GitHub `codeload`
+/// tarball wraps its contents under a `{repo}-{ref}/` top-level directory.
+Uint8List buildGithubTarGz(Map<String, String> files, {required String wrapperDir}) =>
+    buildTarGz({for (final entry in files.entries) '$wrapperDir/${entry.key}': entry.value});
+
+/// Stubs an SDK source tarball on `codeload.github.com/{owner}/{repo}/tar.gz/...`
+/// (`send`, not `get`) with a GitHub-shaped gzip archive built from [files] —
+/// each entry wrapped under a synthetic `{repo}-{ref}/` top-level directory,
+/// as `SdkClient` expects to strip. A non-200 [statusCode] returns an empty
+/// streamed body, e.g. to simulate `SDK_VERSION_NOT_FOUND` via a 404.
+void stubSdkTarball(
+  MockHttpClient mock,
+  Map<String, String> files, {
+  String owner = 'dart-lang',
+  String repo = 'sdk',
+  String ref = '3.12.2',
+  int statusCode = 200,
+}) {
+  when(
+    () => mock.send(
+      any(
+        that: predicate<http.BaseRequest>(
+          (r) => r.url.toString().contains('/$owner/$repo/tar.gz/'),
+        ),
+      ),
+    ),
+  ).thenAnswer(
+    (_) async => statusCode == 200
+        ? http.StreamedResponse(
+            Stream.value(buildGithubTarGz(files, wrapperDir: '$repo-$ref')),
+            200,
+          )
+        : http.StreamedResponse(const Stream.empty(), statusCode),
+  );
+}

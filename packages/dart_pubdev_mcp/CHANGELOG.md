@@ -3,6 +3,19 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- SDK source reading, per [ADR 0006](docs/adr/0006-sdk-source-reading.md): three
+  new tools spanning both the Dart SDK and the Flutter SDK/framework via an
+  `sdk: 'dart' | 'flutter'` selector, backed by download-only GitHub tarballs.
+  - `get_sdk_source_slice` — line-range mode and symbol-bounded mode (AST-located
+    class/mixin/enum/function/typedef/variable, or member via `ClassName.member`).
+  - `list_sdk_source_files` — directory/extension-filtered file listing.
+  - `get_sdk_throw_statements` — scans throw expressions in a class or top-level
+    function, with surrounding control-flow context.
+
 ## [0.6.1]
 
 ### Added

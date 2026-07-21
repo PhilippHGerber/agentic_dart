@@ -115,6 +115,9 @@ validate against a typed contract.
 | `get_throw_statements` | Every `throw` in a class or method, with surrounding control-flow context. | `package` (required); `class`; `method` (at least one of `class`/`method` required); `version` |
 | `get_source_slice` | Read source from one file — by line range, or by symbol name via the analyzer AST. | `package`, `file` (required); `version`; `lineStart`/`lineEnd`; `symbolName`; `maxLines` (collapse large symbols) |
 | `list_package_source_files` | Browse a package's file tree, filtered by directory prefix and/or extension. | `package` (required); `version`; `directory`; `fileExtension` |
+| `get_sdk_source_slice` | Read Dart SDK (`dart:core`, `dart:async`, …) or Flutter SDK/framework (`package:flutter`, `flutter_test`, …) source — by line range, or by symbol name via the analyzer AST — not published on pub.dev, so `get_source_slice` can't reach it. | `sdk`, `file` (required); `library` (Dart) or `package` (Flutter), whichever `sdk` selects; `version` (defaults to the running Dart SDK version, or the local Flutter install's framework version); `lineStart`/`lineEnd`; `symbolName`; `maxLines` (collapse large symbols) |
+| `list_sdk_source_files` | Browse the Dart SDK's or Flutter SDK/framework's file tree, filtered by `library` (Dart) or `package` (Flutter). | `sdk` (required); `library` (Dart) or `package` (Flutter), whichever `sdk` selects — omit either to list every file; `version` (defaults as `get_sdk_source_slice` does) |
+| `get_sdk_throw_statements` | Every `throw` in a class or method within the Dart SDK or Flutter SDK/framework — the SDK-source counterpart to `get_throw_statements`. | `sdk` (required); `library` (Dart) or `package` (Flutter), whichever `sdk` selects; `class`; `method` (at least one of `class`/`method` required); `version` (defaults as `get_sdk_source_slice` does) |
 
 Errors from any tool carry a machine-readable `code` and a `suggestion`
 field describing the next step (e.g. `AMBIGUOUS_SYMBOL` includes candidate
@@ -132,6 +135,9 @@ qualified names to retry with).
   `breaking` flags → `get_api_diff` for the precise symbol-level delta.
 - **Choosing between packages:** `search_packages` → `compare_packages` on
   the top candidates.
+- **SDK exploration:** `list_sdk_source_files` to discover a file path when
+  unknown → `get_sdk_throw_statements` for exception surface →
+  `get_sdk_source_slice` for implementation detail.
 
 ## Resources
 

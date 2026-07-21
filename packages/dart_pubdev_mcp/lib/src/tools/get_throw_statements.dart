@@ -67,8 +67,6 @@
 library;
 
 import 'package:analyzer/dart/analysis/results.dart';
-import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/source/line_info.dart';
 import 'package:dart_mcp/server.dart';
 
 import '../analysis/ast_access.dart';
@@ -76,6 +74,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'throw_scan.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -192,7 +191,7 @@ final class GetThrowStatementsHandler {
     // homonymous types.
     final aggregated = <Map<String, Object?>>[];
     var classWasFound = false;
-    for (final filePath in _sortedDartPaths(files.keys)) {
+    for (final filePath in sortedDartPaths(files.keys)) {
       final partialResults = await _scanEntireClassInFile(
         package,
         resolvedVersion,
@@ -216,7 +215,7 @@ final class GetThrowStatementsHandler {
   /// caller to continue scanning other files.
   ///
   /// Returns a (possibly empty) list of throw records when the class is found.
-  /// Field declarations are excluded — [_memberName] returns `null` for them
+  /// Field declarations are excluded — `memberName` returns `null` for them
   /// and they have no stable `method` name for the response contract.
   Future<List<Map<String, Object?>>?> _scanEntireClassInFile(
     String package,
@@ -242,18 +241,9 @@ final class GetThrowStatementsHandler {
     // no stable "method" name to include in the response).
     final results = <Map<String, Object?>>[];
     for (final member in members) {
-      final memberName = _memberName(member);
-      if (memberName == null) continue; // skip FieldDeclaration
-      _collectThrows(
-        member,
-        ast.lineInfo,
-        ast.content,
-        filePath,
-        className,
-        memberName,
-        null,
-        results,
-      );
+      final name = memberName(member);
+      if (name == null) continue; // skip FieldDeclaration
+      collectThrows(member, ast.lineInfo, ast.content, filePath, className, name, null, results);
     }
     return results;
   }
@@ -279,7 +269,7 @@ final class GetThrowStatementsHandler {
     // return `SYMBOL_NOT_FOUND` from a homonymous class that doesn't have
     // the requested method, ignoring the second class that does.
     var classWasFound = false;
-    for (final filePath in _sortedDartPaths(files.keys)) {
+    for (final filePath in sortedDartPaths(files.keys)) {
       final (:result, :classFound) = await _scanClassMethodInFile(
         package,
         resolvedVersion,
@@ -343,7 +333,7 @@ final class GetThrowStatementsHandler {
     // and setter) can share `method`, and both must be scanned.
     final results = <Map<String, Object?>>[];
     for (final member in matches) {
-      _collectThrows(member, ast.lineInfo, ast.content, filePath, className, method, null, results);
+      collectThrows(member, ast.lineInfo, ast.content, filePath, className, method, null, results);
     }
     return (result: _successJson(results, resolvedVersion), classFound: true);
   }
@@ -440,14 +430,14 @@ final class GetThrowStatementsHandler {
         case PubDevSuccess(:final value):
           ast = value;
       }
-      final funcDecl = _findTopLevelFunction(ast, unqualifiedName);
+      final funcDecl = findTopLevelFunction(ast.unit, unqualifiedName);
       if (funcDecl != null) {
         // Start traversal from the function body, not the FunctionDeclaration —
-        // FunctionDeclaration contains a FunctionExpression child, and
-        // _visitThrows stops at FunctionExpression to suppress closures.
+        // FunctionDeclaration contains a FunctionExpression child, and throw
+        // collection stops at FunctionExpression to suppress closures.
         // Starting from the body bypasses that check for the outermost scope.
         final results = <Map<String, Object?>>[];
-        _collectThrows(
+        collectThrows(
           funcDecl.functionExpression.body,
           ast.lineInfo,
           ast.content,
@@ -472,210 +462,7 @@ final class GetThrowStatementsHandler {
     );
   }
 
-  // ─── AST traversal helpers ────────────────────────────────────────────────
-
-  /// Finds the first top-level function named [name] in [ast].
-  static FunctionDeclaration? _findTopLevelFunction(
-    ParseStringResult ast,
-    String name,
-  ) {
-    for (final decl in ast.unit.declarations) {
-      if (decl is FunctionDeclaration && decl.name.lexeme == name) {
-        return decl;
-      }
-    }
-    return null;
-  }
-
-  /// Returns the display name of [member], or `null` for field declarations.
-  static String? _memberName(ClassMember member) {
-    if (member is MethodDeclaration) return member.name.lexeme;
-    if (member is ConstructorDeclaration) {
-      final name = member.name?.lexeme;
-      return name ?? 'new';
-    }
-    return null;
-  }
-
-  // ─── Throw collection ─────────────────────────────────────────────────────
-
-  /// Recursively collects throw and rethrow expressions from [node] into [results].
-  ///
-  /// [className] and [methodName] tag class-member results.
-  /// [functionName] tags top-level-function results.
-  ///
-  /// `rethrow` statements produce a record with `thrown_type == "rethrow"`.
-  static void _collectThrows(
-    AstNode node,
-    LineInfo lineInfo,
-    String source,
-    String filePath,
-    String? className,
-    String? methodName,
-    String? functionName,
-    List<Map<String, Object?>> results,
-  ) {
-    _visitThrows(node, (Expression throwLike) {
-      final contextNode = _contextNodeFor(throwLike);
-      final thrownType = throwLike is ThrowExpression
-          ? _thrownType(throwLike.expression)
-          : 'rethrow';
-      results.add({
-        'file': filePath,
-        'class': ?className,
-        'method': ?methodName,
-        'function': ?functionName,
-        'thrown_type': thrownType,
-        'context': _contextSnippet(contextNode, throwLike, source, lineInfo),
-      });
-    });
-  }
-
-  /// Recursively visits [node] and calls [onThrowLike] for each
-  /// [ThrowExpression] or [RethrowExpression].
-  ///
-  /// Does not recurse into [FunctionExpression] nodes (closures / lambdas) —
-  /// throws inside anonymous functions are not direct throws of the enclosing
-  /// method scope.
-  static void _visitThrows(AstNode node, void Function(Expression) onThrowLike) {
-    if (node is ThrowExpression) {
-      onThrowLike(node);
-      return; // Do not recurse deeper from a throw.
-    }
-    if (node is RethrowExpression) {
-      onThrowLike(node);
-      return; // Do not recurse deeper from a rethrow.
-    }
-    if (node is FunctionExpression) {
-      return; // Suppress recursion into anonymous functions.
-    }
-    for (final entity in node.childEntities) {
-      if (entity is AstNode) {
-        _visitThrows(entity, onThrowLike);
-      }
-    }
-  }
-
-  // ─── Context node selection ───────────────────────────────────────────────
-
-  /// Returns the nearest enclosing node that provides meaningful context for
-  /// [node].
-  ///
-  /// Walks up the parent chain:
-  /// - Returns immediately on control-flow statements (`if`, `switch`, `for`,
-  ///   `while`, `do`, `try`) — these give the richest context.
-  /// - Tracks the most-recently-seen non-[Block] [Statement] as a fallback.
-  /// - Stops at [FunctionBody] / [MethodDeclaration] / [FunctionDeclaration]
-  ///   boundaries to avoid leaking context into sibling nodes.
-  static AstNode _contextNodeFor(Expression node) {
-    AstNode? lastNonBlockStatement;
-    var current = node.parent;
-    while (current != null) {
-      if (current is FunctionBody ||
-          current is MethodDeclaration ||
-          current is FunctionDeclaration) {
-        break;
-      }
-      if (current is IfStatement ||
-          current is SwitchStatement ||
-          current is ForStatement ||
-          current is WhileStatement ||
-          current is DoStatement ||
-          current is TryStatement) {
-        return current;
-      }
-      if (current is Statement && current is! Block) {
-        lastNonBlockStatement = current;
-      }
-      current = current.parent;
-    }
-    return lastNonBlockStatement ?? node;
-  }
-
-  /// Extracts up to three lines of source around [throwLike] within [contextNode].
-  static String _contextSnippet(
-    AstNode contextNode,
-    AstNode throwLike,
-    String source,
-    LineInfo lineInfo,
-  ) {
-    const maxLines = 3;
-
-    final contextStartLine = lineInfo.getLocation(contextNode.offset).lineNumber - 1;
-    final contextEndOffset = contextNode.end > contextNode.offset
-        ? contextNode.end - 1
-        : contextNode.end;
-    final contextEndLine = lineInfo.getLocation(contextEndOffset).lineNumber - 1;
-    final throwLine = lineInfo.getLocation(throwLike.offset).lineNumber - 1;
-
-    var startLine = throwLine > contextStartLine ? throwLine - 1 : throwLine;
-    if (startLine < contextStartLine) startLine = contextStartLine;
-
-    var endLine = startLine + maxLines - 1;
-    if (endLine > contextEndLine) {
-      endLine = contextEndLine;
-      startLine = endLine - maxLines + 1;
-      if (startLine < contextStartLine) startLine = contextStartLine;
-    }
-
-    final startOffset = lineInfo.getOffsetOfLine(startLine);
-    final endOffset = endLine + 1 < lineInfo.lineCount
-        ? lineInfo.getOffsetOfLine(endLine + 1)
-        : source.length;
-    return source.substring(startOffset, endOffset).trimRight();
-  }
-
-  // ─── Thrown type extraction ───────────────────────────────────────────────
-
-  /// Extracts the type name from the thrown [expr].
-  ///
-  /// Handles:
-  /// - [InstanceCreationExpression]: `throw new/const SomeError(...)`
-  /// - [MethodInvocation]: `throw SomeError(...)` (no-new syntax) or
-  ///   `throw SomeError.named(...)`
-  /// - [SimpleIdentifier]: `throw someVariable`
-  /// - [PrefixedIdentifier]: `throw SomeError.instance` (prefix is the class)
-  /// - [PropertyAccess]: chained property access
-  /// - [ParenthesizedExpression]: unwraps once and recurses
-  /// - Fallback: first uppercase token in the expression source text
-  static String _thrownType(Expression expr) {
-    if (expr is InstanceCreationExpression) {
-      return expr.constructorName.type.name.lexeme;
-    }
-    if (expr is MethodInvocation) {
-      final target = expr.target;
-      if (target == null) {
-        // `throw SomeError(...)` — no-new constructor, parsed as method call.
-        return expr.methodName.name;
-      }
-      if (target is SimpleIdentifier) return target.name;
-      if (target is PrefixedIdentifier) return target.identifier.name;
-      return expr.methodName.name;
-    }
-    if (expr is SimpleIdentifier) return expr.name;
-    if (expr is PrefixedIdentifier) {
-      // `throw SomeError.instance` — the class is the prefix.
-      return expr.prefix.name;
-    }
-    if (expr is PropertyAccess) {
-      final target = expr.target;
-      if (target is SimpleIdentifier) return target.name;
-      if (target is PrefixedIdentifier) return target.prefix.name;
-    }
-    if (expr is ParenthesizedExpression) return _thrownType(expr.expression);
-    // Fallback: first uppercase token in the expression source.
-    final text = expr.toSource();
-    final match = RegExp('[A-Z][A-Za-z0-9_]*').firstMatch(text);
-    return match?.group(0) ?? 'Unknown';
-  }
-
   // ─── Utility helpers ──────────────────────────────────────────────────────
-
-  /// Sorts [paths] so `lib/` files are searched before other directories.
-  static List<String> _sortedDartPaths(Iterable<String> paths) => [
-    ...paths.where((k) => k.endsWith('.dart') && k.startsWith('lib/')),
-    ...paths.where((k) => k.endsWith('.dart') && !k.startsWith('lib/')),
-  ];
 
   /// Maps a dartdoc href to candidate source file paths.
   static List<String> _hrefToSourcePaths(String href) {

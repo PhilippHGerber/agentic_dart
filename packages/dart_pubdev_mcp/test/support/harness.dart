@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:dart_pubdev_mcp/src/cache/cache_registry.dart';
 import 'package:dart_pubdev_mcp/src/data/pub_client.dart';
+import 'package:dart_pubdev_mcp/src/data/sdk_client.dart';
 import 'package:dart_pubdev_mcp/src/trace/wire_trace.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
@@ -77,19 +78,27 @@ class TestStack {
   TestStack({DateTime Function()? clock, WireTrace? trace}) : http = MockHttpClient() {
     _registerHttpFallbacks();
     client = PubDevClient(httpClient: http, retryPolicy: instantRetryPolicy, trace: trace);
-    caches = CacheRegistry(client: client, clock: clock, trace: trace);
+    sdkClient = SdkClient(httpClient: http, retryPolicy: instantRetryPolicy);
+    caches = CacheRegistry(client: client, sdkClient: sdkClient, clock: clock, trace: trace);
   }
 
-  /// The mock HTTP client backing [client]. Stub it with [stubUrl] or a
-  /// direct `when(...)` call before exercising a handler built on [caches].
+  /// The mock HTTP client backing [client] and [sdkClient]. Stub it with
+  /// [stubUrl] or a direct `when(...)` call before exercising a handler built
+  /// on [caches].
   final MockHttpClient http;
 
   /// The real [PubDevClient] wired to [http].
   late final PubDevClient client;
 
-  /// The real [CacheRegistry] wired to [client].
+  /// The real [SdkClient] wired to [http].
+  late final SdkClient sdkClient;
+
+  /// The real [CacheRegistry] wired to [client] and [sdkClient].
   late final CacheRegistry caches;
 
-  /// Closes [client]'s underlying HTTP connection.
-  void close() => client.close();
+  /// Closes [client]'s and [sdkClient]'s underlying HTTP connections.
+  void close() {
+    client.close();
+    sdkClient.close();
+  }
 }
