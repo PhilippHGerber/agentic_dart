@@ -16,27 +16,27 @@ maintainer would.
 
 ## Why it exists
 
-Agents without this server tend to guess package names, hallucinate APIs, or
-paste in stale advice from training data. `dart-pubdev-explorer` backs every
-answer with a live call to pub.dev, dartdoc, or the package tarball itself,
-so an agent's answer is grounded instead of guessed.
+Without live registry access, agents tend to:
 
-## Features
+- Recommend deprecated or unmaintained packages.
+- Invent API method signatures that don't exist, or that changed versions ago.
+- Miss breaking changes between the version they trained on and the version
+  installed.
+- Have no access at all to Dart/Flutter SDK framework source.
 
-- **Find the right package.** `search_packages` ranks by relevance, likes,
-  pub points, or recency, filtered by SDK and platform.
-- **Read the real docs.** Full READMEs, examples, changelogs, and
-  `pubspec.yaml`, fetched at the exact version being targeted.
-- **Browse the API like a human would.** Search a package's public symbols
-  by name or keyword, then read full signatures, doc comments, and every
-  `throw` site.
-- **Read exact source.** Pull a file by line range or by symbol name —
-  resolved through the analyzer AST — without downloading and unpacking a
-  tarball by hand.
-- **Compare candidates side by side.** Score, platform support, and
-  maintenance signals for 2–5 packages in one call.
-- **Plan upgrades with confidence.** Structured changelog entries flagged
-  `breaking`, plus a symbol-level diff between any two versions.
+`dart-pubdev-explorer` backs every answer with a live call to pub.dev,
+dartdoc, or the package tarball itself, so the agent's answer is grounded
+instead of guessed.
+
+For example, ask:
+
+> "Compare `dio` and `http` for a Flutter app that needs file uploads —
+> which has better platform support and is more actively maintained?"
+
+The agent resolves this itself: `search_packages` to confirm both names
+exist, `compare_packages` for the side-by-side score/platform/maintenance
+matrix, then `get_symbol_documentation` if it needs to check a specific API
+before recommending one.
 
 ## Quick start
 
@@ -61,8 +61,16 @@ name).
 
 ### 2. Configure your MCP client
 
-Add a stdio server entry pointing at the installed executable. For example,
-in Claude Code / Claude Desktop's `.mcp.json`:
+All clients run the same stdio command with no arguments — only the config
+shape differs.
+
+**Claude Code (CLI)**
+
+```bash
+claude mcp add dart-pubdev-explorer -- dart-pubdev-explorer
+```
+
+**Cursor / VS Code / Antigravity / Windsurf (`.mcp.json`)**
 
 ```json
 {
@@ -74,86 +82,101 @@ in Claude Code / Claude Desktop's `.mcp.json`:
 }
 ```
 
-Any MCP client that speaks stdio works the same way — Cursor, Windsurf, Zed,
-and others follow the same shape, a bare command with no arguments required.
-Pass any of the [CLI flags](#configuration) below in `args` if you need
-non-default behavior.
+**Zed (`settings.json`)**
+
+```json
+{
+  "context_servers": {
+    "dart-pubdev-explorer": {
+      "command": {
+        "path": "dart-pubdev-explorer"
+      }
+    }
+  }
+}
+```
+
+Pass any of the [CLI flags](#configuration) below as extra args if you need
+non-default behavior (custom cache directory, verbose logging, etc.).
 
 ### 3. Try it
 
 Once connected, ask your agent something that needs live package data
-instead of training-data guesses, for example:
+instead of a training-data guess:
 
-> "Compare `dio` and `http` for a Flutter app that needs file uploads —
-> which has better platform support and is more actively maintained?"
-
-The agent resolves this itself: `search_packages` to confirm both names
-exist, `compare_packages` for the side-by-side score/platform/maintenance
-matrix, then `get_symbol_documentation` if it needs to check a specific API
-before recommending one.
+- "Find actively maintained Flutter state-management packages with web and
+  iOS support."
+- "Compare `dio` and `http` for file upload support, popularity, and pub
+  points."
+- "Show the signature and doc comment for `http.Client.send`."
+- "List the breaking changes in `go_router` between 12.0.0 and 14.0.0."
+- "Show how `StreamController` handles cancellation in `dart:async`."
 
 ## Tools
 
-All tools return JSON. Every tool that accepts a package `version` omits it
-to resolve the latest stable release, and the response then carries a
-`resolvedVersion` field naming what was actually used. Every tool but
-`search_packages` also declares an `outputSchema` and returns a matching
-`structuredContent` block alongside its text response, for clients that
-validate against a typed contract.
+All tools return JSON and resolve to the latest stable version when
+`version` is omitted.
 
-| Tool | Purpose | Key parameters |
-|---|---|---|
-| `search_packages` | Find packages by keyword; the usual starting point. | `query` (required); `limit` (1–20, default 5); `page`; `sdk` (`dart`\|`flutter`); `platform` (`android`\|`ios`\|`web`\|`linux`\|`macos`\|`windows`); `sort` (`relevance`\|`likes`\|`pub_points`\|`updated`) |
-| `get_package` | Full metadata for one package — score, SDK constraints, dependency count. | `package` (required); `version` (omit for latest) |
-| `compare_packages` | Side-by-side score/platform/maintenance matrix for 2–5 candidates. | `packages` (required, 2–5 entries) |
-| `list_package_versions` | All published versions, bucketed into stable/prerelease/retracted with publish dates. | `package` (required) |
-| `get_changelog` | Structured changelog entries with a `breaking` flag per entry. | `package` (required); `fromVersion` (skip already-known entries); `limit` (default 5) |
-| `get_api_diff` | Symbols added/removed between two versions (presence-based, not signature diffs). | `package`, `fromVersion`, `toVersion` (all required) |
-| `browse_api_symbols` | Substring lookup over the dartdoc symbol index, narrowable by `kind` (class/method/enum/etc.); use `find_symbols` for fuzzy, multi-token discovery. | `package`, `query` (required); `kind` (class/method/enum/etc.); `limit` (1–25, default 10); `version` |
-| `find_symbols` | Fuzzy, multi-token discovery over the same symbol index as `browse_api_symbols` (order-independent), capped at 20 results; no `kind` filter. | `package`, `query` (required); `version` |
-| `get_symbol_documentation` | Full signature and doc comment for a known symbol (short name or qualified, e.g. `Client.send`). | `package`, `symbol` (required); `version` |
-| `get_throw_statements` | Every `throw` in a class or method, with surrounding control-flow context. | `package` (required); `class`; `method` (at least one of `class`/`method` required); `version` |
-| `get_source_slice` | Read source from one file — by line range, or by symbol name via the analyzer AST. | `package`, `file` (required); `version`; `lineStart`/`lineEnd`; `symbolName`; `maxLines` (collapse large symbols) |
-| `list_package_source_files` | Browse a package's file tree, filtered by directory prefix and/or extension. | `package` (required); `version`; `directory`; `fileExtension` |
-| `get_sdk_source_slice` | Read Dart SDK (`dart:core`, `dart:async`, …) or Flutter SDK/framework (`package:flutter`, `flutter_test`, …) source — by line range, or by symbol name via the analyzer AST — not published on pub.dev, so `get_source_slice` can't reach it. | `sdk`, `file` (required); `library` (Dart) or `package` (Flutter), whichever `sdk` selects; `version` (defaults to the running Dart SDK version, or the local Flutter install's framework version); `lineStart`/`lineEnd`; `symbolName`; `maxLines` (collapse large symbols) |
-| `list_sdk_source_files` | Browse the Dart SDK's or Flutter SDK/framework's file tree, filtered by `library` (Dart) or `package` (Flutter). | `sdk` (required); `library` (Dart) or `package` (Flutter), whichever `sdk` selects — omit either to list every file; `version` (defaults as `get_sdk_source_slice` does) |
-| `get_sdk_throw_statements` | Every `throw` in a class or method within the Dart SDK or Flutter SDK/framework — the SDK-source counterpart to `get_throw_statements`. | `sdk` (required); `library` (Dart) or `package` (Flutter), whichever `sdk` selects; `class`; `method` (at least one of `class`/`method` required); `version` (defaults as `get_sdk_source_slice` does) |
+### Package discovery and evaluation
+
+- **`search_packages`** — find packages by keyword, filtered by SDK,
+  platform, and sort order. Your starting point for "what should I use for X."
+- **`get_package`** — full metadata for one package: score, SDK constraints,
+  dependencies.
+- **`compare_packages`** — score/platform/maintenance side by side for 2–5
+  candidates, so an agent can justify a recommendation instead of asserting it.
+- **`list_package_versions`** — every published version, bucketed into
+  stable/prerelease/retracted.
+
+### API and source inspection
+
+- **`browse_api_symbols`** / **`find_symbols`** — search a package's public
+  API by substring or fuzzy keyword, so the agent finds the real symbol
+  before it writes code against it.
+- **`get_symbol_documentation`** — the actual signature and doc comment for a
+  symbol, instead of a remembered (and possibly outdated) one.
+- **`get_throw_statements`** — every `throw` in a class or method, so the
+  agent can write correct `try`/`catch` handling instead of guessing at
+  exception types.
+- **`get_source_slice`** — exact source, by line range or by symbol name,
+  resolved through the analyzer AST — no manual tarball download required.
+- **`list_package_source_files`** — browse a package's file tree to find
+  examples or implementation files.
+
+### Version diffs and upgrades
+
+- **`get_changelog`** — structured changelog entries with a `breaking` flag,
+  so an agent can tell you what actually changed instead of paraphrasing
+  prose.
+- **`get_api_diff`** — symbols added or removed between two versions, for
+  upgrade-safety checks before bumping a dependency.
+
+### SDK internals
+
+- **`list_sdk_source_files`** / **`get_sdk_source_slice`** /
+  **`get_sdk_throw_statements`** — the same source-reading and throw-site
+  tools, but for the Dart SDK (`dart:core`, `dart:async`, …) and Flutter
+  framework (`package:flutter`, …), which live outside pub.dev and are
+  otherwise invisible to an agent.
 
 Errors from any tool carry a machine-readable `code` and a `suggestion`
 field describing the next step (e.g. `AMBIGUOUS_SYMBOL` includes candidate
 qualified names to retry with).
 
-### Typical flows
-
-- **Discovery:** `search_packages` → `get_package` → the `readme` resource
-  for full setup docs.
-- **API exploration:** `get_symbol_documentation` directly if the symbol name
-  is known, otherwise `browse_api_symbols` or `find_symbols` to locate it →
-  `get_throw_statements` → `get_source_slice` if more implementation detail is
-  needed.
-- **Upgrade analysis:** `get_changelog` with `fromVersion` set → check
-  `breaking` flags → `get_api_diff` for the precise symbol-level delta.
-- **Choosing between packages:** `search_packages` → `compare_packages` on
-  the top candidates.
-- **SDK exploration:** `list_sdk_source_files` to discover a file path when
-  unknown → `get_sdk_throw_statements` for exception surface →
-  `get_sdk_source_slice` for implementation detail.
-
 ## Resources
 
-In addition to tools, the server exposes read-only MCP resources. Read
-`pub://meta/resources` first to get the full manifest as JSON.
+In addition to tools, the server exposes read-only MCP resources — raw
+README/changelog/pubspec/example content, plus a couple of reference docs.
+Read `pub://meta/resources` for the full manifest.
 
 | URI | Content |
 |---|---|
 | `pub://meta/resources` | Manifest of every resource URI, MIME type, and description. |
-| `pub://meta/instructions` | The same server instructions sent during the MCP handshake — re-read it if a workflow feels off. |
 | `pub://meta/scoring` | Plain-text explainer of pub.dev's 160-point scoring rubric. |
 | `pub://meta/sdk-versions` | Current stable Dart and Flutter SDK versions as JSON. |
 | `pub://package/{name}@{version}/readme` | Full README (Markdown). |
+| `pub://package/{name}@{version}/changelog` | Full raw changelog text (Markdown). |
 | `pub://package/{name}@{version}/example` | Working example code from the package's Example tab (Markdown). |
-| `pub://package/{name}@{version}/changelog` | Full raw changelog text (Markdown) — prefer the `get_changelog` tool for structured entries. |
-| `pub://package/{name}@{version}/api` | Raw dartdoc symbol index (JSON) — prefer `browse_api_symbols`/`find_symbols` for filtered lookup. |
 | `pub://package/{name}@{version}/pubspec` | Verbatim `pubspec.yaml` from the version's tarball. |
 
 Package resource URIs require an explicit `@{version}` segment; use
