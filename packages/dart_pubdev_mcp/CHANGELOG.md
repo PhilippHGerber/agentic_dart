@@ -3,7 +3,7 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.6.2]
 
 ### Added
 
