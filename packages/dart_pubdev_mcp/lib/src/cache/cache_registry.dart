@@ -33,6 +33,13 @@ const Duration kPackageVersionsTtl = Duration(minutes: 15);
 /// TTL applied to changelog entries (parsed `ChangelogEntry` lists).
 const Duration kChangelogTtl = Duration(minutes: 15);
 
+/// TTL applied to security advisory entries (parsed `SecurityAdvisory` lists).
+///
+/// Matches [kChangelogTtl]: both are package-scoped, not version-scoped, data
+/// that changes infrequently but should not go stale for long in a
+/// security-sensitive context.
+const Duration kSecurityAdvisoriesTtl = Duration(minutes: 15);
+
 /// TTL applied to API-documentation index (`index.json`) entries.
 const Duration kApiDocsTtl = Duration(hours: 1);
 
@@ -120,6 +127,16 @@ typedef VersionListId = ({String name});
 /// full changelog text covers every released version, so one cached parse
 /// serves every `fromVersion`/`versionLimit` query for the package.
 typedef ChangelogEntriesId = ({String name});
+
+/// Identity for a package's full published security-advisory list: a package
+/// `name`.
+///
+/// Shared by `get_security_advisories` (ticket 02) and the passive advisory
+/// signal on `get_package`/`compare_packages` (ticket 03), so one advisories
+/// fetch per package per TTL window serves every reader. No version segment —
+/// pub.dev's advisories endpoint is not version-scoped, so one cached fetch
+/// covers every `version` a caller supplies.
+typedef SecurityAdvisoriesId = ({String name});
 
 /// Discriminates which raw markdown artifact a [ReadmeId] identifies.
 ///
@@ -339,6 +356,13 @@ final class CacheRegistry {
          clock: clock,
          trace: trace,
        ),
+       securityAdvisories = KeyedCache<SecurityAdvisoriesId, List<SecurityAdvisory>>(
+         keyOf: (id) => 'advisories:${id.name}',
+         ttl: kSecurityAdvisoriesTtl,
+         fetch: (id) => client.getSecurityAdvisories(id.name),
+         clock: clock,
+         trace: trace,
+       ),
        readme = KeyedCache<ReadmeId, String>(
          keyOf: (id) => '${id.kind.name}:${id.name}',
          ttl: kReadmeTtl,
@@ -445,6 +469,12 @@ final class CacheRegistry {
   ///
   /// Single-owner: `get_changelog` is the only reader.
   final KeyedCache<ChangelogEntriesId, List<ChangelogEntry>> changelog;
+
+  /// Resolves a package's full published security-advisory list by `name`.
+  ///
+  /// Shared by `get_security_advisories` and the passive advisory signal on
+  /// `get_package`/`compare_packages`.
+  final KeyedCache<SecurityAdvisoriesId, List<SecurityAdvisory>> securityAdvisories;
 
   /// Resolves a raw markdown resource body by `(name, kind)`.
   ///

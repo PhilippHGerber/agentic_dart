@@ -30,6 +30,7 @@ import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
 import 'tools/get_sdk_source_slice.dart';
 import 'tools/get_sdk_throw_statements.dart';
+import 'tools/get_security_advisories.dart';
 import 'tools/get_source_slice.dart';
 import 'tools/get_symbol_documentation.dart';
 import 'tools/get_throw_statements.dart';
@@ -67,7 +68,8 @@ base class PubMcpServer extends MCPServer
   /// and `get_throw_statements`), `searchResults` (shared by `search_packages`
   /// and the `{name}` autocomplete handler), `versionList` (shared by
   /// `list_package_versions` and the `{version}` autocomplete handler),
-  /// `changelog` (`get_changelog`), `readme` (the package resource handler's
+  /// `changelog` (`get_changelog`), `securityAdvisories` (`get_security_advisories`),
+  /// `readme` (the package resource handler's
   /// `readme`, `example`, and `changelog` resources), `symbolDoc` (the
   /// symbol-documentation handler), `meta` (the `pub://meta/` resource
   /// handler), and `sdkSourceFiles`/`sdkAst` (shared by `get_sdk_source_slice`,
@@ -425,6 +427,7 @@ base class PubMcpServer extends MCPServer
     final getPackageHandler = GetPackageHandler(
       versionResolver: _versionResolver,
       packageDetail: _cacheRegistry.packageDetail,
+      securityAdvisories: _cacheRegistry.securityAdvisories,
       log: log,
     );
     _registerTracedTool(getPackageTool, getPackageHandler.call);
@@ -438,9 +441,18 @@ base class PubMcpServer extends MCPServer
     _registerTracedTool(getChangelogTool, getChangelogHandler.call);
     log(LoggingLevel.debug, 'registered tool: get_changelog');
 
+    final getSecurityAdvisoriesHandler = GetSecurityAdvisoriesHandler(
+      versionResolver: _versionResolver,
+      securityAdvisories: _cacheRegistry.securityAdvisories,
+      log: log,
+    );
+    _registerTracedTool(getSecurityAdvisoriesTool, getSecurityAdvisoriesHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_security_advisories');
+
     final comparePackagesHandler = ComparePackagesHandler(
       versionResolver: _versionResolver,
       packageDetail: _cacheRegistry.packageDetail,
+      securityAdvisories: _cacheRegistry.securityAdvisories,
       log: log,
     );
     _registerTracedTool(comparePackagesTool, comparePackagesHandler.call);

@@ -24,6 +24,8 @@ const kServerInstructions =
     'list_package_versions for concrete version strings → '
     'get_api_diff for the symbol-level delta between two known versions. '
     'Package comparison: search_packages → compare_packages on the top candidates. '
+    'Security: get_security_advisories evaluates known advisories against a specific version, '
+    'splitting affecting from other — check it before recommending or upgrading to a version. '
     'Dart/Flutter SDK source (dart:core, dart:async, package:flutter, …, not published on pub.dev): '
     'list_sdk_source_files to discover a file path when unknown, then get_sdk_throw_statements '
     'for exception surface, then get_sdk_source_slice for implementation detail. '
@@ -45,6 +47,12 @@ const kServerInstructions =
 const kSearchPackagesDescription =
     'Call this first whenever you need a package name or want to discover packages for a use case. '
     'Never guess a package name — always search first. '
+    'query accepts pub.dev search qualifiers, not just keywords — publisher:, dependency:, topic:, '
+    'license:, has:, and sdk: all pass through verbatim (e.g. query: "publisher:gskinner.com" lists every '
+    'package that publisher owns). '
+    'Keep sort at the default relevance for qualifier queries — the other sort orders rank globally '
+    'across all of pub.dev, so a narrow qualifier query combined with a non-relevance sort can return '
+    'top-ranked but unrelated packages. '
     'Each result is a package summary — name, description, and score/maintenance signals '
     '(e.g. likes, pubPoints, popularity, daysSinceUpdate) — not the full metadata get_package returns '
     '(dependencies, SDK constraints, README excerpt). '
@@ -59,6 +67,9 @@ const kSearchPackagesDescription =
 const kGetPackageDescription =
     'Call this after search_packages to read full metadata for a specific package. '
     "Check scores, SDK constraints, and dependency count to evaluate fitness for the user's project. "
+    'The response includes a best-effort advisories summary (count, ids, whether resolvedVersion is '
+    'affected) when the advisories fetch succeeds — call get_security_advisories for the full '
+    'per-advisory detail (summary, aliases, affected ranges). '
     'For the full README, read pub://package/{name}@{version}/readme (use @latest) — the excerpt here is truncated. '
     'Do not call this with a guessed name — use search_packages first. '
     'It never returns changelog entries or API symbols — use get_changelog and '
@@ -73,6 +84,20 @@ const kGetChangelogDescription =
     'Check the breaking flag on each entry — flagged entries require code changes before upgrading. '
     'For the full unstructured changelog text, read pub://package/{name}@{version}/changelog (use @latest) instead. '
     'It does not detect API-level changes — pair with get_api_diff for a symbol-level diff.';
+
+// ─── get_security_advisories ──────────────────────────────────────────────────
+
+/// Description for `getSecurityAdvisoriesTool`.
+const kGetSecurityAdvisoriesDescription =
+    'Call this to check whether a package version is affected by known security advisories '
+    'before recommending or upgrading to it. '
+    "pub.dev's advisories endpoint reports every advisory ever published against the package, "
+    "regardless of version — this tool evaluates each advisory's OSV affected ranges against "
+    'the Resolved Version and splits the result into affecting (this version is vulnerable) and '
+    'other (advisories on the package that do not cover this version). '
+    'A package with no advisories at all returns both lists empty — that is success, not an error. '
+    'Each advisory carries its GHSA/OSV id, CVE aliases, a summary, a URL, and the raw affected '
+    'ranges so you can see why a version was or was not flagged.';
 
 // ─── browse_api_symbols ───────────────────────────────────────────────────────
 
@@ -120,6 +145,8 @@ const kGetSymbolDocumentationDescription =
 /// Description for `getSourceSliceTool`.
 const kGetSourceSliceDescription =
     'Call this to read Dart source from a single package file, in one of two modes. '
+    'file is not limited to lib/ — files anywhere in the package archive are readable, '
+    'including example/lib/main.dart and other files under example/, test/, or bin/. '
     'Line-range mode: provide file with optional lineStart/lineEnd (1-based, inclusive) '
     'to read an exact range with no truncation; omit both bounds to read the whole file. '
     'Symbol-bounded mode: provide file and symbolName to extract a named declaration '
@@ -183,6 +210,9 @@ const kListSdkSourceFilesDescription =
 /// Description for `listPackageSourceFilesTool`.
 const kListPackageSourceFilesDescription =
     'Call this only when get_source_slice returns SOURCE_FILE_NOT_FOUND and the suggestion does not name the right file. '
+    'The listing covers the whole package archive, not just lib/ — example/, test/, and bin/ are all '
+    'browsable too; pass directory: "example/" to list a multi-file example instead of relying on the '
+    'single-file example resource. '
     'Set directory and fileExtension to narrow the listing before reading individual files. '
     'Select a path from the result and pass it to get_source_slice. '
     'It never returns file contents — pass a chosen path to get_source_slice for that.';
@@ -229,8 +259,10 @@ const kComparePackagesDescription =
     'Call this after search_packages when the user is choosing between multiple candidates. '
     'Pass the top 2–5 names from search results directly. '
     'Returns a comparison matrix — one row per field (score, platform support, SDK constraints, '
-    'dependency count, maintenance signals such as license, publisher, and days since last update) '
-    'mapped to a value per package — for scanning candidates side by side. '
+    'dependency count, maintenance signals such as license, publisher, and days since last update, '
+    'and a best-effort per-package security-advisory count) mapped to a value per package — for '
+    'scanning candidates side by side. Call get_security_advisories for the full per-advisory detail '
+    'behind the count. '
     'Failed packages appear in errors and are excluded from the matrix — do not retry them. '
     'It never compares API surfaces or README content — use get_symbol_documentation/get_api_diff '
     'or the readme resource for that level of detail.';

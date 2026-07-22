@@ -450,6 +450,27 @@ final class PubDevClient {
     };
   }
 
+  /// Returns every published security advisory for [name] from
+  /// `GET /api/packages/{name}/advisories`, in OSV format.
+  ///
+  /// Not version-scoped — pub.dev reports every advisory ever published
+  /// against the package, regardless of which versions they affect. Callers
+  /// evaluate [SecurityAdvisory.ranges] against a concrete version themselves
+  /// (see `osvRangesAffectVersion`). Returns [DomainErrors.packageNotFound]
+  /// when the package does not exist on pub.dev.
+  Future<PubDevResult<List<SecurityAdvisory>>> getSecurityAdvisories(String name) async {
+    final result = await _fetchJson('$_kBaseUrl/api/packages/$name/advisories');
+    return switch (result) {
+      PubDevFailure<Map<String, Object?>>(:final error) => PubDevFailure(error),
+      PubDevSuccess<Map<String, Object?>>(:final value) => PubDevSuccess(
+        ((value['advisories'] as List<Object?>?) ?? const [])
+            .whereType<Map<String, Object?>>()
+            .map(SecurityAdvisory.fromJson)
+            .toList(),
+      ),
+    };
+  }
+
   /// Returns full metrics for [name] from `GET /api/packages/{name}/metrics`.
   Future<PubDevResult<PackageMetrics>> getMetrics(String name) async {
     final result = await _fetchJson('$_kBaseUrl/api/packages/$name/metrics');

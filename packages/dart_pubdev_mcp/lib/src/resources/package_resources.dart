@@ -192,7 +192,10 @@ final class PackageResourcesHandler {
     name: 'Package example',
     description:
         "Read this to retrieve working example code from the package's example tab. "
-        'Use it before writing setup or usage code — copy patterns from here instead of guessing.',
+        'Use it before writing setup or usage code — copy patterns from here instead of guessing. '
+        "This resource is single-document, rendered from pub.dev's example tab. For multi-file "
+        'examples, call list_package_source_files with directory: "example/" and read individual '
+        'files with get_source_slice instead.',
     mimeType: 'text/markdown',
   );
 

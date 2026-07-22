@@ -19,6 +19,30 @@ import '../../support/schema_conformance.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/// One advisory affecting versions `< 0.13.3` — mirrors the live `http`
+/// GHSA-4rgh-jx4f-qfcq advisory also used by `get_security_advisories_test.dart`.
+const _oneAdvisoryBody = '''
+{
+  "advisories": [
+    {
+      "id": "GHSA-4rgh-jx4f-qfcq",
+      "aliases": ["CVE-2020-35669"],
+      "summary": "http before 0.13.3 vulnerable to header injection",
+      "affected": [
+        {
+          "package": {"ecosystem": "Pub", "name": "http"},
+          "ranges": [
+            {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "0.13.3"}]}
+          ]
+        }
+      ],
+      "database_specific": {"pub_display_url": "https://github.com/advisories/GHSA-4rgh-jx4f-qfcq"}
+    }
+  ],
+  "advisoriesUpdated": "2026-05-04T16:03:47.124153Z"
+}
+''';
+
 /// Stubs the three endpoints for a successful `get_package` call (latest version).
 ///
 /// The more specific `/score` stub is registered last so it wins over the
@@ -90,6 +114,7 @@ void main() {
   GetPackageHandler buildHandler() => GetPackageHandler(
     versionResolver: versionResolver,
     packageDetail: packageDetail,
+    securityAdvisories: stack.caches.securityAdvisories,
     log: (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -301,6 +326,91 @@ void main() {
     });
   });
 
+  // ─── advisories summary (ticket 03) ───────────────────────────────────────────
+
+  group('advisories summary', () {
+    test('is present with count/ids/affectsResolvedVersion on a successful fetch', () async {
+      _stubSuccess(mockHttp);
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/http/advisories',
+        response: ok(_oneAdvisoryBody),
+      );
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+      final advisories = _detail(result)['advisories'] as Map<String, Object?>;
+
+      expect(advisories['count'], equals(1));
+      expect(advisories['ids'], equals(['GHSA-4rgh-jx4f-qfcq']));
+      // Resolved version (1.6.0) is past the fix (0.13.3).
+      expect(advisories['affectsResolvedVersion'], isFalse);
+    });
+
+    test('affectsResolvedVersion is true when the resolved version is in range', () async {
+      _stubVersionSuccess(mockHttp, '0.12.0');
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/http/advisories',
+        response: ok(_oneAdvisoryBody),
+      );
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'version': '0.12.0'}),
+      );
+      final advisories = _detail(result)['advisories'] as Map<String, Object?>;
+
+      expect(advisories['affectsResolvedVersion'], isTrue);
+    });
+
+    test('count is zero when the package has no advisories', () async {
+      _stubSuccess(mockHttp);
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/http/advisories',
+        response: ok('{"advisories": [], "advisoriesUpdated": "1970-01-01T00:00:00.000"}'),
+      );
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+      final advisories = _detail(result)['advisories'] as Map<String, Object?>;
+
+      expect(advisories['count'], equals(0));
+      expect(advisories['ids'], isEmpty);
+      expect(advisories['affectsResolvedVersion'], isFalse);
+    });
+
+    test('is omitted (not a Tool Error) when the advisories fetch fails', () async {
+      _stubSuccess(mockHttp);
+      // Registered after _stubSuccess so it wins over the broader
+      // '/api/packages/http' stub, which would otherwise also match this URL.
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/http/advisories',
+        response: notFound(),
+      );
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(result.isError, isNull);
+      expect(_detail(result).containsKey('advisories'), isFalse);
+    });
+
+    test(
+      'structuredContent conforms to the declared outputSchema with advisories present',
+      () async {
+        _stubSuccess(mockHttp);
+        stubUrl(
+          mock: mockHttp,
+          urlFragment: '/api/packages/http/advisories',
+          response: ok(_oneAdvisoryBody),
+        );
+
+        final result = await buildHandler().call(_request({'package': 'http'}));
+
+        expectConformsToOutputSchema(getPackageTool, result.structuredContent);
+      },
+    );
+  });
+
   // ─── Version-pinned fetch ─────────────────────────────────────────────────────
 
   group('version-pinned fetch', () {
@@ -323,6 +433,11 @@ void main() {
 
     test('does not call the unversioned package endpoint when version is supplied', () async {
       _stubVersionSuccess(mockHttp, '1.5.0');
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/http/advisories',
+        response: notFound(),
+      );
 
       await buildHandler().call(_request({'package': 'http', 'version': '1.5.0'}));
 
@@ -333,7 +448,8 @@ void main() {
               (u) =>
                   u.toString().contains('/api/packages/http') &&
                   !u.toString().contains('/score') &&
-                  !u.toString().contains('/versions/'),
+                  !u.toString().contains('/versions/') &&
+                  !u.toString().contains('/advisories'),
             ),
           ),
           headers: any(named: 'headers'),
@@ -382,14 +498,15 @@ void main() {
       fakeNow = fakeNow.add(const Duration(minutes: 14));
       await handler.call(_request({'package': 'http'}));
 
-      // First call: resolve (1) + getPackage (2) + score (3).
-      // Second call: resolve (4) + cache hit (no fetch).
+      // First call: resolve (1) + getPackage (2) + score (3) + advisories (4).
+      // Second call: resolve (5) + cache hit for packageDetail and
+      // securityAdvisories both (no further fetch).
       verify(
         () => mockHttp.get(
           any(that: predicate<Uri>((u) => u.toString().contains('/api/packages/http'))),
           headers: any(named: 'headers'),
         ),
-      ).called(4);
+      ).called(5);
     });
 
     test('fetches version-pinned requests independently of the latest entry', () async {

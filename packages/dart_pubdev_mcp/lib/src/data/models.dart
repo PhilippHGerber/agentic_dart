@@ -697,3 +697,151 @@ final class DartdocSymbol {
     _ => kind.toString(),
   };
 }
+
+// ─── OsvEvent ─────────────────────────────────────────────────────────────────
+
+/// One OSV range event: a version boundary that toggles whether a version is
+/// considered affected.
+///
+/// Exactly one field is expected to be non-null per event, mirroring the OSV
+/// schema's `events` array shape. `introduced` may carry the literal `"0"`
+/// sentinel meaning "affected since the beginning" rather than a parseable
+/// semver string.
+final class OsvEvent {
+  /// Creates an [OsvEvent] with the given fields.
+  const OsvEvent({this.introduced, this.fixed, this.lastAffected, this.limit});
+
+  /// Constructs an [OsvEvent] from one entry of an OSV range's `events` array.
+  factory OsvEvent.fromJson(Map<String, Object?> json) => OsvEvent(
+    introduced: _optStr(json, 'introduced'),
+    fixed: _optStr(json, 'fixed'),
+    lastAffected: _optStr(json, 'last_affected'),
+    limit: _optStr(json, 'limit'),
+  );
+
+  /// The version this range becomes affected from, inclusive. The literal
+  /// `"0"` means "since the beginning" rather than a parseable semver string.
+  final String? introduced;
+
+  /// The version this range stops being affected from, inclusive
+  /// (`version >= fixed` is unaffected).
+  final String? fixed;
+
+  /// The last version still affected, inclusive (`version > lastAffected` is
+  /// unaffected).
+  final String? lastAffected;
+
+  /// An exclusive upper bound past which this range no longer applies.
+  final String? limit;
+
+  /// Returns a copy of this event with the given fields replaced.
+  OsvEvent copyWith({String? introduced, String? fixed, String? lastAffected, String? limit}) =>
+      OsvEvent(
+        introduced: introduced ?? this.introduced,
+        fixed: fixed ?? this.fixed,
+        lastAffected: lastAffected ?? this.lastAffected,
+        limit: limit ?? this.limit,
+      );
+}
+
+// ─── OsvRange ─────────────────────────────────────────────────────────────────
+
+/// One OSV affected range: an ordered list of [OsvEvent]s that together
+/// describe which versions of a package a [SecurityAdvisory] affects.
+final class OsvRange {
+  /// Creates an [OsvRange] with the given [events].
+  const OsvRange({required this.events});
+
+  /// Constructs an [OsvRange] from one entry of an `affected[].ranges` array.
+  factory OsvRange.fromJson(Map<String, Object?> json) => OsvRange(
+    events: ((json['events'] as List<Object?>?) ?? const [])
+        .whereType<Map<String, Object?>>()
+        .map(OsvEvent.fromJson)
+        .toList(),
+  );
+
+  /// The ordered events describing this range's affected/unaffected boundaries.
+  final List<OsvEvent> events;
+
+  /// Returns a copy of this range with [events] replaced.
+  OsvRange copyWith({List<OsvEvent>? events}) => OsvRange(events: events ?? this.events);
+}
+
+// ─── SecurityAdvisory ──────────────────────────────────────────────────────────
+
+/// A single OSV-format security advisory published against a package.
+///
+/// Sourced from `GET /api/packages/{name}/advisories`. [ranges] flattens
+/// every `affected[].ranges` entry from the raw advisory — pub.dev's endpoint
+/// already scopes advisories to the requested package, so no further
+/// filtering by package name is needed. Evaluate [ranges] against a concrete
+/// version with `osvRangesAffectVersion`.
+final class SecurityAdvisory {
+  /// Creates a [SecurityAdvisory] with the given fields.
+  const SecurityAdvisory({
+    required this.id,
+    required this.aliases,
+    required this.summary,
+    required this.url,
+    required this.ranges,
+  });
+
+  /// Constructs a [SecurityAdvisory] from one entry of the `advisories` array.
+  ///
+  /// [url] prefers `database_specific.pub_display_url` (the GitHub Advisories
+  /// page pub.dev links to) and falls back to the advisory's OSV.dev page,
+  /// which exists for every valid OSV id.
+  factory SecurityAdvisory.fromJson(Map<String, Object?> json) {
+    final id = _optStr(json, 'id') ?? '';
+    final databaseSpecific = json['database_specific'] as Map<String, Object?>?;
+    final pubDisplayUrl = databaseSpecific != null ? _optStr(databaseSpecific, 'pub_display_url') : null;
+
+    final ranges = <OsvRange>[];
+    for (final affected in ((json['affected'] as List<Object?>?) ?? const [])
+        .whereType<Map<String, Object?>>()) {
+      ranges.addAll(
+        ((affected['ranges'] as List<Object?>?) ?? const [])
+            .whereType<Map<String, Object?>>()
+            .map(OsvRange.fromJson),
+      );
+    }
+
+    return SecurityAdvisory(
+      id: id,
+      aliases: ((json['aliases'] as List<Object?>?) ?? const []).whereType<String>().toList(),
+      summary: _optStr(json, 'summary') ?? '',
+      url: pubDisplayUrl ?? 'https://osv.dev/$id',
+      ranges: ranges,
+    );
+  }
+
+  /// The advisory's primary id (e.g. `"GHSA-4rgh-jx4f-qfcq"`).
+  final String id;
+
+  /// Alternate ids for the same advisory (e.g. `["CVE-2020-35669"]`).
+  final List<String> aliases;
+
+  /// A short human-readable summary of the vulnerability.
+  final String summary;
+
+  /// A URL to the advisory's detail page.
+  final String url;
+
+  /// Every OSV affected range across the advisory's `affected` entries.
+  final List<OsvRange> ranges;
+
+  /// Returns a copy of this advisory with the given fields replaced.
+  SecurityAdvisory copyWith({
+    String? id,
+    List<String>? aliases,
+    String? summary,
+    String? url,
+    List<OsvRange>? ranges,
+  }) => SecurityAdvisory(
+    id: id ?? this.id,
+    aliases: aliases ?? this.aliases,
+    summary: summary ?? this.summary,
+    url: url ?? this.url,
+    ranges: ranges ?? this.ranges,
+  );
+}

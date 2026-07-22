@@ -127,6 +127,9 @@ All tools return JSON and resolve to the latest stable version when
   candidates, so an agent can justify a recommendation instead of asserting it.
 - **`list_package_versions`** — every published version, bucketed into
   stable/prerelease/retracted.
+- **`get_security_advisories`** — known security advisories for a package,
+  evaluated against a specific version so the agent knows whether that
+  version is actually affected, not just whether the package has ever had one.
 
 ### API and source inspection
 

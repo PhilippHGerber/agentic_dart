@@ -37,6 +37,11 @@ void main() {
         'license': 'BSD-3-Clause',
         'readmeExcerpt': 'A composable...',
         'repository': 'https://github.com/dart-lang/http',
+        'advisories': {
+          'count': 1,
+          'ids': ['GHSA-4rgh-jx4f-qfcq'],
+          'affectsResolvedVersion': false,
+        },
       });
     });
 
@@ -73,6 +78,37 @@ void main() {
           },
           {'version': '1.1.0', 'changes': '- Initial release', 'breaking': true},
         ],
+      });
+    });
+
+    test('get_security_advisories', () {
+      expectConformsToOutputSchema(getSecurityAdvisoriesTool, {
+        'resolvedVersion': '0.12.0',
+        'affecting': [
+          {
+            'id': 'GHSA-4rgh-jx4f-qfcq',
+            'aliases': ['CVE-2020-35669'],
+            'summary': 'http before 0.13.3 vulnerable to header injection',
+            'url': 'https://github.com/advisories/GHSA-4rgh-jx4f-qfcq',
+            'affectedRanges': [
+              {
+                'events': [
+                  {'introduced': '0'},
+                  {'fixed': '0.13.3'},
+                ],
+              },
+            ],
+          },
+        ],
+        'other': <Object?>[],
+      });
+    });
+
+    test('get_security_advisories (zero advisories)', () {
+      expectConformsToOutputSchema(getSecurityAdvisoriesTool, {
+        'resolvedVersion': '1.6.0',
+        'affecting': <Object?>[],
+        'other': <Object?>[],
       });
     });
 
@@ -305,6 +341,7 @@ void main() {
           'platforms': {
             'http': ['android', 'ios'],
           },
+          'advisories': {'http': 1},
         },
       });
     });

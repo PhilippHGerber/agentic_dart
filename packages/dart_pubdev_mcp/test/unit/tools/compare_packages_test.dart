@@ -136,6 +136,7 @@ void main() {
   }) => ComparePackagesHandler(
     versionResolver: versionResolver,
     packageDetail: packageDetail,
+    securityAdvisories: stack.caches.securityAdvisories,
     log: log ?? (level, data) => loggedMessages.add((level, data)),
   );
 
@@ -315,6 +316,81 @@ void main() {
       final deps = _matrixOf(result)['dependencies']! as Map<String, Object?>;
 
       expect(deps['http'], equals(2));
+    });
+  });
+
+  // ─── advisories row (ticket 03) ────────────────────────────────────────────────
+
+  group('advisories row', () {
+    test('reflects the per-package advisory count when both fetches succeed', () async {
+      _stubSuccess(mockHttp, 'http');
+      _stubSuccess(mockHttp, 'dio');
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/http/advisories',
+        response: ok(
+          '{"advisories": [{"id": "GHSA-1", "affected": []}], '
+          '"advisoriesUpdated": "1970-01-01T00:00:00.000"}',
+        ),
+      );
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: '/api/packages/dio/advisories',
+        response: ok('{"advisories": [], "advisoriesUpdated": "1970-01-01T00:00:00.000"}'),
+      );
+
+      final result = await buildHandler().call(_request(['http', 'dio']));
+      final advisories = _matrixOf(result)['advisories'] as Map<String, Object?>;
+
+      expect(advisories['http'], equals(1));
+      expect(advisories['dio'], equals(0));
+    });
+
+    test(
+      'omits a package from the row (without failing the comparison) when its '
+      'advisories fetch fails',
+      () async {
+        _stubSuccess(mockHttp, 'http');
+        _stubSuccess(mockHttp, 'dio');
+        // Registered after _stubSuccess so these specific stubs win over the
+        // broader '/api/packages/{name}' stubs, which would otherwise also
+        // match these URLs.
+        stubUrl(
+          mock: mockHttp,
+          urlFragment: '/api/packages/http/advisories',
+          response: ok('{"advisories": [], "advisoriesUpdated": "1970-01-01T00:00:00.000"}'),
+        );
+        stubUrl(
+          mock: mockHttp,
+          urlFragment: '/api/packages/dio/advisories',
+          response: notFound(),
+        );
+
+        final result = await buildHandler().call(_request(['http', 'dio']));
+
+        expect(result.isError, isNull);
+        final advisories = (_matrixOf(result)['advisories'] as Map<String, Object?>?) ?? const {};
+        expect(advisories, contains('http'));
+        expect(advisories, isNot(contains('dio')));
+        // The package itself is unaffected by its advisories-fetch failure.
+        final names = _matrixOf(result)['name'] as Map<String, Object?>;
+        expect(names, contains('dio'));
+      },
+    );
+
+    test("is absent entirely when every package's advisories fetch fails", () async {
+      _stubSuccess(mockHttp, 'http');
+      _stubSuccess(mockHttp, 'dio');
+      // Registered after _stubSuccess so these specific stubs win over the
+      // broader '/api/packages/{name}' stubs, which would otherwise also
+      // match these URLs.
+      stubUrl(mock: mockHttp, urlFragment: '/api/packages/http/advisories', response: notFound());
+      stubUrl(mock: mockHttp, urlFragment: '/api/packages/dio/advisories', response: notFound());
+
+      final result = await buildHandler().call(_request(['http', 'dio']));
+
+      expect(result.isError, isNull);
+      expect(_matrixOf(result), isNot(contains('advisories')));
     });
   });
 
@@ -513,6 +589,7 @@ void main() {
       final getPackageHandler = GetPackageHandler(
         versionResolver: versionResolver,
         packageDetail: packageDetail,
+        securityAdvisories: stack.caches.securityAdvisories,
         log: (level, data) {},
       );
       await getPackageHandler.call(

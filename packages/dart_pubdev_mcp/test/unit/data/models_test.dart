@@ -635,4 +635,168 @@ void main() {
       expect(base.copyWith(desc: 'New.').type, equals(base.type));
     });
   });
+
+  // ─── OsvEvent ─────────────────────────────────────────────────────────────
+
+  group('OsvEvent.fromJson', () {
+    test('parses introduced', () {
+      final event = OsvEvent.fromJson({'introduced': '0'});
+      expect(event.introduced, equals('0'));
+    });
+
+    test('parses fixed', () {
+      final event = OsvEvent.fromJson({'fixed': '0.13.3'});
+      expect(event.fixed, equals('0.13.3'));
+    });
+
+    test('parses last_affected as lastAffected', () {
+      final event = OsvEvent.fromJson({'last_affected': '1.0.0'});
+      expect(event.lastAffected, equals('1.0.0'));
+    });
+
+    test('parses limit', () {
+      final event = OsvEvent.fromJson({'limit': '2.0.0'});
+      expect(event.limit, equals('2.0.0'));
+    });
+
+    test('unset fields are null', () {
+      final event = OsvEvent.fromJson({'introduced': '0'});
+      expect(event.fixed, isNull);
+    });
+
+    test('copyWith replaces fixed', () {
+      final base = OsvEvent.fromJson({'introduced': '0'});
+      expect(base.copyWith(fixed: '1.0.0').fixed, equals('1.0.0'));
+    });
+  });
+
+  // ─── OsvRange ─────────────────────────────────────────────────────────────
+
+  group('OsvRange.fromJson', () {
+    test('parses events in order', () {
+      final range = OsvRange.fromJson({
+        'events': [
+          {'introduced': '0'},
+          {'fixed': '0.13.3'},
+        ],
+      });
+      expect(range.events.map((e) => e.introduced ?? e.fixed), equals(['0', '0.13.3']));
+    });
+
+    test('events defaults to empty list when absent', () {
+      final range = OsvRange.fromJson(const {});
+      expect(range.events, isEmpty);
+    });
+
+    test('copyWith replaces events', () {
+      final base = OsvRange.fromJson({
+        'events': [
+          {'introduced': '0'},
+        ],
+      });
+      final replaced = base.copyWith(events: const []);
+      expect(replaced.events, isEmpty);
+    });
+  });
+
+  // ─── SecurityAdvisory ─────────────────────────────────────────────────────
+
+  group('SecurityAdvisory.fromJson', () {
+    Map<String, Object?> advisoryJson({
+      String id = 'GHSA-4rgh-jx4f-qfcq',
+      List<String> aliases = const ['CVE-2020-35669'],
+      String summary = 'http before 0.13.3 vulnerable to header injection',
+      Map<String, Object?>? databaseSpecific,
+      List<Map<String, Object?>>? affected,
+    }) => {
+      'id': id,
+      'aliases': aliases,
+      'summary': summary,
+      'database_specific': ?databaseSpecific,
+      'affected':
+          affected ??
+          [
+            {
+              'package': {'ecosystem': 'Pub', 'name': 'http'},
+              'ranges': [
+                {
+                  'type': 'ECOSYSTEM',
+                  'events': [
+                    {'introduced': '0'},
+                    {'fixed': '0.13.3'},
+                  ],
+                },
+              ],
+            },
+          ],
+    };
+
+    test('parses id', () {
+      final advisory = SecurityAdvisory.fromJson(advisoryJson());
+      expect(advisory.id, equals('GHSA-4rgh-jx4f-qfcq'));
+    });
+
+    test('parses aliases', () {
+      final advisory = SecurityAdvisory.fromJson(advisoryJson());
+      expect(advisory.aliases, equals(['CVE-2020-35669']));
+    });
+
+    test('parses summary', () {
+      final advisory = SecurityAdvisory.fromJson(advisoryJson());
+      expect(advisory.summary, contains('header injection'));
+    });
+
+    test('url prefers database_specific.pub_display_url', () {
+      final advisory = SecurityAdvisory.fromJson(
+        advisoryJson(
+          databaseSpecific: {'pub_display_url': 'https://github.com/advisories/GHSA-4rgh-jx4f-qfcq'},
+        ),
+      );
+      expect(advisory.url, equals('https://github.com/advisories/GHSA-4rgh-jx4f-qfcq'));
+    });
+
+    test('url falls back to osv.dev when pub_display_url is absent', () {
+      final advisory = SecurityAdvisory.fromJson(advisoryJson());
+      expect(advisory.url, equals('https://osv.dev/GHSA-4rgh-jx4f-qfcq'));
+    });
+
+    test('flattens ranges across every affected entry', () {
+      final advisory = SecurityAdvisory.fromJson(
+        advisoryJson(
+          affected: [
+            {
+              'ranges': [
+                {
+                  'events': [
+                    {'introduced': '0'},
+                    {'fixed': '1.0.0'},
+                  ],
+                },
+              ],
+            },
+            {
+              'ranges': [
+                {
+                  'events': [
+                    {'introduced': '2.0.0'},
+                  ],
+                },
+              ],
+            },
+          ],
+        ),
+      );
+      expect(advisory.ranges, hasLength(2));
+    });
+
+    test('aliases defaults to empty list when absent', () {
+      final advisory = SecurityAdvisory.fromJson({'id': 'GHSA-x', 'affected': const []});
+      expect(advisory.aliases, isEmpty);
+    });
+
+    test('copyWith replaces summary', () {
+      final base = SecurityAdvisory.fromJson(advisoryJson());
+      expect(base.copyWith(summary: 'New.').summary, equals('New.'));
+    });
+  });
 }

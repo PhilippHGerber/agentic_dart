@@ -217,6 +217,24 @@ final getPackageTool = Tool(
       'repository': Schema.string(
         description: 'The source repository URL. Omitted when not declared.',
       ),
+      'advisories': Schema.object(
+        description:
+            'Best-effort security-advisory summary, evaluated against resolvedVersion. '
+            'Omitted when the advisories fetch fails — that is not itself an error for this tool. '
+            'Call get_security_advisories for the full per-advisory detail (summary, aliases, '
+            'affected ranges).',
+        required: ['count', 'ids', 'affectsResolvedVersion'],
+        properties: {
+          'count': Schema.int(description: 'Total advisories ever published against the package.'),
+          'ids': Schema.list(
+            description: 'The primary id of every advisory (e.g. "GHSA-4rgh-jx4f-qfcq").',
+            items: Schema.string(),
+          ),
+          'affectsResolvedVersion': Schema.bool(
+            description: "Whether any advisory's OSV affected ranges cover resolvedVersion.",
+          ),
+        },
+      ),
     },
   ),
 );
@@ -270,6 +288,95 @@ final getChangelogTool = Tool(
       ),
     },
   ),
+);
+
+// ─── get_security_advisories ──────────────────────────────────────────────────
+
+/// The `get_security_advisories` [Tool] definition registered with the MCP server.
+final getSecurityAdvisoriesTool = Tool(
+  name: 'get_security_advisories',
+  title: 'Get security advisories',
+  annotations: kReadOnlyOpenWorldAnnotations,
+  description: kGetSecurityAdvisoriesDescription,
+  inputSchema: ObjectSchema(
+    required: ['package'],
+    properties: {
+      'package': Schema.string(
+        description: 'Exact package name on pub.dev. Obtain it from search_packages; never guess.',
+      ),
+      'version': Schema.string(
+        description:
+            'A specific version string (e.g. "1.2.0"). '
+            'Omit to evaluate advisories against the latest published version.',
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: ['resolvedVersion', 'affecting', 'other'],
+    properties: {
+      'resolvedVersion': _kResolvedVersionSchema,
+      'affecting': Schema.list(
+        description: 'Advisories whose OSV affected ranges include the Resolved Version.',
+        items: _kSecurityAdvisorySchema,
+      ),
+      'other': Schema.list(
+        description:
+            'Advisories published against the package whose OSV affected ranges do not '
+            'include the Resolved Version.',
+        items: _kSecurityAdvisorySchema,
+      ),
+    },
+  ),
+);
+
+/// One advisory entry in `get_security_advisories`'s `affecting`/`other` lists.
+final ObjectSchema _kSecurityAdvisorySchema = Schema.object(
+  required: ['id', 'aliases', 'summary', 'url', 'affectedRanges'],
+  properties: {
+    'id': Schema.string(description: 'The advisory\'s primary id (e.g. "GHSA-4rgh-jx4f-qfcq").'),
+    'aliases': Schema.list(
+      description: 'Alternate ids for the same advisory (e.g. CVE identifiers).',
+      items: Schema.string(),
+    ),
+    'summary': Schema.string(description: 'A short human-readable summary of the vulnerability.'),
+    'url': Schema.string(description: "A URL to the advisory's detail page."),
+    'affectedRanges': Schema.list(
+      description:
+          "The advisory's raw OSV affected ranges, unevaluated — inspect these to see why a "
+          'version was or was not flagged.',
+      items: Schema.object(
+        required: ['events'],
+        properties: {
+          'events': Schema.list(
+            description:
+                'Ordered OSV range events; each carries whichever of the four fields applies.',
+            items: Schema.object(
+              properties: {
+                'introduced': Schema.string(
+                  description:
+                      'The version this range becomes affected from, inclusive. '
+                      'The literal "0" means affected since the beginning.',
+                ),
+                'fixed': Schema.string(
+                  description:
+                      'The version this range stops being affected from, inclusive '
+                      '(version >= fixed is unaffected).',
+                ),
+                'lastAffected': Schema.string(
+                  description:
+                      'The last version still affected, inclusive '
+                      '(version > lastAffected is unaffected).',
+                ),
+                'limit': Schema.string(
+                  description: 'An exclusive upper bound past which this range no longer applies.',
+                ),
+              },
+            ),
+          ),
+        },
+      ),
+    ),
+  },
 );
 
 // ─── browse_api_symbols ───────────────────────────────────────────────────────
@@ -974,9 +1081,12 @@ final comparePackagesTool = Tool(
       ),
       'matrix': Schema.object(
         description:
-            'Maps each metric field name (e.g. "likes", "sdkConstraints.dart") to a map of package name → '
-            'value for that metric. Packages in errors are excluded. Values are heterogeneous '
-            '(string, number, boolean, list, or null depending on the field) and are not further typed here.',
+            'Maps each metric field name (e.g. "likes", "sdkConstraints.dart", "advisories") to a map '
+            'of package name → value for that metric. Packages in errors are excluded. Values are '
+            'heterogeneous (string, number, boolean, list, or null depending on the field) and are not '
+            'further typed here. "advisories" (per-package security-advisory count) is best-effort: a '
+            'package whose advisories fetch failed is simply absent from the advisories row, not '
+            'present with a null — call get_security_advisories for the full per-advisory detail.',
         additionalProperties: Schema.object(
           description: 'Per-package values for one metric, keyed by package name.',
           additionalProperties: true,

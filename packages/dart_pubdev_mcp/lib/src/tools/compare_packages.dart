@@ -16,6 +16,13 @@
 /// from the matrix.
 ///
 /// See `issues/pub-dev-mcp/08-compare-packages-tool.md`.
+///
+/// The matrix also carries a best-effort `advisories` row (per-package
+/// security-advisory count), sourced from the same `securityAdvisories`
+/// [KeyedCache] facade `get_security_advisories` uses — see
+/// `issues/fr-tools-disposition/03-advisories-passive-signal.md`. A
+/// per-package advisories-fetch failure leaves that package's cell absent
+/// from the row without failing the comparison.
 library;
 
 import 'package:dart_mcp/server.dart';
@@ -24,6 +31,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'advisories_signal.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -39,18 +47,23 @@ final class ComparePackagesHandler {
   ///
   /// [versionResolver] resolves each package's Resolved Version, falling back
   /// to the Latest Stable Version. [packageDetail] is the shared [KeyedCache]
-  /// facade (same instance as used by `GetPackageHandler`). [log] receives
+  /// facade (same instance as used by `GetPackageHandler`). [securityAdvisories]
+  /// is the shared [KeyedCache] facade (same instance as `get_security_advisories`)
+  /// used for the matrix's best-effort `advisories` row. [log] receives
   /// structured log events at the appropriate [LoggingLevel].
   const ComparePackagesHandler({
     required VersionResolver versionResolver,
     required KeyedCache<PackageDetailId, PackageDetail> packageDetail,
+    required KeyedCache<SecurityAdvisoriesId, List<SecurityAdvisory>> securityAdvisories,
     required void Function(LoggingLevel, Object) log,
   }) : _versionResolver = versionResolver,
        _packageDetail = packageDetail,
+       _securityAdvisories = securityAdvisories,
        _log = log;
 
   final VersionResolver _versionResolver;
   final KeyedCache<PackageDetailId, PackageDetail> _packageDetail;
+  final KeyedCache<SecurityAdvisoriesId, List<SecurityAdvisory>> _securityAdvisories;
   final void Function(LoggingLevel, Object) _log;
 
   /// Handles a [CallToolRequest] for `compare_packages`.
@@ -99,14 +112,42 @@ final class ComparePackagesHandler {
       );
     }
 
+    final advisoryCounts = await _fetchAdvisoryCounts(details.keys);
+
     return ToolResponse.ok(
       _ComparisonMatrix(
         packages: packages,
         errors: errors,
-        matrix: _buildMatrix(details),
+        matrix: _buildMatrix(details, advisoryCounts),
       ).toJson(),
     );
   }
+
+  // ── Best-effort advisories row ───────────────────────────────────────────────
+
+  /// Fetches a best-effort advisory count for every package in [names],
+  /// concurrently. A package whose advisories fetch fails (domain failure or
+  /// an escaping exception) is absent from the returned map rather than
+  /// failing the comparison.
+  Future<Map<String, int>> _fetchAdvisoryCounts(Iterable<String> names) async {
+    final counts = <String, int>{};
+    final results = await Future.wait(
+      names.map((name) async => MapEntry(name, await _fetchAdvisoryCount(name))),
+    );
+    for (final entry in results) {
+      if (entry.value case final count?) counts[entry.key] = count;
+    }
+    return counts;
+  }
+
+  /// Fetches the advisory count for one [package], or `null` on any failure.
+  Future<int?> _fetchAdvisoryCount(String package) => fetchAdvisoriesBestEffort(
+    cache: _securityAdvisories,
+    package: package,
+    tool: 'compare_packages',
+    log: _log,
+    onSuccess: (advisories) => advisories.length,
+  );
 
   /// Fetches one package, mapping any thrown error to a [PubDevFailure].
   ///
@@ -155,6 +196,7 @@ final class ComparePackagesHandler {
 
   static Map<String, Map<String, Object?>> _buildMatrix(
     Map<String, PackageDetail> details,
+    Map<String, int> advisoryCounts,
   ) {
     final matrix = <String, Map<String, Object?>>{};
     for (final entry in details.entries) {
@@ -177,6 +219,7 @@ final class ComparePackagesHandler {
       _set(matrix, 'sdkConstraints.dart', pkg, d.sdkConstraints.dart);
       _set(matrix, 'sdkConstraints.flutter', pkg, d.sdkConstraints.flutter);
       _set(matrix, 'dependencies', pkg, d.dependencies.length);
+      if (advisoryCounts[pkg] case final count?) _set(matrix, 'advisories', pkg, count);
     }
     return matrix;
   }

@@ -84,6 +84,18 @@ _Avoid_: Source excerpt, code snippet (for this server's specific tool output)
 The output of `get_api_diff`: sets of added and removed libraries, classes, fields, and methods between two package versions, computed by diffing the dartdoc `index.json` artifacts for each version. V1 limitation: no structural diff (parameter changes, nullability). If dartdoc is missing for either version the tool hard-fails with `DOCUMENTATION_NOT_FOUND` and a `suggestedNextStep` pointing to `browse_api_symbols` per version as a manual workaround.
 _Avoid_: Breaking change report (the tool detects structural additions/removals, not semantic breaking changes)
 
+**Security Advisory**:
+One OSV-format entry from pub.dev's `GET /api/packages/{name}/advisories` endpoint — id (e.g. `GHSA-4rgh-jx4f-qfcq`), CVE aliases, a summary, a URL, and a set of OSV Affected Ranges. Not version-scoped: pub.dev reports every advisory ever published against a package regardless of version, which is why `get_security_advisories` exists to do the per-version evaluation rather than exposing this list raw. See `issues/fr-tools-disposition/02-security-advisories-tool.md`.
+_Avoid_: CVE, vulnerability (use "Security Advisory" for the OSV entry itself; CVE is one kind of alias it may carry, not a synonym for the whole record)
+
+**Advisories Summary** (passive signal):
+The thin, best-effort `advisories` object `get_package` attaches to its response — `count`, `ids`, and `affectsResolvedVersion` — and the single `advisories` count `compare_packages` adds as a Comparison Matrix row. Both share the `securityAdvisories` cache facade with `get_security_advisories` (one fetch per package per TTL window) but never surface per-advisory detail (summary, aliases, ranges) — that stays behind `get_security_advisories`. Best-effort: a failed fetch omits the field/cell rather than failing the parent tool. See `issues/fr-tools-disposition/03-advisories-passive-signal.md`.
+_Avoid_: Security Advisory (that's the full OSV record; this is a derived summary carrying none of its detail)
+
+**OSV Affected Range**:
+One `affected[].ranges[]` entry on a Security Advisory: an ordered list of OSV Range Events (`introduced`, `fixed`, `last_affected`, `limit`) that together describe which versions a Security Advisory covers. `get_security_advisories` evaluates every range OR'd together against the Resolved Version via `osvRangesAffectVersion` (`lib/src/data/osv_range_evaluator.dart`), using `pub_semver` for version comparison. The literal `introduced: "0"` is the OSV sentinel for "affected since the beginning," not a parseable semver string.
+_Avoid_: Version range, affected versions (both ambiguous with `pub_semver`'s own `VersionRange`, a distinct concept this evaluator does not use)
+
 ### Errors
 
 **Tool Error**:
@@ -130,7 +142,7 @@ _Avoid_: Request id, trace id, span id (reserve those if OpenTelemetry is ever a
 ### Tool outputs
 
 **Comparison Matrix**:
-The fixed output of `compare_packages`: a JSON object mapping every available hard metric (scores, platforms, sdk constraints, dependency count, maintenance signals, license, publisher) to a per-package value map. No caller-supplied criteria filter — the full matrix is always returned; the LLM selects what is relevant. Metrics requiring tarball access (`api-surface`, `example-quality`) are post-V1.
+The fixed output of `compare_packages`: a JSON object mapping every available hard metric (scores, platforms, sdk constraints, dependency count, maintenance signals, license, publisher, advisories count — see Advisories Summary) to a per-package value map. No caller-supplied criteria filter — the full matrix is always returned; the LLM selects what is relevant. Metrics requiring tarball access (`api-surface`, `example-quality`) are post-V1.
 _Avoid_: Criteria matrix, filtered comparison
 
 **Non-Relevance Sort**:

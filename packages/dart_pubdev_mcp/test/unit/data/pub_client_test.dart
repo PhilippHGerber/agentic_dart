@@ -376,6 +376,90 @@ void main() {
     });
   });
 
+  // ─── getSecurityAdvisories ──────────────────────────────────────────────────
+
+  group('PubDevClient.getSecurityAdvisories', () {
+    late _MockHttpClient mock;
+
+    const oneAdvisoryBody = '''
+{
+  "advisories": [
+    {
+      "id": "GHSA-4rgh-jx4f-qfcq",
+      "aliases": ["CVE-2020-35669"],
+      "summary": "http before 0.13.3 vulnerable to header injection",
+      "affected": [
+        {
+          "package": {"ecosystem": "Pub", "name": "http"},
+          "ranges": [
+            {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "0.13.3"}]}
+          ]
+        }
+      ],
+      "database_specific": {"pub_display_url": "https://github.com/advisories/GHSA-4rgh-jx4f-qfcq"}
+    }
+  ],
+  "advisoriesUpdated": "2026-05-04T16:03:47.124153Z"
+}
+''';
+
+    setUp(() {
+      mock = _setUp();
+      _stubGet(mock, '/api/packages/http/advisories', _json(oneAdvisoryBody));
+    });
+
+    test('returns PubDevSuccess', () async {
+      expect(
+        await _client(mock).getSecurityAdvisories('http'),
+        isA<PubDevSuccess<List<SecurityAdvisory>>>(),
+      );
+    });
+
+    test('parses one advisory', () async {
+      final advisories =
+          ((await _client(mock).getSecurityAdvisories('http'))
+                  as PubDevSuccess<List<SecurityAdvisory>>)
+              .value;
+      expect(advisories, hasLength(1));
+    });
+
+    test('advisory id matches fixture', () async {
+      final advisories =
+          ((await _client(mock).getSecurityAdvisories('http'))
+                  as PubDevSuccess<List<SecurityAdvisory>>)
+              .value;
+      expect(advisories.first.id, equals('GHSA-4rgh-jx4f-qfcq'));
+    });
+
+    test('returns an empty list for a package with no advisories', () async {
+      _stubGet(
+        mock,
+        '/api/packages/json_annotation/advisories',
+        _json('{"advisories": [], "advisoriesUpdated": "1970-01-01T00:00:00.000"}'),
+      );
+      final advisories =
+          ((await _client(mock).getSecurityAdvisories('json_annotation'))
+                  as PubDevSuccess<List<SecurityAdvisory>>)
+              .value;
+      expect(advisories, isEmpty);
+    });
+
+    test('returns PubDevFailure on 404', () async {
+      _stubGet(mock, '/api/packages/missing/advisories', _json('', status: 404));
+      expect(
+        await _client(mock).getSecurityAdvisories('missing'),
+        isA<PubDevFailure<List<SecurityAdvisory>>>(),
+      );
+    });
+
+    test('404 failure carries PACKAGE_NOT_FOUND', () async {
+      _stubGet(mock, '/api/packages/missing/advisories', _json('', status: 404));
+      final result =
+          await _client(mock).getSecurityAdvisories('missing') as PubDevFailure<List<SecurityAdvisory>>;
+      expect(result.error.code, equals(DomainErrors.packageNotFound));
+    });
+  });
+
   // ─── getApiIndex ────────────────────────────────────────────────────────────
 
   group('PubDevClient.getApiIndex', () {
