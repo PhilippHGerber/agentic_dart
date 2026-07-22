@@ -3,6 +3,30 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.4]
+
+### Added
+
+- `get_security_advisories(package, version?)` tool — evaluates a package's
+  security advisories (pub.dev's OSV-format advisories endpoint) against the
+  Resolved Version, separating advisories that affect the Resolved Version
+  from those that don't. Each entry carries id, aliases (CVEs), summary,
+  affected ranges, and a URL. Responses are cached with a TTL.
+
+### Changed
+
+- `get_package` gains a best-effort `advisories` summary (count, ids, whether
+  the Resolved Version is affected); a failed advisories fetch never fails
+  the parent call.
+- `compare_packages`'s Comparison Matrix gains a best-effort `advisories` row
+  with per-package advisory counts, on the same best-effort terms.
+- Clarified tool descriptions to surface existing capabilities that were
+  previously easy to miss: `list_package_source_files` and `get_source_slice`
+  now state that the whole package archive is browsable (`example/`, `test/`,
+  `bin/` — not just `lib/`), and `search_packages` documents pub.dev search
+  qualifiers (`publisher:`, `dependency:`, `topic:`, `license:`, `has:`,
+  `sdk:`) with the Non-Relevance Sort caveat.
+
 ## [0.6.3]
 
 ### Changed
