@@ -346,7 +346,7 @@ void main() {
         expect(tool.inputSchema.required, equals(['sdk']));
       });
 
-      // All 16 tools this server registers — kept in sync with
+      // All 17 tools this server registers — kept in sync with
       // tool_definitions.dart. Used to assert every tool carries a title and
       // truthful, read-only/open-world annotations.
       const allToolNames = [
@@ -359,6 +359,7 @@ void main() {
         'get_symbol_documentation',
         'get_source_slice',
         'list_package_source_files',
+        'grep_package_source',
         'get_throw_statements',
         'compare_packages',
         'list_package_versions',
@@ -368,7 +369,7 @@ void main() {
         'get_sdk_throw_statements',
       ];
 
-      test('lists exactly the 16 expected tools', () async {
+      test('lists exactly the 17 expected tools', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final names = tools.tools.map((t) => t.name).toSet();

@@ -145,6 +145,9 @@ All tools return JSON and resolve to the latest stable version when
   resolved through the analyzer AST — no manual tarball download required.
 - **`list_package_source_files`** — browse a package's file tree to find
   examples or implementation files.
+- **`grep_package_source`** — search across a package's whole source tree for
+  a literal string or regex pattern, so an agent can find every call site of
+  a symbol without enumerating and reading files one by one.
 
 ### Version diffs and upgrades
 

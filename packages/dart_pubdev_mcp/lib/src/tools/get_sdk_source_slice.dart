@@ -75,6 +75,7 @@ import 'package:dart_mcp/server.dart';
 import '../analysis/ast_access.dart';
 import '../data/domain_error.dart';
 import '../data/sdk_client.dart';
+import 'arg_parsing.dart';
 import 'line_range_slice.dart';
 import 'symbol_bounded_slice.dart';
 import 'tool_response.dart';
@@ -113,9 +114,9 @@ final class GetSdkSourceSliceHandler {
     final suppliedVersion = args['version'] as String?;
     final rawSymbol = args['symbolName'] as String?;
     final symbolName = (rawSymbol == null || rawSymbol.isEmpty) ? null : rawSymbol;
-    final lineStart = _asInt(args['lineStart']);
-    final lineEnd = _asInt(args['lineEnd']);
-    final maxLines = _asInt(args['maxLines']);
+    final lineStart = asInt(args['lineStart']);
+    final lineEnd = asInt(args['lineEnd']);
+    final maxLines = asInt(args['maxLines']);
 
     return switch (sdk) {
       'dart' => _handleDart(args, suppliedVersion, symbolName, maxLines, lineStart, lineEnd),
@@ -369,13 +370,6 @@ final class GetSdkSourceSliceHandler {
   }
 
   // ─── Utility helpers ───────────────────────────────────────────────────────
-
-  static int? _asInt(Object? value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
-  }
 
   /// Validates [raw] as a single non-empty path segment: no `/`, no `..`, no
   /// bare `.`. Returns `null` when invalid.

@@ -874,6 +874,95 @@ final listPackageSourceFilesTool = Tool(
   ),
 );
 
+// ─── grep_package_source ──────────────────────────────────────────────────────
+
+/// The `grep_package_source` [Tool] definition registered with the MCP server.
+final grepPackageSourceTool = Tool(
+  name: 'grep_package_source',
+  title: 'Search package source',
+  annotations: kReadOnlyOpenWorldAnnotations,
+  description: kGrepPackageSourceDescription,
+  inputSchema: ObjectSchema(
+    required: ['package', 'pattern'],
+    properties: {
+      'package': Schema.string(
+        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+      ),
+      'version': Schema.string(
+        description:
+            'A specific version string (e.g. "1.2.0"). '
+            'Omit to use the latest published version.',
+      ),
+      'pattern': Schema.string(
+        description:
+            'The literal substring to search for (default), or a Dart RegExp pattern when '
+            'regex is true.',
+      ),
+      'regex': Schema.bool(
+        description:
+            'When true, compile pattern as a Dart RegExp instead of matching it as a literal '
+            'substring. Default false — an LLM-typed pattern like "isEmpty()" is matched '
+            'verbatim rather than having its parens reinterpreted as regex metacharacters.',
+      ),
+      'caseInsensitive': Schema.bool(
+        description: 'Match case-insensitively. Default false.',
+      ),
+      'contextLines': Schema.int(
+        description:
+            'Symmetric number of lines of context to include before/after each match. '
+            'Default 0.',
+        minimum: 0,
+      ),
+      'directory': Schema.string(
+        description:
+            'Path prefix filter (e.g. "lib/src/"), same normalization as '
+            'list_package_source_files. Default scope is the whole package tree.',
+      ),
+      'fileExtension': Schema.string(
+        description:
+            'Extension filter (e.g. ".dart"). Extensions on the binary denylist '
+            '(.png, .jpg, .jpeg, .gif, .ico, .ttf, .otf, .woff, .woff2, .zip, .gz, .so, .dylib, '
+            '.dll) are excluded from the scan by default; naming one here explicitly overrides '
+            'that exclusion.',
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: ['resolvedVersion', 'package', 'pattern', 'matches', 'hasMore'],
+    properties: {
+      'resolvedVersion': _kResolvedVersionSchema,
+      'package': _kPackageNameSchema,
+      'pattern': Schema.string(description: 'The search pattern, as given.'),
+      'matches': Schema.list(
+        description: 'Matches sorted by file path then line number, capped at 50 total.',
+        items: Schema.object(
+          required: ['file', 'line', 'matchedLine', 'contextBefore', 'contextAfter'],
+          properties: {
+            'file': Schema.string(description: 'The source file the match was found in.'),
+            'line': Schema.int(description: '1-based line number of the match.'),
+            'matchedLine': Schema.string(description: 'The full text of the matching line.'),
+            'contextBefore': Schema.list(
+              description:
+                  'Up to contextLines lines immediately preceding the match, in file order. '
+                  'Empty when contextLines is 0 or omitted.',
+              items: Schema.string(),
+            ),
+            'contextAfter': Schema.list(
+              description:
+                  'Up to contextLines lines immediately following the match, in file order. '
+                  'Empty when contextLines is 0 or omitted.',
+              items: Schema.string(),
+            ),
+          },
+        ),
+      ),
+      'hasMore': Schema.bool(
+        description: 'True when more than 50 matches exist beyond the returned list.',
+      ),
+    },
+  ),
+);
+
 // ─── get_throw_statements ─────────────────────────────────────────────────────
 
 /// The `get_throw_statements` [Tool] definition registered with the MCP server.

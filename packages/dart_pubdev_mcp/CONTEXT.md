@@ -6,165 +6,82 @@ An MCP server that gives LLM agents structured, version-aware, token-efficient a
 
 ### Naming
 
-**Package Identifier**:
-The `pubspec.yaml` `name:` value and pub.dev listing name for this server. Constrained to `lowercase_with_underscores` — pub.dev rejects hyphens. Is `dart_pubdev_mcp`. Distinct from the MCP Server Identity below; the two need not match.
-_Avoid_: Package name (ambiguous with the "Package" distribution-unit term below)
+**Package Identifier**: The `pubspec.yaml` `name:` / pub.dev listing name — `dart_pubdev_mcp` (`lowercase_with_underscores`; pub.dev rejects hyphens). Distinct from MCP Server Identity.
 
-**MCP Server Identity**:
-The name this server presents to MCP clients: the `Implementation.name` sent in the handshake, the key under `mcpServers` in `.mcp.json`, and the CLI executable a user types. Unconstrained by Dart identifier rules — hyphens allowed. Is `dart-pubdev-explorer`.
-_Avoid_: Display name, server name (use this term precisely — it spans handshake identity, config key, and executable together, not just one of them)
+**MCP Server Identity**: The name presented to MCP clients — handshake `Implementation.name`, `.mcp.json` key, CLI executable — `dart-pubdev-explorer`. Hyphens allowed.
 
 ### Distribution units
 
-**Package**:
-A pub.dev distribution unit identified by name and version. Contains one or more libraries.
-_Avoid_: Module, gem, dependency (for this concept)
+**Package**: A pub.dev distribution unit (name + version) containing one or more libraries.
+_Avoid_: module, gem, dependency
 
-**Library**:
-A named Dart grouping (via the `library` directive or implicit file-level library) that forms the organizational unit within a package's public API. A package exposes one or more libraries.
-_Avoid_: Module, namespace
+**Library**: A named Dart grouping (`library` directive or file-level) forming a package's public API.
+_Avoid_: module, namespace
 
-**Symbol**:
-A single named, documentable Dart declaration that dartdoc assigns a kind and indexes in `index.json`. Covers classes, methods, functions, constructors, enums, mixins, extensions, typedefs, accessors, and top-level constants/properties.
-_Excludes_: Libraries and packages — those are distinct concepts.
-_Avoid_: API element, declaration, member (use "member" only for class-scoped symbols when scope is clear)
+**Symbol**: A named, documentable Dart declaration indexed in dartdoc's `index.json` (classes, methods, functions, constructors, enums, mixins, extensions, typedefs, accessors, top-level constants/properties). Excludes libraries and packages.
+_Avoid_: API element, declaration
 
 ### Versioning
 
-**Latest Stable Version**:
-The newest published version of a package that carries no pre-release segment (no `-alpha`, `-beta`, `-rc`, `-dev` suffix). Used as the automatic fallback whenever a caller omits `version`. Resolved from pub.dev's versions list at call time.
-_Avoid_: Latest version (ambiguous — could include pre-releases)
+**Latest Stable Version**: Newest published version with no pre-release suffix (`-alpha`/`-beta`/`-rc`/`-dev`). Default fallback when `version` is omitted.
+_Avoid_: latest version (ambiguous re pre-releases)
 
-**Resolved Version**:
-A top-level field in the JSON response of any tool that accepts a `version` parameter (whether the caller supplied it or the server auto-resolved it). Value is the exact semver string used (e.g. `"1.2.0"`). Not present on version-agnostic tools (`search_packages`) or on `compare_packages` (which already includes `version` per package in the Comparison Matrix).
-_Avoid_: Inferred version, effective version
+**Resolved Version**: The exact semver string a tool call actually used, returned as top-level `resolvedVersion`. Absent on `search_packages` and `compare_packages` (per-package `version` instead).
 
-**Update Check**:
-The once-per-server-startup, rate-limited (~24h) background lookup of this server's own Latest Stable Version on pub.dev (package `dart_pubdev_mcp`), compared against the running executable's version. Reuses `PubDevClient`, the same fetch path every other tool uses — no separate HTTP client or dependency. Its result (and the timestamp it last ran) is persisted in the Tarball Disk Cache directory so a restart within the rate-limit window reuses the last known answer instead of re-querying pub.dev. Disableable via `--no-update-check` / `dart_pubdev_mcp_UPDATE_CHECK`. A failed check (offline, pub.dev unreachable) is swallowed silently, same as every other best-effort background operation in this server.
-_Avoid_: Version check, self-check (both ambiguous with Resolved Version resolution, which is a per-call, per-target-package concept, not a server-startup, self-directed one)
+**Update Check**: Rate-limited (~24h) background lookup of this server's own Latest Stable Version, once per startup. Disableable via `--no-update-check` / `dart_pubdev_mcp_UPDATE_CHECK`. Failures are silent.
 
-**Update Notice**:
-The `dartPubdevMcpUpdate` object (`{ current, latest, message }`) piggybacked onto the first eligible successful tool response of a session, sent only when an Update Check found a newer Latest Stable Version than the running server. At most one per server process lifetime — never repeated, never attached to a Tool Error, and never attached to `search_packages`'s array-shaped response body (skips to the next eligible call instead). Remains the sole *guaranteed*-to-reach-the-model channel — chosen over the `_meta` field on `InitializeResult`/`CallToolResult` because `_meta` is explicitly reserved for protocol-level plumbing per spec — and is not superseded by the Update Log Notification below, which is additive and best-effort, not a replacement: `log()` visibility to the model is entirely client-dependent, which is exactly why this object still carries the delivery guarantee on its own. Inserted into the `TextContent` body only — never into `structuredContent` — since it is not part of any tool's declared `outputSchema`; folding it in would make `structuredContent` stop conforming to that schema for the one response it lands on. `message` exists because landing in the model's context is not the same as the model choosing to relay it: reaching the payload only guarantees delivery, not that an unprompted field gets verbalized to the operator, so `message` is a direct, self-contained instruction ("mention this to your user...") rather than bare data the model has to recognize as noteworthy on its own.
-_Avoid_: Update banner (that term names a distinct concept — see Update Banner below — reserved for genuine terminal output, not piggybacked tool-response JSON), update warning (this is informational, not a Tool Error)
+**Update Notice**: The `dartPubdevMcpUpdate` object piggybacked on the first eligible tool response of a session when a newer version exists. At most once per process; text-content only, never `structuredContent`.
 
-**Update Banner**:
-The two-line stdout text appended to `dart-pubdev-explorer --version`'s output when a persisted Update Check result (see Update Check) shows a newer Latest Stable Version than the running server: the existing identity/version line, followed by `Update available: {latest} — run \`dart install dart_pubdev_mcp --overwrite\` to upgrade.` Read-only — never triggers its own pub.dev lookup; if no Update Check has ever run and persisted a result (e.g. a brand-new install), the extra line is simply absent. Respects `--no-update-check` / `dart_pubdev_mcp_UPDATE_CHECK` the same as the Update Check itself, even though no network call is at stake here — the opt-out's intent is "tell me nothing about updates," not narrowly "make no HTTP calls." Distinct from Update Notice: this is genuine terminal output on the one-shot `--version` exit path, which runs before the MCP stdio transport starts, so — unlike the tool-response `TextContent` channel — writing free text to stdout here is safe.
-_Avoid_: Update notice (that term is reserved for the tool-response object), version banner
+**Update Banner**: Two-line addition to `dart-pubdev-explorer --version` output when an update is available. Read-only, no network call.
 
-**Update Log Notification**:
-An MCP `notifications/message` (`LoggingMessageNotification`) pushed once per session, from the same Update Check callback that sets the Update Notice's pending state, carrying the same wording as the Update Banner's second line. Sent via a direct `sendNotification` call rather than through this server's own severity-gated `log()` helper (`LoggingSupport.log`) — an intentional, deliberate bypass of the operator's configured `--log-level` threshold, since this is a one-time informational push, not a diagnostic log line that verbosity setting was ever meant to filter. Purely additive to Update Notice, never a replacement for it — see Update Notice's note on why the delivery guarantee still lives there.
-_Avoid_: Update banner (reserved for the `--version` CLI text — this is a push over the MCP protocol, not terminal output), log notice (ambiguous with this server's ordinary debug/info/warning log lines, which do go through the severity-gated `log()` helper)
+**Update Log Notification**: One-time MCP `notifications/message` push carrying the Update Banner's text, sent outside the severity-gated `log()` path.
 
-**Package Resource URI**:
-The canonical address of a versioned package artifact served by this server, e.g. `pub://package/http@1.2.0/readme`. Always includes an explicit `@{version}` segment; `latest` is a legal version value and resolves to the Latest Stable Version. The versionless form is not supported. See ADR 0001.
-_Avoid_: Resource URL, resource path
+**Package Resource URI**: Canonical versioned resource address, e.g. `pub://package/http@1.2.0/readme`. Always includes `@{version}` (`latest` is legal). See ADR 0001.
 
-**Version Listing**:
-The output of `list_package_versions`: three bucketed lists — `stable`, `prerelease`, `retracted` — each sorted newest-first, each entry carrying the version string and `publishedAt` date. Version-level retraction status is included here; package-level discontinuation belongs on `get_package`. Post-V1: pagination / truncation for packages with 100+ versions.
-_Avoid_: Version history, version catalog
+**Version Listing**: `list_package_versions` output — `stable`/`prerelease`/`retracted` lists, newest-first, each with version + `publishedAt`.
 
 ### Symbols and source
 
-**Symbol Identity**:
-The exact, unambiguous address of a symbol: fully-qualified name + enclosing library URI + package version (e.g. `CueTimelineController`, `package:cue/cue.dart`, `1.2.0`). The output format returned by `find_symbols` and consumed by `get_symbol_documentation` and `get_source_slice`.
-_Avoid_: Symbol reference, symbol path
+**Symbol Identity**: Fully-qualified name + library URI + package version, e.g. `CueTimelineController`, `package:cue/cue.dart`, `1.2.0`. Returned by `find_symbols`; consumed by `get_symbol_documentation`/`get_source_slice`.
 
-**Symbol Search**:
-A case-insensitive substring and fuzzy match against symbol names and short descriptions within a single package's dartdoc `index.json`. Requires an explicit package name; returns up to 20 Symbol Search Results with a `hasMore` flag. Backed by the same cached artifact as `browse_api_symbols`.
-_Avoid_: Global symbol search, cross-package search (V1 is single-package only)
+**Symbol Search**: Case-insensitive substring/fuzzy match against symbol names and descriptions in one package's dartdoc index. Up to 20 results + `hasMore`.
 
-**Symbol Search Result**:
-One entry in the output of `find_symbols`: `{ name, qualifiedName, kind, library, enclosedBy, description, href }`. `enclosedBy` is null for top-level symbols and holds the container name (e.g. a class name) for methods, constructors, and accessors.
+**Symbol Search Result**: One `find_symbols` entry — `{ name, qualifiedName, kind, library, enclosedBy, description, href }`.
 
-**Source Slice**:
-An extract of Dart source code from a package file, produced by `get_source_slice`. Two modes: (1) *line-range* — caller supplies `lineStart`/`lineEnd`, honored exactly with no truncation; (2) *symbol-bounded* — caller supplies a symbol name, server uses the AST to locate the node and applies optional `maxLines` truncation if the body exceeds the limit, returning `truncated: true` and `effectiveLineEnd` when cut.
-_Avoid_: Source excerpt, code snippet (for this server's specific tool output)
+**Source Slice**: A `get_source_slice` extract — line-range mode (`lineStart`/`lineEnd`, exact) or symbol-bounded mode (AST-located, optional `maxLines` truncation with `truncated`/`effectiveLineEnd`).
 
-**API Diff**:
-The output of `get_api_diff`: sets of added and removed libraries, classes, fields, and methods between two package versions, computed by diffing the dartdoc `index.json` artifacts for each version. V1 limitation: no structural diff (parameter changes, nullability). If dartdoc is missing for either version the tool hard-fails with `DOCUMENTATION_NOT_FOUND` and a `suggestedNextStep` pointing to `browse_api_symbols` per version as a manual workaround.
-_Avoid_: Breaking change report (the tool detects structural additions/removals, not semantic breaking changes)
+**Grep Match**: One `grep_package_source` match — `{ file, line, matchedLine, contextBefore, contextAfter }`. Literal substring by default, `RegExp` when `regex: true`; case-sensitive unless `caseInsensitive: true`.
 
-**Security Advisory**:
-One OSV-format entry from pub.dev's `GET /api/packages/{name}/advisories` endpoint — id (e.g. `GHSA-4rgh-jx4f-qfcq`), CVE aliases, a summary, a URL, and a set of OSV Affected Ranges. Not version-scoped: pub.dev reports every advisory ever published against a package regardless of version, which is why `get_security_advisories` exists to do the per-version evaluation rather than exposing this list raw. See `issues/fr-tools-disposition/02-security-advisories-tool.md`.
-_Avoid_: CVE, vulnerability (use "Security Advisory" for the OSV entry itself; CVE is one kind of alias it may carry, not a synonym for the whole record)
+**API Diff**: `get_api_diff` output — added/removed libraries, classes, fields, methods between two versions (presence-based, not structural). `DOCUMENTATION_NOT_FOUND` if dartdoc is missing for either version.
 
-**Advisories Summary** (passive signal):
-The thin, best-effort `advisories` object `get_package` attaches to its response — `count`, `ids`, and `affectsResolvedVersion` — and the single `advisories` count `compare_packages` adds as a Comparison Matrix row. Both share the `securityAdvisories` cache facade with `get_security_advisories` (one fetch per package per TTL window) but never surface per-advisory detail (summary, aliases, ranges) — that stays behind `get_security_advisories`. Best-effort: a failed fetch omits the field/cell rather than failing the parent tool. See `issues/fr-tools-disposition/03-advisories-passive-signal.md`.
-_Avoid_: Security Advisory (that's the full OSV record; this is a derived summary carrying none of its detail)
+**Security Advisory**: One OSV-format entry from pub.dev's advisories endpoint — id, CVE aliases, summary, URL, affected ranges. Not version-scoped; `get_security_advisories` does the per-version evaluation.
 
-**OSV Affected Range**:
-One `affected[].ranges[]` entry on a Security Advisory: an ordered list of OSV Range Events (`introduced`, `fixed`, `last_affected`, `limit`) that together describe which versions a Security Advisory covers. `get_security_advisories` evaluates every range OR'd together against the Resolved Version via `osvRangesAffectVersion` (`lib/src/data/osv_range_evaluator.dart`), using `pub_semver` for version comparison. The literal `introduced: "0"` is the OSV sentinel for "affected since the beginning," not a parseable semver string.
-_Avoid_: Version range, affected versions (both ambiguous with `pub_semver`'s own `VersionRange`, a distinct concept this evaluator does not use)
+**Advisories Summary**: Best-effort `advisories` field (`count`, `ids`, `affectsResolvedVersion`) on `get_package`, and the `advisories` row on `compare_packages`. A failed fetch omits the field rather than failing the call.
+
+**OSV Affected Range**: One `affected[].ranges[]` entry — ordered range events (`introduced`, `fixed`, `last_affected`, `limit`). Evaluated via `osvRangesAffectVersion` (`pub_semver`). `introduced: "0"` means "affected since the beginning."
 
 ### Errors
 
-**Tool Error**:
-A failed tool result returned via MCP `CallToolResult` with `isError: true`. Content is a single JSON block: `{ "error": { "code": "…", "message": "…", "retryable": bool, "suggestion": "…", "suggestedNextStep": {…}, "details": {…} } }`. `suggestedNextStep` and `details` are optional. See ADR 0002.
-_Avoid_: Exception, thrown error (no Dart exceptions cross module boundaries), error string
+**Tool Error**: A failed `CallToolResult` (`isError: true`) with body `{ error: { code, message, retryable, suggestion?, suggestedNextStep?, details? } }`. See ADR 0002.
 
-**Error Code**:
-A `SCREAMING_SNAKE_CASE` string identifying a failure category. Defined codes: `AMBIGUOUS_SYMBOL`, `SYMBOL_NOT_FOUND`, `PACKAGE_NOT_FOUND`, `DOCUMENTATION_NOT_FOUND`, `RATE_LIMITED`, `PACKAGE_TOO_LARGE`, `INVALID_ARGUMENT`, `SERVICE_UNAVAILABLE`, `REQUEST_TIMEOUT`, `NO_DOCUMENTATION`, `UNEXPECTED_RESPONSE`.
-_Avoid_: Error type, error string, exception code
+**Error Code**: `SCREAMING_SNAKE_CASE` failure category. Defined: `AMBIGUOUS_SYMBOL`, `SYMBOL_NOT_FOUND`, `PACKAGE_NOT_FOUND`, `DOCUMENTATION_NOT_FOUND`, `RATE_LIMITED`, `PACKAGE_TOO_LARGE`, `INVALID_ARGUMENT`, `SERVICE_UNAVAILABLE`, `REQUEST_TIMEOUT`, `NO_DOCUMENTATION`, `UNEXPECTED_RESPONSE`.
 
 ### Caching and infrastructure
 
-**Tarball Disk Cache**:
-An LRU, size-capped on-disk store of downloaded `.tar.gz` package archives, keyed by `{name}@{version}`. Default location: `~/.cache/dart_pubdev_mcp/` (XDG cache dir), overridable via `--cache-dir`. Default cap: 500 MB. Per-tarball download limit: 50 MB; exceeded downloads abort and return a `PACKAGE_TOO_LARGE` Tool Error. Survives server restarts.
-_Avoid_: File cache, package cache (ambiguous with in-memory caches)
+**Tarball Disk Cache**: LRU on-disk store of `.tar.gz` archives keyed by `{name}@{version}`. Default `~/.cache/dart_pubdev_mcp/`, 500 MB cap, 50 MB per-download limit (else `PACKAGE_TOO_LARGE`). Survives restarts.
 
-**Cache Hit**:
-A `ResponseCache.get()` call that returns a live, non-expired entry for the exact key requested — served with no pub.dev call. Logged to the Wire Trace as `⚡ cache hit`.
-_Avoid_: Warm cache, cached response (favor "Cache Hit" as the noun form)
+**Cache Hit / Cache Miss / Uncached Call**: A `ResponseCache.get()` returning a live entry (Hit) or none/expired (Miss), vs. a pub.dev call with no cache in front at all (Uncached Call) — the latter two render identically in the Wire Trace.
 
-**Cache Miss**:
-A `ResponseCache.get()` call that finds no entry, or an expired one, for the key requested — the caller must fetch from pub.dev. Distinct from an **Uncached Call**, which renders identically in the Wire Trace but is a different situation.
-_Avoid_: Cold cache
-
-**Uncached Call**:
-A pub.dev request made by a code path that has no cache in front of it at all — there is nothing to check, so nothing can miss. Indistinguishable from a Cache Miss in the current Wire Trace format (both render as a bare `→ pub` line).
-
-**Package Info Cache**:
-The `ResponseCache<Map<String, Object?>>` inside `PubDevClient` for the raw `GET /api/packages/{name}` response, keyed by package name only (the endpoint returns every version, so no version segment is needed), TTL `kPackageMetadataTtl` (15 min). Shared transparently by every `PubDevClient` method touching that endpoint — `resolveLatestStable`, `getPackage`, `listVersions`, `search`'s per-result enrichment — so one package's metadata is fetched from pub.dev at most once per TTL window regardless of how many tools ask for it.
-_Avoid_: Package cache (ambiguous with Tarball Disk Cache), metadata cache
+**Package Info Cache**: `PubDevClient`'s cache for `GET /api/packages/{name}`, keyed by name, TTL 15 min. Shared across `resolveLatestStable`, `getPackage`, `listVersions`, `search`.
 
 ### Observability
 
-**Wire Trace**:
-The human-readable, chronological file log that records every message crossing the server's two boundaries — the **LLM boundary** (inbound tool/resource calls and the results returned to the LLM) and the **pub.dev boundary** (outbound HTTP requests and their responses). Each line is tagged with a **Correlation Id** so a single LLM request and the pub.dev calls it triggered can be read together. Format is human-first pretty text (never JSON). Written live to a dedicated file the server owns, so `tail -f` works during a session. Bodies are logged as size-capped previews (tarballs: metadata only; HTML endpoints: converted-markdown preview only).
-_Purpose beyond error debugging_: because every pub.dev call and cache hit/miss is visible, Wire Trace is also the instrument for auditing whether the server's caching and fetch strategy actually delivers the token-efficient access promised in this document's opening line — rather than assuming an LLM would do better reading pub.dev data unmediated.
-_Distinct from_: the MCP `log()` notification mechanism (`notifications/message`, client-facing, gated by the client-settable `--log-level`), which is unchanged and orthogonal.
-_Avoid_: Wire log, trace log, debug log, audit log.
+**Wire Trace**: Human-readable log of every message crossing the LLM boundary and pub.dev boundary, tagged with a Correlation Id. Written live to its own file; bodies are size-capped previews. Distinct from the client-facing MCP `log()`/`--log-level` mechanism.
 
-**Correlation Id**:
-A short opaque token (e.g. `#a3f`) assigned to one inbound LLM request and propagated — via a Dart `Zone` — into every pub.dev call that request triggers, so all their Wire Trace lines share the same id. Enables following one request's full story with `grep` even when concurrent requests interleave.
-_Avoid_: Request id, trace id, span id (reserve those if OpenTelemetry is ever adopted).
+**Correlation Id**: Short token (e.g. `#a3f`) tying one inbound request to every pub.dev call it triggers, via a Dart `Zone`.
 
 ### Tool outputs
 
-**Comparison Matrix**:
-The fixed output of `compare_packages`: a JSON object mapping every available hard metric (scores, platforms, sdk constraints, dependency count, maintenance signals, license, publisher, advisories count — see Advisories Summary) to a per-package value map. No caller-supplied criteria filter — the full matrix is always returned; the LLM selects what is relevant. Metrics requiring tarball access (`api-surface`, `example-quality`) are post-V1.
-_Avoid_: Criteria matrix, filtered comparison
+**Comparison Matrix**: `compare_packages` output — every hard metric (scores, platforms, sdk constraints, deps, maintenance signals, advisories) mapped per package. No filtering; full matrix always returned.
 
-**Non-Relevance Sort**:
-`search_packages`'s `sort` values other than the default `relevance` (`likes`, `pub_points`, `updated`) rank pub.dev's full catalog by that metric globally rather than by match to `query` — confirmed live (2026-07-17): `query: "csv", sort: "likes"` returned `font_awesome_flutter` as the top result, nothing CSV-related in the top five. Not a bug in this server — `sort` is forwarded to pub.dev's own `/api/search` verbatim (`pub_client.dart`); pub.dev itself appears to drop text-relevance filtering once a non-default sort is set. The `search_packages` tool description now carries this caveat directly (keep `relevance` whenever `query` is specific; only switch sort when browsing broadly). Discovered via a #06 transcript-based eval session — see `issues/mcp-prompt-surface/06-evaluation-pass.md`.
-_Avoid_: Sort bug, broken sort (the sort itself works correctly — it's the combination with a narrow query that's misleading)
-
----
-
-## Example dialogue
-
-> **Dev:** I want to find the `StreamController` class in the `async` package — which tool do I use?
->
-> **Expert:** `find_symbols` — it takes the package name and a query. The `package` argument is mandatory; the server returns `INVALID_ARGUMENT` immediately if you omit it. Pass `query: "StreamController"` and it searches the dartdoc index, returning a list of Symbol Search Results — name, kind, library, enclosedBy, and an href. Each result is a Symbol Identity you can hand straight to `get_symbol_documentation`.
->
-> **Dev:** What if I just want to browse what's in the package without knowing a symbol name?
->
-> **Expert:** That's `browse_api_symbols` — give it a package and a depth, it returns the API tree as an outline. `find_symbols` is query-driven; `browse_api_symbols` is structural exploration.
->
-> **Dev:** If I call `get_source_slice` on a huge class and don't want the whole thing —
->
-> **Expert:** Pass `maxLines`. The server returns the signature, opening brace, a truncation comment, and closing brace, with `truncated: true` and `effectiveLineEnd` so you know where it cut. If you need an exact range instead, use the line-range mode with `lineStart`/`lineEnd` — that's never truncated.
->
-> **Dev:** I forgot to pass a version to `get_package` — what happens?
->
-> **Expert:** The server resolves the Latest Stable Version — newest non-pre-release — and runs the call. The response always includes `resolvedVersion` as the first key so you know exactly which version was used. From there you can pin that version in all your follow-up calls.
+**Non-Relevance Sort**: `search_packages` `sort` values other than `relevance` (`likes`, `pub_points`, `updated`) rank pub.dev's whole catalog by that metric, not by match to `query` — confirmed live (query `"csv"` + `sort: "likes"` returned unrelated top results). Documented in the tool description, not a bug.

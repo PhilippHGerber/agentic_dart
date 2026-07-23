@@ -70,6 +70,7 @@ import 'package:dart_mcp/server.dart';
 
 import '../analysis/ast_access.dart';
 import '../data/domain_error.dart';
+import 'arg_parsing.dart';
 import 'line_range_slice.dart';
 import 'symbol_bounded_slice.dart';
 import 'tool_response.dart';
@@ -107,9 +108,9 @@ final class GetSourceSliceHandler {
     final rawFile = (args['file'] as String?) ?? '';
     final rawSymbol = args['symbolName'] as String?;
     final symbolName = (rawSymbol == null || rawSymbol.isEmpty) ? null : rawSymbol;
-    final lineStart = _asInt(args['lineStart']);
-    final lineEnd = _asInt(args['lineEnd']);
-    final maxLines = _asInt(args['maxLines']);
+    final lineStart = asInt(args['lineStart']);
+    final lineEnd = asInt(args['lineEnd']);
+    final maxLines = asInt(args['maxLines']);
 
     // Validate: `file` is always required.
     final file = _normalizePath(rawFile);
@@ -226,13 +227,6 @@ final class GetSourceSliceHandler {
   }
 
   // ─── Utility helpers ───────────────────────────────────────────────────────
-
-  static int? _asInt(Object? value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
-  }
 
   static String? _normalizePath(String raw) {
     final stripped = raw.startsWith('/') ? raw.substring(1) : raw;

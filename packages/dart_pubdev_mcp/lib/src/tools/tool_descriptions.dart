@@ -20,6 +20,8 @@ const kServerInstructions =
     'otherwise browse_api_symbols or find_symbols to locate it, then get_throw_statements, '
     'then get_source_slice for implementation detail (list_package_source_files first when '
     'the file path is unknown). '
+    'grep_package_source searches across the whole cached source tree for a literal or regex '
+    'pattern — use it to find every call site of a symbol instead of enumerating files by hand. '
     'Upgrade analysis: get_changelog with fromVersion set → inspect breaking flags → '
     'list_package_versions for concrete version strings → '
     'get_api_diff for the symbol-level delta between two known versions. '
@@ -216,6 +218,29 @@ const kListPackageSourceFilesDescription =
     'Set directory and fileExtension to narrow the listing before reading individual files. '
     'Select a path from the result and pass it to get_source_slice. '
     'It never returns file contents — pass a chosen path to get_source_slice for that.';
+
+// ─── grep_package_source ──────────────────────────────────────────────────────
+
+/// Description for `grepPackageSourceTool`.
+const kGrepPackageSourceDescription =
+    "Search a package's cached source tree for a literal string or, with regex: true, a Dart "
+    'RegExp pattern — the way to find "every call site of X" without enumerating files and '
+    'reading each one with get_source_slice. '
+    'Runs against the same cached tarball as get_source_slice, get_throw_statements, and '
+    'list_package_source_files, so a warm cache serves this tool with no extra download. '
+    'Literal substring matching is the default; pass regex: true to compile pattern as a Dart '
+    'RegExp instead — an invalid pattern returns INVALID_ARGUMENT with the compiler message. '
+    'Matching is case-sensitive unless caseInsensitive: true. '
+    'Default scope is the whole package tree, not just lib/ — set directory and/or '
+    'fileExtension to narrow it, matching list_package_source_files semantics. '
+    'Binary-looking extensions (.png, .zip, .so, …) are excluded by default since decoding them '
+    'as text can produce spurious matches; name one explicitly via fileExtension to search it '
+    'anyway. '
+    'Pass contextLines for symmetric lines of surrounding context around each match. '
+    'Results are sorted by file then line and capped at 50 total (hasMore: true on overflow) — '
+    'narrow with directory/fileExtension rather than expecting pagination. '
+    'The whole scan is bounded by a 5-second wall-clock timeout (REQUEST_TIMEOUT on expiry), the '
+    'only guard against a pathological pattern; no static regex analysis is performed.';
 
 // ─── get_throw_statements ─────────────────────────────────────────────────────
 

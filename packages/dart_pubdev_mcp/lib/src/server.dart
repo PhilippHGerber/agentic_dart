@@ -34,6 +34,7 @@ import 'tools/get_security_advisories.dart';
 import 'tools/get_source_slice.dart';
 import 'tools/get_symbol_documentation.dart';
 import 'tools/get_throw_statements.dart';
+import 'tools/grep_package_source.dart';
 import 'tools/list_package_source_files.dart';
 import 'tools/list_package_versions.dart';
 import 'tools/list_sdk_source_files.dart';
@@ -504,6 +505,14 @@ base class PubMcpServer extends MCPServer
     );
     _registerTracedTool(listPackageSourceFilesTool, listSourceFilesHandler.call);
     log(LoggingLevel.debug, 'registered tool: list_package_source_files');
+
+    final grepPackageSourceHandler = GrepPackageSourceHandler(
+      versionResolver: _versionResolver,
+      sourceFiles: _cacheRegistry.sourceFiles,
+      log: log,
+    );
+    _registerTracedTool(grepPackageSourceTool, grepPackageSourceHandler.call);
+    log(LoggingLevel.debug, 'registered tool: grep_package_source');
 
     final getSourceSliceHandler = GetSourceSliceHandler(
       versionResolver: _versionResolver,

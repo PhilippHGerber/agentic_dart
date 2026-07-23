@@ -11,6 +11,7 @@ import 'package:dart_mcp/server.dart';
 import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
+import 'path_filters.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -72,7 +73,7 @@ final class ListPackageSourceFilesHandler {
         files = value;
     }
 
-    final directory = _normalizeDirectory(rawDirectory);
+    final directory = normalizeDirectory(rawDirectory);
     var paths = files.keys.toList();
 
     if (directory != null && directory.isNotEmpty) {
@@ -84,12 +85,5 @@ final class ListPackageSourceFilesHandler {
 
     paths.sort();
     return ToolResponse.ok({'name': package, 'files': paths}, resolvedVersion: resolvedVersion);
-  }
-
-  static String? _normalizeDirectory(String? raw) {
-    if (raw == null) return null;
-    var dir = raw.startsWith('/') ? raw.substring(1) : raw;
-    if (!dir.endsWith('/') && dir.isNotEmpty) dir = '$dir/';
-    return dir;
   }
 }

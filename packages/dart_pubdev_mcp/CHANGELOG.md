@@ -3,6 +3,14 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `grep_package_source` tool — literal/regex search across a package's
+  cached source tree, with optional context lines and directory/extension
+  filters.
+
 ## [0.6.4]
 
 ### Added
