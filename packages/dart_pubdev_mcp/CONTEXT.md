@@ -52,7 +52,9 @@ _Avoid_: latest version (ambiguous re pre-releases)
 
 **Grep Match**: One `grep_package_source` match — `{ file, line, matchedLine, contextBefore, contextAfter }`. Literal substring by default, `RegExp` when `regex: true`; case-sensitive unless `caseInsensitive: true`.
 
-**API Diff**: `get_api_diff` output — added/removed libraries, classes, fields, methods between two versions (presence-based, not structural). `DOCUMENTATION_NOT_FOUND` if dartdoc is missing for either version.
+**API Diff**: `get_api_diff` output — added/removed libraries, classes, fields, methods between two versions (presence-based, not structural). `DOCUMENTATION_NOT_FOUND` if dartdoc is missing for either version. Opt-in `includeSignatureChanges` + `symbol` adds a Signature Change for one declaration.
+
+**Signature Change**: `get_api_diff`'s opt-in `signatureChange` result — `{qualifiedName, changed, before, after}` — an AST-reconstructed, formatting-invariant header comparison for one `symbol` across both versions. `symbol` must resolve in both or the call fails with `SYMBOL_NOT_FOUND`.
 
 **Security Advisory**: One OSV-format entry from pub.dev's advisories endpoint — id, CVE aliases, summary, URL, affected ranges. Not version-scoped; `get_security_advisories` does the per-version evaluation.
 

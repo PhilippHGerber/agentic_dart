@@ -58,24 +58,9 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'symbol_resolution.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
-
-// ─── Internal resolution result types ─────────────────────────────────────────
-
-sealed class _SymbolMatch {}
-
-final class _SingleMatch extends _SymbolMatch {
-  _SingleMatch(this.href);
-  final String href;
-}
-
-final class _AmbiguousMatch extends _SymbolMatch {
-  _AmbiguousMatch(this.alternatives);
-  final List<String> alternatives;
-}
-
-final class _NoMatch extends _SymbolMatch {}
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
@@ -158,10 +143,10 @@ final class GetSymbolDocumentationHandler {
 
     // ── Step 3: resolve symbol name → href ────────────────────────────────────
 
-    final match = _resolveSymbol(symbols, symbol);
+    final match = resolveDartdocSymbol(symbols, symbol);
 
     return switch (match) {
-      _NoMatch() => ToolResponse.error(
+      NoSymbolMatch() => ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
           message: "Symbol '$symbol' was not found in the API index for package '$package'.",
@@ -170,7 +155,7 @@ final class GetSymbolDocumentationHandler {
               'Use browse_api_symbols to discover available symbol names.',
         ),
       ),
-      _AmbiguousMatch(:final alternatives) => ToolResponse.error(
+      AmbiguousSymbolMatch(:final alternatives) => ToolResponse.error(
         DomainError(
           code: DomainErrors.ambiguousSymbol,
           message: "Symbol '$symbol' is ambiguous — ${alternatives.length} candidates were found.",
@@ -180,60 +165,12 @@ final class GetSymbolDocumentationHandler {
           details: {'candidates': alternatives},
         ),
       ),
-      _SingleMatch(:final href) => await _fetchDoc(package, href, resolvedVersion),
+      SingleSymbolMatch(symbol: final resolved) => await _fetchDoc(
+        package,
+        resolved.href,
+        resolvedVersion,
+      ),
     };
-  }
-
-  // ── Symbol resolution ──────────────────────────────────────────────────────
-
-  /// Resolves [symbol] against [symbols] using a three-pass strategy.
-  ///
-  /// **Pass 0** — exact [DartdocSymbol.qualifiedName] match. This is the
-  /// primary retry path after an `AMBIGUOUS_SYMBOL` error: callers pass a
-  /// value from `error.details.candidates` and the match is always unambiguous.
-  ///
-  /// **Pass 1** — exact [DartdocSymbol.name] match.
-  ///
-  /// **Pass 2** — [DartdocSymbol.qualifiedName] suffix match (library prefix
-  /// stripped up to and including the first `.`).
-  ///
-  /// Disambiguation: class entries are preferred when multiple matches remain.
-  static _SymbolMatch _resolveSymbol(List<DartdocSymbol> symbols, String symbol) {
-    // Pass 0: exact qualifiedName match — unambiguous retry path.
-    final qnMatches = symbols.where((s) => s.qualifiedName == symbol).toList();
-    if (qnMatches.length == 1) return _SingleMatch(qnMatches.first.href);
-    if (qnMatches.isNotEmpty) return _disambiguate(qnMatches);
-
-    // Pass 1: exact name match.
-    final nameMatches = symbols.where((s) => s.name == symbol).toList();
-    if (nameMatches.length == 1) return _SingleMatch(nameMatches.first.href);
-    if (nameMatches.isNotEmpty) return _disambiguate(nameMatches);
-
-    // Pass 2: qualifiedName suffix match (strip library prefix).
-    final suffixMatches = symbols.where((s) {
-      final dot = s.qualifiedName.indexOf('.');
-      if (dot == -1) return false;
-      return s.qualifiedName.substring(dot + 1) == symbol;
-    }).toList();
-
-    return _disambiguate(suffixMatches);
-  }
-
-  /// Selects a single match from [candidates] or reports ambiguity.
-  ///
-  /// If [candidates] is empty, returns [_NoMatch].
-  /// If [candidates] has exactly one entry, returns [_SingleMatch].
-  /// Otherwise, prefers the sole class-level entry — or reports
-  /// [_AmbiguousMatch] when none or multiple class entries exist.
-  static _SymbolMatch _disambiguate(List<DartdocSymbol> candidates) {
-    if (candidates.isEmpty) return _NoMatch();
-    if (candidates.length == 1) return _SingleMatch(candidates.first.href);
-
-    final classEntries = candidates.where((s) => s.type == 'class').toList();
-    if (classEntries.length == 1) return _SingleMatch(classEntries.first.href);
-
-    // Multiple class entries, or no class entry with multiple matches.
-    return _AmbiguousMatch(candidates.map((s) => s.qualifiedName).toList());
   }
 
   // ── Symbol doc fetch ───────────────────────────────────────────────────────

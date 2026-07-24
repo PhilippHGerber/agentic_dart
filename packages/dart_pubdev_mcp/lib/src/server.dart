@@ -484,6 +484,7 @@ base class PubMcpServer extends MCPServer
 
     final getApiDiffHandler = GetApiDiffHandler(
       apiIndex: _cacheRegistry.apiIndex,
+      astAccess: _astAccess,
       log: log,
     );
     _registerTracedTool(getApiDiffTool, getApiDiffHandler.call);

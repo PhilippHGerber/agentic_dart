@@ -1259,6 +1259,20 @@ final getApiDiffTool = Tool(
             'The target version to diff to (e.g. "1.2.0"). '
             'Required — this tool does not resolve a latest-stable version.',
       ),
+      'includeSignatureChanges': Schema.bool(
+        description:
+            'Opt in to a structural comparison of one declaration signature across both '
+            'versions. Requires `symbol` — there is no whole-package structural scan, so this '
+            'stays cheap and targeted. Default false; the default call downloads no tarballs.',
+      ),
+      'symbol': Schema.string(
+        description:
+            'The declaration to compare when `includeSignatureChanges` is true — a bare name '
+            '("Client"), a dotted member name ("Client.send"), or a full qualifiedName. '
+            'Resolved against the dartdoc index of each version the same way '
+            'get_symbol_documentation resolves `symbol`. Required when '
+            '`includeSignatureChanges` is true; ignored otherwise.',
+      ),
     },
   ),
   outputSchema: ObjectSchema(
@@ -1269,8 +1283,27 @@ final getApiDiffTool = Tool(
       'toVersion': Schema.string(description: 'The target version diffed to, as given.'),
       'added': _kApiDiffBucketsSchema('Symbols present in toVersion but not fromVersion.'),
       'removed': _kApiDiffBucketsSchema('Symbols present in fromVersion but not toVersion.'),
+      'signatureChange': _kSignatureChangeSchema,
     },
   ),
+);
+
+/// The `signatureChange` result `get_api_diff` adds when
+/// `includeSignatureChanges` and `symbol` were both supplied.
+final ObjectSchema _kSignatureChangeSchema = ObjectSchema(
+  description:
+      'Present only when `includeSignatureChanges` was requested. Compares one declaration '
+      'AST-reconstructed signature (modifiers, types, names, parameters, and — for classes — '
+      'extends/with/implements clauses; the body/implementation is excluded) across both '
+      'versions. Present even when unchanged (`changed: false`) — a confirmed-unchanged result '
+      'is a useful answer, not something to omit.',
+  required: ['qualifiedName', 'changed', 'before', 'after'],
+  properties: {
+    'qualifiedName': Schema.string(description: 'The resolved symbol qualifiedName.'),
+    'changed': Schema.bool(description: 'Whether `before` and `after` differ.'),
+    'before': Schema.string(description: 'The declaration rendered signature in fromVersion.'),
+    'after': Schema.string(description: 'The declaration rendered signature in toVersion.'),
+  },
 );
 
 /// The four API-surface buckets shared by `get_api_diff`'s `added` and

@@ -4,6 +4,7 @@ library;
 import 'dart:convert';
 
 import 'package:dart_mcp/server.dart';
+import 'package:dart_pubdev_mcp/src/analysis/ast_access.dart';
 import 'package:dart_pubdev_mcp/src/cache/cache_registry.dart';
 import 'package:dart_pubdev_mcp/src/cache/keyed_cache.dart';
 import 'package:dart_pubdev_mcp/src/data/domain_error.dart';
@@ -563,7 +564,11 @@ void main() {
       stubIndexJson(mockHttp);
 
       await buildHandler().call(_request({'package': 'http', 'query': 'client'}));
-      await GetApiDiffHandler(apiIndex: apiIndex, log: (_, _) {}).call(
+      await GetApiDiffHandler(
+        apiIndex: apiIndex,
+        astAccess: AstAccess(sourceFiles: stack.caches.sourceFiles, ast: stack.caches.ast),
+        log: (_, _) {},
+      ).call(
         CallToolRequest(
           name: 'get_api_diff',
           arguments: {'package': 'http', 'fromVersion': '1.6.0', 'toVersion': '1.6.0'},

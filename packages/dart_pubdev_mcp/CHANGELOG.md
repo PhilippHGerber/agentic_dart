@@ -10,6 +10,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `grep_package_source` tool — literal/regex search across a package's
   cached source tree, with optional context lines and directory/extension
   filters.
+- `get_api_diff` gains an opt-in `includeSignatureChanges` parameter (with a
+  required `symbol`) that adds a `signatureChange` field comparing one
+  declaration's signature across versions.
 
 ## [0.6.4]
 

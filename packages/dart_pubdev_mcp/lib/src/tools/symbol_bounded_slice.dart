@@ -51,7 +51,7 @@ SymbolBoundedSlice? sliceSymbol(
   String symbolName, {
   int? maxLines,
 }) {
-  final node = _findSymbol(astAccess, ast.unit, symbolName);
+  final node = findDeclarationNode(astAccess, ast.unit, symbolName);
   if (node == null) return null;
 
   final content = ast.content;
@@ -100,7 +100,11 @@ SymbolBoundedSlice? sliceSymbol(
 /// (`Type.member`) delegates to [AstAccess.member] for the class-member
 /// lookup and name normalization, taking the first match when an accessor
 /// pair shares the member name.
-AstNode? _findSymbol(AstAccess astAccess, CompilationUnit unit, String symbolName) {
+///
+/// Shared with `get_api_diff`'s `includeSignatureChanges` mode, which locates
+/// the same declaration in two package versions' source before rendering and
+/// comparing their signatures.
+AstNode? findDeclarationNode(AstAccess astAccess, CompilationUnit unit, String symbolName) {
   final dot = symbolName.indexOf('.');
   if (dot > 0) {
     final typeName = symbolName.substring(0, dot);
