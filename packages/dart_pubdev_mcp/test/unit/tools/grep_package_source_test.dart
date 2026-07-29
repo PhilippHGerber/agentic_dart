@@ -408,6 +408,36 @@ void main() {
     });
   });
 
+  // ─── SDK package guard ──────────────────────────────────────────────────────
+
+  group('SDK package guard', () {
+    test('rejects an SDK package name with no version supplied', () async {
+      final result = await buildHandler().call(
+        _request({'package': 'flutter', 'pattern': 'needle'}),
+      );
+
+      expect(result.isError, isTrue);
+      final error = _errorPayload(result);
+      expect(error['code'], equals(DomainErrors.packageNotFound));
+      expect(error['suggestedNextStep'], isNotNull);
+
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      verifyNever(() => mockHttp.send(any()));
+    });
+
+    test('rejects an SDK package name even with an explicit version', () async {
+      final result = await buildHandler().call(
+        _request({'package': 'flutter', 'version': '3.35.0', 'pattern': 'needle'}),
+      );
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      verifyNever(() => mockHttp.send(any()));
+    });
+  });
+
   // ─── outputSchema conformance ──────────────────────────────────────────────
 
   group('outputSchema conformance', () {

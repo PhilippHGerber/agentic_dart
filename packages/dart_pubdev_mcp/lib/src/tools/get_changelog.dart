@@ -13,6 +13,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'sdk_package_guard.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -82,6 +83,10 @@ final class GetChangelogHandler {
     final package = (args['package'] as String?) ?? '';
     final versionLimit = (args['limit'] as int?) ?? 5;
     final fromVersion = args['fromVersion'] as String?;
+
+    // Checked before touching VersionResolver/PubDevClient so an SDK package
+    // name (e.g. "flutter") never reaches either.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     _log(
       LoggingLevel.info,

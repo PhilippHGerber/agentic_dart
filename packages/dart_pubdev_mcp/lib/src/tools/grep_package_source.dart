@@ -73,6 +73,7 @@ import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import 'arg_parsing.dart';
 import 'path_filters.dart';
+import 'sdk_package_guard.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -143,6 +144,11 @@ final class GrepPackageSourceHandler {
     if (package.isEmpty) {
       return ToolResponse.error(_kPackageRequired);
     }
+
+    // Checked before touching VersionResolver/PubDevClient — including with an
+    // explicit `version` — so an SDK package name (e.g. "flutter") never reaches either.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
+
     if (pattern == null || pattern.isEmpty) {
       return ToolResponse.error(_kPatternRequired);
     }

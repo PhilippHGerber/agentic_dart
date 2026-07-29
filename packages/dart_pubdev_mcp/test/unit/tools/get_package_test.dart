@@ -623,4 +623,24 @@ void main() {
       expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
     });
   });
+
+  group('SDK package guard', () {
+    test('rejects an SDK package name with no version supplied', () async {
+      final result = await buildHandler().call(_request({'package': 'flutter'}));
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test('rejects an SDK package name even with an explicit version', () async {
+      final result = await buildHandler().call(
+        _request({'package': 'flutter', 'version': '3.35.0'}),
+      );
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+  });
 }

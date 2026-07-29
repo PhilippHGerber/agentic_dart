@@ -12,6 +12,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import 'path_filters.dart';
+import 'sdk_package_guard.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -43,6 +44,10 @@ final class ListPackageSourceFilesHandler {
     final suppliedVersion = args['version'] as String?;
     final rawDirectory = args['directory'] as String?;
     final fileExtension = args['fileExtension'] as String?;
+
+    // Checked before anything else — including an explicit `version` — so an
+    // SDK package name (e.g. "flutter") never reaches VersionResolver/PubDevClient.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     // ── Resolve version ────────────────────────────────────────────────────────
 

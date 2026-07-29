@@ -74,6 +74,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'sdk_package_guard.dart';
 import 'throw_scan.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
@@ -133,6 +134,10 @@ final class GetThrowStatementsHandler {
     final version = args['version'] as String?;
     // Treat an empty-string method as if it were omitted.
     final method = (rawMethod == null || rawMethod.isEmpty) ? null : rawMethod;
+
+    // Checked before anything else — including an explicit `version` — so an
+    // SDK package name (e.g. "flutter") never reaches VersionResolver/PubDevClient.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     _log(
       LoggingLevel.info,

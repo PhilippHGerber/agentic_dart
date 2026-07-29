@@ -62,6 +62,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'sdk_package_guard.dart';
 import 'symbol_bounded_slice.dart';
 import 'symbol_resolution.dart';
 import 'tool_response.dart';
@@ -136,6 +137,10 @@ final class GetApiDiffHandler {
         ),
       );
     }
+
+    // Checked before anything else — including the two explicit versions — so
+    // an SDK package name (e.g. "flutter") never reaches the pub.dev client.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     _log(
       LoggingLevel.info,

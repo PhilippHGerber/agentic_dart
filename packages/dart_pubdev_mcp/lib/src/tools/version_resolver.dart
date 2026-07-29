@@ -14,6 +14,7 @@ import 'package:dart_mcp/server.dart';
 
 import '../data/domain_error.dart';
 import '../data/pub_client.dart';
+import 'sdk_package_guard.dart';
 
 /// Resolves the Resolved Version for a tool call: the supplied version when
 /// present, otherwise the Latest Stable Version via [PubDevClient.resolveLatestStable].
@@ -34,16 +35,23 @@ final class VersionResolver {
 
   /// Resolves the version to use for a call to [tool] against [package].
   ///
-  /// Returns [supplied] immediately, wrapped in [PubDevSuccess], without
-  /// calling the client. When [supplied] is `null`, resolves the Latest Stable
-  /// Version via [PubDevClient.resolveLatestStable], logging the resolving and
-  /// resolved lines tagged with [tool]. A resolution failure is passed through
-  /// unchanged as a [PubDevFailure].
+  /// Checked first, before anything else: if [package] is an SDK package name
+  /// (see [sdkPackageGuardError]), fails with a sharpened
+  /// [DomainErrors.packageNotFound] without calling the client — even when
+  /// [supplied] is present, so an explicit `version` cannot bypass the guard.
+  ///
+  /// Otherwise returns [supplied] immediately, wrapped in [PubDevSuccess],
+  /// without calling the client. When [supplied] is `null`, resolves the
+  /// Latest Stable Version via [PubDevClient.resolveLatestStable], logging the
+  /// resolving and resolved lines tagged with [tool]. A resolution failure is
+  /// passed through unchanged as a [PubDevFailure].
   Future<PubDevResult<String>> resolve({
     required String package,
     required String tool,
     String? supplied,
   }) async {
+    if (sdkPackageGuardError(package) case final error?) return PubDevFailure(error);
+
     if (supplied != null) return PubDevSuccess(supplied);
 
     _log(LoggingLevel.info, '$tool: resolving latest stable version for $package');

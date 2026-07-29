@@ -14,6 +14,7 @@ import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/osv_range_evaluator.dart';
+import 'sdk_package_guard.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -57,6 +58,10 @@ final class GetSecurityAdvisoriesHandler {
     final args = request.arguments ?? const {};
     final package = (args['package'] as String?) ?? '';
     final suppliedVersion = args['version'] as String?;
+
+    // Checked before anything else — including an explicit `version` — so an
+    // SDK package name (e.g. "flutter") never reaches VersionResolver/PubDevClient.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     _log(
       LoggingLevel.info,

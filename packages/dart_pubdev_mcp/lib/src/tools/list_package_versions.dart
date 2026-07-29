@@ -23,6 +23,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'sdk_package_guard.dart';
 import 'tool_response.dart';
 
 // ─── Domain error constants ───────────────────────────────────────────────────
@@ -65,6 +66,10 @@ final class ListPackageVersionsHandler {
     final package = (args['package'] as String?) ?? '';
 
     if (package.isEmpty) return ToolResponse.error(_missingName);
+
+    // Checked before touching the pub.dev client so an SDK package name
+    // (e.g. "flutter") never reaches it.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     _log(LoggingLevel.info, 'list_package_versions: package=$package');
 

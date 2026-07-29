@@ -72,6 +72,7 @@ import '../analysis/ast_access.dart';
 import '../data/domain_error.dart';
 import 'arg_parsing.dart';
 import 'line_range_slice.dart';
+import 'sdk_package_guard.dart';
 import 'symbol_bounded_slice.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
@@ -111,6 +112,10 @@ final class GetSourceSliceHandler {
     final lineStart = asInt(args['lineStart']);
     final lineEnd = asInt(args['lineEnd']);
     final maxLines = asInt(args['maxLines']);
+
+    // Checked before anything else — including an explicit `version` — so an
+    // SDK package name (e.g. "flutter") never reaches VersionResolver/PubDevClient.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     // Validate: `file` is always required.
     final file = _normalizePath(rawFile);

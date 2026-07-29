@@ -325,6 +325,30 @@ void main() {
     });
   });
 
+  // ─── SDK package guard ──────────────────────────────────────────────────────
+
+  group('SDK package guard', () {
+    test('rejects an SDK package name with no version supplied', () async {
+      final result = await buildHandler().call(
+        _request({'package': 'flutter', 'file': 'lib/src/widget.dart'}),
+      );
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test('rejects an SDK package name even with an explicit version', () async {
+      final result = await buildHandler().call(
+        _request({'package': 'flutter', 'version': '3.35.0', 'file': 'lib/src/widget.dart'}),
+      );
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.packageNotFound));
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+  });
+
   // ─── Argument validation ───────────────────────────────────────────────────
 
   group('argument validation', () {

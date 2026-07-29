@@ -29,6 +29,7 @@ import '../cache/cache_registry.dart';
 import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
+import 'sdk_package_guard.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -72,6 +73,10 @@ final class BrowseApiSymbolsHandler {
     final kind = args['kind'] as String?;
     final limit = (args['limit'] as int?) ?? 10;
     final suppliedVersion = args['version'] as String?;
+
+    // Checked before anything else — including an explicit `version` — so an
+    // SDK package name (e.g. "flutter") never reaches VersionResolver/PubDevClient.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     _log(
       LoggingLevel.info,

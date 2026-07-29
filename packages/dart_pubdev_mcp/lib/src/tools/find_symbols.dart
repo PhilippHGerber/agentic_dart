@@ -30,6 +30,7 @@ import '../cache/keyed_cache.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import 'browse_api_symbols.dart' show BrowseApiSymbolsHandler;
+import 'sdk_package_guard.dart';
 import 'tool_response.dart';
 import 'version_resolver.dart';
 
@@ -95,6 +96,10 @@ final class FindSymbolsHandler {
         ),
       );
     }
+
+    // Checked before anything else — including an explicit `version` — so an
+    // SDK package name (e.g. "flutter") never reaches VersionResolver/PubDevClient.
+    if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
     _log(
       LoggingLevel.info,

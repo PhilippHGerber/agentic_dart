@@ -101,6 +101,42 @@ void main() {
     });
   });
 
+  group('SDK package guard', () {
+    test('short-circuits with PACKAGE_NOT_FOUND for an SDK package name', () async {
+      final result = await buildResolver().resolve(package: 'flutter', tool: 'get_package');
+
+      expect(result, isA<PubDevFailure<String>>());
+      expect((result as PubDevFailure<String>).error.code, equals(DomainErrors.packageNotFound));
+    });
+
+    test('never calls the client for an SDK package name', () async {
+      await buildResolver().resolve(package: 'flutter', tool: 'get_package');
+
+      verifyNever(
+        () => mockHttp.get(any(), headers: any(named: 'headers')),
+      );
+    });
+
+    test('fires even when an explicit version is supplied', () async {
+      final result = await buildResolver().resolve(
+        package: 'flutter',
+        supplied: '3.35.0',
+        tool: 'get_package',
+      );
+
+      expect(result, isA<PubDevFailure<String>>());
+      expect((result as PubDevFailure<String>).error.code, equals(DomainErrors.packageNotFound));
+    });
+
+    test('never calls the client for an SDK package name with an explicit version', () async {
+      await buildResolver().resolve(package: 'flutter', supplied: '3.35.0', tool: 'get_package');
+
+      verifyNever(
+        () => mockHttp.get(any(), headers: any(named: 'headers')),
+      );
+    });
+  });
+
   group('resolution failure', () {
     test('passes the PubDevFailure through', () async {
       stubUrl(
