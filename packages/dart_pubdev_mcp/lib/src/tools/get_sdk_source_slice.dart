@@ -348,7 +348,8 @@ final class GetSdkSourceSliceHandler {
           code: DomainErrors.symbolNotFound,
           message: 'Symbol "$symbolName" was not found in $file.',
           suggestion:
-              'Verify the symbol name is spelled correctly. '
+              'Verify the symbol name is spelled correctly, or use grep_sdk_source to find it '
+              'by name/content. '
               'For a class member use "ClassName.memberName". '
               'Read the file with a line range instead if you need to browse it.',
         ),

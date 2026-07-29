@@ -1136,6 +1136,120 @@ final getSdkThrowStatementsTool = Tool(
   ),
 );
 
+// ─── grep_sdk_source ──────────────────────────────────────────────────────────
+
+/// The `grep_sdk_source` [Tool] definition registered with the MCP server.
+final grepSdkSourceTool = Tool(
+  name: 'grep_sdk_source',
+  title: 'Search Dart or Flutter SDK source',
+  annotations: kReadOnlyOpenWorldAnnotations,
+  description: kGrepSdkSourceDescription,
+  inputSchema: ObjectSchema(
+    required: ['sdk', 'pattern'],
+    properties: {
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK to scan.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description:
+            'Dart only (sdk: "dart"): the dart: library name (e.g. "core", "async", "io") — '
+            'scopes the scan to the SDK\'s lib/<library>/ directory. Omit to scan the whole '
+            'Dart SDK tree.',
+      ),
+      'package': Schema.string(
+        description:
+            'Flutter only (sdk: "flutter"): the Flutter package name (e.g. "flutter", '
+            '"flutter_test", "flutter_driver") — scopes the scan to the '
+            'packages/<package>/lib/ directory. Omit to scan the whole flutter/flutter tree.',
+      ),
+      'version': Schema.string(
+        description:
+            'A Dart or Flutter tag or commit SHA (e.g. "3.12.2"), matching sdk. '
+            "Omit to auto-detect: the running server's Dart SDK version, or the local "
+            "Flutter install's framework version.",
+      ),
+      'pattern': Schema.string(
+        description:
+            'The literal substring to search for (default), or a Dart RegExp pattern when '
+            'regex is true.',
+      ),
+      'regex': Schema.bool(
+        description:
+            'When true, compile pattern as a Dart RegExp instead of matching it as a literal '
+            'substring. Default false.',
+      ),
+      'caseInsensitive': Schema.bool(
+        description: 'Match case-insensitively. Default false.',
+      ),
+      'contextLines': Schema.int(
+        description:
+            'Symmetric number of lines of context to include before/after each match. '
+            'Default 0.',
+        minimum: 0,
+      ),
+      'directory': Schema.string(
+        description:
+            'Path prefix filter (e.g. "lib/src/rendering/"), same normalization as '
+            'grep_package_source.',
+      ),
+      'fileExtension': Schema.string(
+        description:
+            'Extension filter (e.g. ".yaml"). Overrides the default .dart-only scan scope — '
+            'an SDK/framework tarball contains large amounts of non-Dart content, so unlike '
+            'grep_package_source, only .dart files are scanned by default.',
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: ['resolvedVersion', 'sdk', 'pattern', 'matches', 'hasMore'],
+    properties: {
+      'resolvedVersion': Schema.string(
+        description:
+            'The exact SDK ref this response describes — the caller-supplied version, or the '
+            'auto-detected Dart/Flutter SDK version when version was omitted.',
+      ),
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK this response describes.',
+        values: ['dart', 'flutter'],
+      ),
+      'library': Schema.string(
+        description: 'The dart: library filter, as given. Present only when supplied.',
+      ),
+      'package': Schema.string(
+        description: 'The Flutter package filter, as given. Present only when supplied.',
+      ),
+      'pattern': Schema.string(description: 'The search pattern, as given.'),
+      'matches': Schema.list(
+        description: 'Matches sorted by file path then line number, capped at 50 total.',
+        items: Schema.object(
+          required: ['file', 'line', 'matchedLine', 'contextBefore', 'contextAfter'],
+          properties: {
+            'file': Schema.string(description: 'The source file the match was found in.'),
+            'line': Schema.int(description: '1-based line number of the match.'),
+            'matchedLine': Schema.string(description: 'The full text of the matching line.'),
+            'contextBefore': Schema.list(
+              description:
+                  'Up to contextLines lines immediately preceding the match, in file order. '
+                  'Empty when contextLines is 0 or omitted.',
+              items: Schema.string(),
+            ),
+            'contextAfter': Schema.list(
+              description:
+                  'Up to contextLines lines immediately following the match, in file order. '
+                  'Empty when contextLines is 0 or omitted.',
+              items: Schema.string(),
+            ),
+          },
+        ),
+      ),
+      'hasMore': Schema.bool(
+        description: 'True when more than 50 matches exist beyond the returned list.',
+      ),
+    },
+  ),
+);
+
 // ─── compare_packages ─────────────────────────────────────────────────────────
 
 /// The `compare_packages` [Tool] definition registered with the MCP server.

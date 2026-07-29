@@ -31,6 +31,9 @@ const kServerInstructions =
     'Dart/Flutter SDK source (dart:core, dart:async, package:flutter, …, not published on pub.dev): '
     'list_sdk_source_files to discover a file path when unknown, then get_sdk_throw_statements '
     'for exception surface, then get_sdk_source_slice for implementation detail. '
+    'grep_sdk_source searches across the whole cached SDK/framework source tree (Dart-only by '
+    'default) for a literal or regex pattern — use it to find something anywhere in the SDK or '
+    'framework instead of enumerating files by hand. '
     'Every error response carries a machine-readable code and a suggestion field — read suggestion before retrying. '
     'Resources: read pub://meta/resources first to see all available URIs. '
     'pub://meta/scoring — pub.dev 160-point scoring rubric. '
@@ -276,6 +279,40 @@ const kGetSdkThrowStatementsDescription =
     'Omit version to auto-detect, matching get_sdk_source_slice. '
     'This is a static scan of throw expressions in source — it does not execute the code '
     'or report exceptions actually raised at runtime.';
+
+// ─── grep_sdk_source ──────────────────────────────────────────────────────────
+
+/// Description for `grepSdkSourceTool`.
+const kGrepSdkSourceDescription =
+    "Search the Dart or Flutter SDK's cached source tree for a literal string or, with "
+    'regex: true, a Dart RegExp pattern — the SDK-source counterpart to grep_package_source, '
+    'for "find X anywhere in the framework" instead of enumerating files and slicing them one '
+    'by one, or shelling out. '
+    'Runs entirely in-process against the SDK source-file map served by AstAccess over '
+    'CacheRegistry.sdkSourceFiles — the same cache list_sdk_source_files/get_sdk_source_slice '
+    'already share. No extra tarball download once warm. '
+    'For sdk: "dart", library (e.g. "core") optionally restricts the scan to that dart: library; '
+    'omit it to scan the whole Dart SDK tree. '
+    'For sdk: "flutter", package (e.g. "flutter") optionally restricts the scan to that Flutter '
+    'package; omit it to scan the whole flutter/flutter tree. '
+    'Literal substring matching is the default; pass regex: true to compile pattern as a Dart '
+    'RegExp instead — an invalid pattern returns INVALID_ARGUMENT with the compiler message. '
+    'Matching is case-sensitive unless caseInsensitive: true. '
+    'Default file-extension scope is .dart only — deliberately narrower than '
+    "grep_package_source's binary-denylist-only default, since an SDK/framework tarball "
+    '(dart-lang/sdk, flutter/flutter) contains large amounts of non-Dart content (C++ runtime '
+    'source, build config, docs, vendored code). Pass fileExtension to widen (or further '
+    'narrow) scope, e.g. to search .yaml/.md files. '
+    'directory path-prefix-filters the candidate set, same normalization as '
+    'list_package_source_files/grep_package_source. '
+    'Pass contextLines for symmetric lines of surrounding context around each match. '
+    'Results are sorted by file then line and capped at 50 total (hasMore: true on overflow) — '
+    'narrow with library/package/directory/fileExtension rather than expecting pagination. '
+    'The whole scan is bounded by the same 5-second wall-clock timeout (REQUEST_TIMEOUT on '
+    'expiry) as grep_package_source, the only guard against a pathological pattern; no static '
+    'regex complexity analysis is performed. '
+    'Omit version to auto-detect, matching get_sdk_source_slice; a Flutter request with no '
+    'local install found and no explicit version surfaces SDK_NOT_DETECTED.';
 
 // ─── compare_packages ─────────────────────────────────────────────────────────
 

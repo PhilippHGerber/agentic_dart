@@ -1,6 +1,6 @@
 /// Path-prefix normalization shared by every tool that accepts a `directory`
-/// filter over a package's source-file map — `list_package_source_files` and
-/// `grep_package_source`.
+/// filter over a package's or SDK's source-file map —
+/// `list_package_source_files`, `grep_package_source`, and `grep_sdk_source`.
 library;
 
 /// Normalizes a caller-supplied `directory` filter.

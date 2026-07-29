@@ -160,10 +160,13 @@ All tools return JSON and resolve to the latest stable version when
 ### SDK internals
 
 - **`list_sdk_source_files`** / **`get_sdk_source_slice`** /
-  **`get_sdk_throw_statements`** — the same source-reading and throw-site
-  tools, but for the Dart SDK (`dart:core`, `dart:async`, …) and Flutter
-  framework (`package:flutter`, …), which live outside pub.dev and are
-  otherwise invisible to an agent.
+  **`get_sdk_throw_statements`** / **`grep_sdk_source`** — the same
+  source-reading, throw-site, and search tools, but for the Dart SDK
+  (`dart:core`, `dart:async`, …) and Flutter framework (`package:flutter`,
+  …), which live outside pub.dev and are otherwise invisible to an agent.
+  `grep_sdk_source` scans `.dart` files only by default, since an SDK or
+  framework tarball is far noisier with non-Dart content than a pub.dev
+  package.
 
 Errors from any tool carry a machine-readable `code` and a `suggestion`
 field describing the next step (e.g. `AMBIGUOUS_SYMBOL` includes candidate

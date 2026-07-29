@@ -3,6 +3,21 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `grep_sdk_source` tool — literal/regex search across the Dart or Flutter
+  SDK's cached source tree, the SDK-source counterpart to
+  `grep_package_source`. Defaults to scanning `.dart` files only (overridable
+  via `fileExtension`), since an SDK/framework tarball is far noisier with
+  non-Dart content than a pub.dev package.
+
+### Changed
+
+- `get_sdk_source_slice`'s `SYMBOL_NOT_FOUND` suggestion now mentions
+  `grep_sdk_source` as a way to find a symbol by name/content.
+
 ## [0.6.5]
 
 ### Added
