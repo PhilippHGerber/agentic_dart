@@ -1154,7 +1154,7 @@ final grepSdkSourceTool = Tool(
       'library': Schema.string(
         description:
             'Dart only (sdk: "dart"): the dart: library name (e.g. "core", "async", "io") — '
-            'scopes the scan to the SDK\'s lib/<library>/ directory. Omit to scan the whole '
+            "scopes the scan to the SDK's lib/<library>/ directory. Omit to scan the whole "
             'Dart SDK tree.',
       ),
       'package': Schema.string(
