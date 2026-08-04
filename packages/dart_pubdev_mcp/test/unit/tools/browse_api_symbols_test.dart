@@ -283,6 +283,19 @@ void main() {
       expect(_symbols(result).every((s) => s['type'] == 'class'), isTrue);
     });
 
+    test('matches kind case-insensitively', () async {
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'query': 'client', 'kind': 'Class'}),
+      );
+
+      final symbols = _symbols(result);
+      expect(symbols, isNotEmpty);
+      expect(symbols.every((s) => s['type'] == 'class'), isTrue);
+    });
+
     test('absent kind returns all matching symbol kinds', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);

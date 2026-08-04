@@ -336,6 +336,22 @@ void main() {
       final files = _matches(result).map((m) => m['file']).toSet();
       expect(files, equals({'lib/core/list.dart', 'lib/core/map.dart'}));
     });
+
+    test('a full file path scopes the scan to that one file', () async {
+      stubSdkTarball(mockHttp, _rawFiles);
+
+      final result = await buildHandler().call(
+        _request({
+          'sdk': 'dart',
+          'version': '3.12.2',
+          'pattern': 'isEmpty',
+          'directory': 'lib/core/list.dart',
+        }),
+      );
+
+      final files = _matches(result).map((m) => m['file']).toSet();
+      expect(files, equals({'lib/core/list.dart'}));
+    });
   });
 
   // ─── Match cap ───────────────────────────────────────────────────────────────

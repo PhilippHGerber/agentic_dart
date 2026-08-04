@@ -78,12 +78,9 @@ final class ListPackageSourceFilesHandler {
         files = value;
     }
 
-    final directory = normalizeDirectory(rawDirectory);
     var paths = files.keys.toList();
 
-    if (directory != null && directory.isNotEmpty) {
-      paths = paths.where((p) => p.startsWith(directory)).toList();
-    }
+    paths = paths.where((p) => matchesDirectoryFilter(p, rawDirectory)).toList();
     if (fileExtension != null && fileExtension.isNotEmpty) {
       paths = paths.where((p) => p.endsWith(fileExtension)).toList();
     }

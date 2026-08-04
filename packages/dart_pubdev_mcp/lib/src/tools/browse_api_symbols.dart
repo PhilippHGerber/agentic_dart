@@ -134,7 +134,10 @@ final class BrowseApiSymbolsHandler {
     }
 
     final ranked = [...nameMatches, ...descMatches];
-    final filtered = kind != null ? ranked.where((s) => s.type == kind).toList() : ranked;
+    final kindLower = kind?.toLowerCase();
+    final filtered = kindLower != null
+        ? ranked.where((s) => s.type.toLowerCase() == kindLower).toList()
+        : ranked;
 
     if (filtered.isEmpty) {
       return ToolResponse.error(

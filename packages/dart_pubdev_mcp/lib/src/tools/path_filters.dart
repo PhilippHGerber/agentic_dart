@@ -14,3 +14,19 @@ String? normalizeDirectory(String? raw) {
   if (!dir.endsWith('/') && dir.isNotEmpty) dir = '$dir/';
   return dir;
 }
+
+/// Returns whether [path] satisfies a caller-supplied `directory` filter.
+///
+/// Matches [path] either as living under the [rawDirectory] folder prefix
+/// (via [normalizeDirectory]) or as being exactly [rawDirectory] itself —
+/// callers regularly pass a full file path (e.g. copied from a prior
+/// `matches[].file`) expecting it to scope the search to that one file, and
+/// prefix-only matching would silently return zero results for that case
+/// since a file path is never a prefix of itself. A `null`/empty
+/// [rawDirectory] matches everything.
+bool matchesDirectoryFilter(String path, String? rawDirectory) {
+  if (rawDirectory == null || rawDirectory.isEmpty) return true;
+  final exact = rawDirectory.startsWith('/') ? rawDirectory.substring(1) : rawDirectory;
+  final prefix = normalizeDirectory(rawDirectory)!;
+  return path.startsWith(prefix) || path == exact;
+}

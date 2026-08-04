@@ -19,7 +19,10 @@
 /// Default scope is the whole package tree, matching
 /// `list_package_source_files`'s own default (no implicit `lib/`-only
 /// restriction). `directory` and `fileExtension` filter the candidate file set
-/// exactly as `list_package_source_files` does. Files whose extension is on
+/// exactly as `list_package_source_files` does — `directory` matches either as
+/// a folder prefix or, via [matchesDirectoryFilter], as an exact full file
+/// path (so passing a complete path scopes the scan to that one file instead
+/// of silently matching nothing). Files whose extension is on
 /// [kBinaryExtensionDenylist] are excluded by default — every tarball entry is
 /// decoded as UTF-8 with malformed bytes allowed through, so binary content
 /// can produce spurious garbled matches — unless `fileExtension` names one of
@@ -234,12 +237,9 @@ final class GrepPackageSourceHandler {
     String? rawDirectory,
     String? fileExtension,
   ) {
-    final directory = normalizeDirectory(rawDirectory);
     var paths = allPaths.toList();
 
-    if (directory != null && directory.isNotEmpty) {
-      paths = paths.where((p) => p.startsWith(directory)).toList();
-    }
+    paths = paths.where((p) => matchesDirectoryFilter(p, rawDirectory)).toList();
     if (fileExtension != null && fileExtension.isNotEmpty) {
       paths = paths.where((p) => p.endsWith(fileExtension)).toList();
     } else {

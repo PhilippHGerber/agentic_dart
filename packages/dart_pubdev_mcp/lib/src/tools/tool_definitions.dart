@@ -400,7 +400,7 @@ final browseApiSymbolsTool = Tool(
       ),
       'kind': Schema.string(
         description:
-            'Filter by dartdoc symbol kind. '
+            'Filter by dartdoc symbol kind, matched case-insensitively. '
             'Known values: class, mixin, enum, function, constant, method, property, '
             'extension, accessor, constructor, typedef, library. '
             'Omit to return all matching symbol kinds. '
@@ -850,9 +850,10 @@ final listPackageSourceFilesTool = Tool(
       ),
       'directory': Schema.string(
         description:
-            'Path prefix filter (e.g. "lib/src/server/"). '
+            'Path prefix filter (e.g. "lib/src/server/"), or a full file path '
+            '(e.g. "lib/src/server/prompts_support.dart") to scope to that one file. '
             'Set this to avoid scanning the full tree. '
-            'Trailing slash is added automatically if absent.',
+            'Trailing slash is added automatically if absent from a prefix.',
       ),
       'fileExtension': Schema.string(
         description:
@@ -915,7 +916,8 @@ final grepPackageSourceTool = Tool(
       ),
       'directory': Schema.string(
         description:
-            'Path prefix filter (e.g. "lib/src/"), same normalization as '
+            'Path prefix filter (e.g. "lib/src/"), or a full file path '
+            '(e.g. "lib/src/client.dart") to scope to that one file — same normalization as '
             'list_package_source_files. Default scope is the whole package tree.',
       ),
       'fileExtension': Schema.string(
@@ -1190,8 +1192,9 @@ final grepSdkSourceTool = Tool(
       ),
       'directory': Schema.string(
         description:
-            'Path prefix filter (e.g. "lib/src/rendering/"), same normalization as '
-            'grep_package_source.',
+            'Path prefix filter (e.g. "lib/src/rendering/"), or a full file path '
+            '(e.g. "lib/src/rendering/box.dart") to scope to that one file — same normalization '
+            'as grep_package_source.',
       ),
       'fileExtension': Schema.string(
         description:

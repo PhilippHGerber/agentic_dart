@@ -29,9 +29,11 @@
 /// non-Dart content (C++ runtime source, build config, docs, vendored code)
 /// that a pub.dev package doesn't. `fileExtension` overrides this default to
 /// widen (or further narrow) scope, exactly as it overrides the binary
-/// denylist in `grep_package_source`. `directory` path-prefix-filters the
-/// candidate set on top of that, same normalization as
-/// `list_package_source_files`/`grep_package_source`.
+/// denylist in `grep_package_source`. `directory` filters the candidate set
+/// on top of that — either a folder prefix or, via [matchesDirectoryFilter],
+/// an exact full file path (so passing a complete path scopes the scan to
+/// that one file instead of silently matching nothing) — same normalization
+/// as `list_package_source_files`/`grep_package_source`.
 ///
 /// ## Response shape
 ///
@@ -373,10 +375,7 @@ final class GrepSdkSourceHandler {
       paths = paths.where((p) => p.startsWith(prefix)).toList();
     }
 
-    final directory = normalizeDirectory(rawDirectory);
-    if (directory != null && directory.isNotEmpty) {
-      paths = paths.where((p) => p.startsWith(directory)).toList();
-    }
+    paths = paths.where((p) => matchesDirectoryFilter(p, rawDirectory)).toList();
 
     if (fileExtension != null && fileExtension.isNotEmpty) {
       paths = paths.where((p) => p.endsWith(fileExtension)).toList();
