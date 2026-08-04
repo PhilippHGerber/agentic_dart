@@ -3,6 +3,18 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.1]
+
+### Fixed
+
+- `directory` filters on `grep_sdk_source`, `grep_package_source`, and
+  `list_package_source_files` now also match an exact full file path, not
+  just a folder prefix — passing a complete file path (e.g. copied from a
+  prior `matches[].file`) previously matched nothing silently instead of
+  scoping the scan to that file.
+- `browse_api_symbols`'s `kind` filter now matches case-insensitively (e.g.
+  `"Class"` matches `"class"`) instead of silently returning `NO_RESULTS`.
+
 ## [0.7.0]
 
 ### Added
