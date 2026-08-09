@@ -227,9 +227,13 @@ final class SdkClient {
   static DomainError _sdkVersionNotFound(String sdkId, String ref) => DomainError(
     code: DomainErrors.sdkVersionNotFound,
     message: 'No $sdkId SDK release matches version "$ref".',
-    suggestion:
-        'Verify the version string is a real tag or commit SHA, '
-        'or omit it to auto-detect the running SDK version.',
+    suggestion: sdkId == 'flutter'
+        ? 'Verify the version string is a real flutter/flutter tag or commit SHA. If it '
+              'came from `flutter --version --machine`, try the `frameworkRevision` field '
+              '(a commit SHA) instead of `frameworkVersion` — some builds (dev/beta '
+              'snapshots, version-managed installs) sit on an untagged commit.'
+        : 'Verify the version string is a real dart-lang/sdk tag or commit SHA, '
+              'or omit it to auto-detect the running SDK version.',
     details: {'sdk': sdkId},
   );
 

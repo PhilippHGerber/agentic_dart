@@ -132,8 +132,10 @@ final class ListSdkSourceFilesHandler {
             code: DomainErrors.sdkNotDetected,
             message: 'No local Flutter install was found via FLUTTER_ROOT or PATH.',
             suggestion:
-                'Set the FLUTTER_ROOT environment variable, add flutter to PATH, '
-                'or pass an explicit version (a flutter/flutter tag or commit SHA).',
+                'If you have shell access, run `flutter --version --machine` and pass its '
+                '`frameworkVersion` value as `version`; otherwise ask the user for their '
+                'Flutter version. Setting FLUTTER_ROOT or adding flutter to PATH also works '
+                "if you control this process's environment.",
             details: {'sdk': 'flutter'},
           ),
         );
