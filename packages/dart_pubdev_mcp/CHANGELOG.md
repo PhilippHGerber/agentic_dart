@@ -3,6 +3,17 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.2]
+
+### Changed
+
+- `SDK_VERSION_NOT_FOUND` and `SDK_NOT_DETECTED` suggestions for the Flutter
+  SDK tools (`get_sdk_source_slice`, `get_sdk_throw_statements`,
+  `grep_sdk_source`, `list_sdk_source_files`) now guide an LLM caller through
+  resolving a usable version — e.g. running `flutter --version --machine` and
+  using its `frameworkRevision` (commit SHA) when `frameworkVersion` doesn't
+  resolve to a tag, or asking the user when there's no shell access.
+
 ## [0.7.1]
 
 ### Fixed
