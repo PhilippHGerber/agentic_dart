@@ -346,7 +346,21 @@ void main() {
         expect(tool.inputSchema.required, equals(['sdk']));
       });
 
-      // All 18 tools this server registers — kept in sync with
+      test('lists get_sdk_release_notes after initialization', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final names = tools.tools.map((t) => t.name).toList();
+        expect(names, contains('get_sdk_release_notes'));
+      });
+
+      test('get_sdk_release_notes input schema marks only sdk as required', () async {
+        await doInitialize();
+        final tools = await serverConnection.listTools(ListToolsRequest());
+        final tool = tools.tools.firstWhere((t) => t.name == 'get_sdk_release_notes');
+        expect(tool.inputSchema.required, equals(['sdk']));
+      });
+
+      // All 19 tools this server registers — kept in sync with
       // tool_definitions.dart. Used to assert every tool carries a title and
       // truthful, read-only/open-world annotations.
       const allToolNames = [
@@ -368,9 +382,10 @@ void main() {
         'list_sdk_source_files',
         'get_sdk_throw_statements',
         'grep_sdk_source',
+        'get_sdk_release_notes',
       ];
 
-      test('lists exactly the 18 expected tools', () async {
+      test('lists exactly the 19 expected tools', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final names = tools.tools.map((t) => t.name).toSet();

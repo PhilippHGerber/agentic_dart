@@ -378,5 +378,30 @@ void main() {
         },
       });
     });
+
+    test('get_sdk_release_notes', () {
+      expectConformsToOutputSchema(getSdkReleaseNotesTool, {
+        'resolvedVersion': '3.14.0',
+        'entries': [
+          {
+            'version': '3.14.0',
+            'date': '2025-01-15T00:00:00.000Z',
+            'changes': [
+              'dart:ffi: Added NativeFinalizer.callback support.',
+              "Formatter: Don't crash.",
+            ],
+            'sections': {
+              'Libraries': [
+                'dart:ffi: Added NativeFinalizer.callback support.',
+              ],
+              'Tools': [
+                "Formatter: Don't crash.",
+              ],
+            },
+            'breaking': false,
+          },
+        ],
+      });
+    });
   });
 }

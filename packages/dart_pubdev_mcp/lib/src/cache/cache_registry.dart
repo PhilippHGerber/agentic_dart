@@ -15,6 +15,7 @@ import '../data/changelog_parser.dart';
 import '../data/domain_error.dart';
 import '../data/models.dart';
 import '../data/pub_client.dart';
+import '../data/sdk_changelog_parser.dart';
 import '../data/sdk_client.dart';
 import '../resources/scoring_content.dart';
 import '../trace/wire_trace.dart';
@@ -32,6 +33,9 @@ const Duration kPackageVersionsTtl = Duration(minutes: 15);
 
 /// TTL applied to changelog entries (parsed `ChangelogEntry` lists).
 const Duration kChangelogTtl = Duration(minutes: 15);
+
+/// TTL applied to SDK changelog entries (parsed `SdkReleaseNotesEntry` lists).
+const Duration kSdkChangelogTtl = Duration(hours: 24);
 
 /// TTL applied to security advisory entries (parsed `SecurityAdvisory` lists).
 ///
@@ -127,6 +131,14 @@ typedef VersionListId = ({String name});
 /// full changelog text covers every released version, so one cached parse
 /// serves every `fromVersion`/`versionLimit` query for the package.
 typedef ChangelogEntriesId = ({String name});
+
+/// Identity for an SDK's full parsed release notes entry list: an SDK `sdk`
+/// (`'dart'` / `'flutter'`) and optional `version` (for tarball fallback).
+///
+/// Single-owner: `get_sdk_release_notes` is the only reader. Keyed by SDK
+/// selector only so one fetched upstream changelog serves all version and
+/// range queries for that SDK.
+typedef SdkChangelogId = ({String sdk, String? version});
 
 /// Identity for a package's full published security-advisory list: a package
 /// `name`.
@@ -356,6 +368,22 @@ final class CacheRegistry {
          clock: clock,
          trace: trace,
        ),
+       sdkChangelog = KeyedCache<SdkChangelogId, List<SdkReleaseNotesEntry>>(
+         keyOf: (id) => 'sdk_changelog:${id.sdk}',
+         ttl: kSdkChangelogTtl,
+         fetch: (id) async {
+           final result = await sdkClient.getChangelogText(
+             sdkId: id.sdk,
+             version: id.version,
+           );
+           return switch (result) {
+             PubDevSuccess(:final value) => PubDevSuccess(parseSdkChangelogText(value)),
+             PubDevFailure(:final error) => PubDevFailure(error),
+           };
+         },
+         clock: clock,
+         trace: trace,
+       ),
        securityAdvisories = KeyedCache<SecurityAdvisoriesId, List<SecurityAdvisory>>(
          keyOf: (id) => 'advisories:${id.name}',
          ttl: kSecurityAdvisoriesTtl,
@@ -469,6 +497,12 @@ final class CacheRegistry {
   ///
   /// Single-owner: `get_changelog` is the only reader.
   final KeyedCache<ChangelogEntriesId, List<ChangelogEntry>> changelog;
+
+  /// Resolves an SDK's full parsed release notes entry list by `sdk` (`'dart'` /
+  /// `'flutter'`).
+  ///
+  /// Single-owner: `get_sdk_release_notes` is the only reader.
+  final KeyedCache<SdkChangelogId, List<SdkReleaseNotesEntry>> sdkChangelog;
 
   /// Resolves a package's full published security-advisory list by `name`.
   ///

@@ -159,6 +159,9 @@ All tools return JSON and resolve to the latest stable version when
 
 ### SDK internals
 
+- **`get_sdk_release_notes`** — structured release notes, categorized sections,
+  and breaking changes for the Dart SDK and Flutter framework, bounded with
+  token-conscious defaults.
 - **`list_sdk_source_files`** / **`get_sdk_source_slice`** /
   **`get_sdk_throw_statements`** / **`grep_sdk_source`** — the same
   source-reading, throw-site, and search tools, but for the Dart SDK

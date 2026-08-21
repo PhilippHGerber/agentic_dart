@@ -26,6 +26,18 @@ Map<String, String> _strMap(Map<String, Object?> map, String key) {
   return result;
 }
 
+Map<String, List<String>> _sectionsMap(Map<String, Object?> map, String key) {
+  final raw = _subMap(map, key);
+  final result = <String, List<String>>{};
+  for (final entry in raw.entries) {
+    final value = entry.value;
+    if (value is List<Object?>) {
+      result[entry.key] = value.whereType<String>().toList();
+    }
+  }
+  return result;
+}
+
 List<String> _tagsWithPrefix(List<String> tags, String prefix) =>
     tags.where((t) => t.startsWith(prefix)).map((t) => t.substring(prefix.length)).toList();
 
@@ -578,6 +590,62 @@ final class ChangelogEntry {
     version: version ?? this.version,
     date: date ?? this.date,
     changes: changes ?? this.changes,
+    breaking: breaking ?? this.breaking,
+  );
+}
+
+// ─── SdkReleaseNotesEntry ───────────────────────────────────────────────────
+
+/// A single version entry from an SDK changelog or release notes document.
+///
+/// [breaking] is `true` when the entry text or section names contain explicit
+/// breaking-change markers (e.g. `Breaking changes`, `BREAKING`).
+final class SdkReleaseNotesEntry {
+  /// Creates an [SdkReleaseNotesEntry] with the given fields.
+  const SdkReleaseNotesEntry({
+    required this.version,
+    required this.changes,
+    required this.sections,
+    required this.breaking,
+    this.date,
+  });
+
+  /// Constructs an [SdkReleaseNotesEntry] from a parsed changelog map.
+  factory SdkReleaseNotesEntry.fromJson(Map<String, Object?> json) => SdkReleaseNotesEntry(
+    version: _optStr(json, 'version') ?? '',
+    date: DateTime.tryParse(_optStr(json, 'date') ?? ''),
+    changes: _strList(json, 'changes'),
+    sections: _sectionsMap(json, 'sections'),
+    breaking: (json['breaking'] as bool?) ?? false,
+  );
+
+  /// The version string for this release notes entry (e.g. `"3.14.0"`).
+  final String version;
+
+  /// The release date for this version, or `null` when the field is absent or unparseable.
+  final DateTime? date;
+
+  /// Flat list of change descriptions for this version across all sections.
+  final List<String> changes;
+
+  /// Categorized map of change descriptions keyed by section name.
+  final Map<String, List<String>> sections;
+
+  /// Whether this version contains breaking changes.
+  final bool breaking;
+
+  /// Returns a copy of this entry with the given fields replaced.
+  SdkReleaseNotesEntry copyWith({
+    String? version,
+    DateTime? date,
+    List<String>? changes,
+    Map<String, List<String>>? sections,
+    bool? breaking,
+  }) => SdkReleaseNotesEntry(
+    version: version ?? this.version,
+    date: date ?? this.date,
+    changes: changes ?? this.changes,
+    sections: sections ?? this.sections,
     breaking: breaking ?? this.breaking,
   );
 }

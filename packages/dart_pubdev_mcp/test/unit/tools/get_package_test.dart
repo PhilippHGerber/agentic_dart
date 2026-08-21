@@ -338,7 +338,7 @@ void main() {
       );
 
       final result = await buildHandler().call(_request({'package': 'http'}));
-      final advisories = _detail(result)['advisories'] as Map<String, Object?>;
+      final advisories = _detail(result)['advisories']! as Map<String, Object?>;
 
       expect(advisories['count'], equals(1));
       expect(advisories['ids'], equals(['GHSA-4rgh-jx4f-qfcq']));
@@ -357,7 +357,7 @@ void main() {
       final result = await buildHandler().call(
         _request({'package': 'http', 'version': '0.12.0'}),
       );
-      final advisories = _detail(result)['advisories'] as Map<String, Object?>;
+      final advisories = _detail(result)['advisories']! as Map<String, Object?>;
 
       expect(advisories['affectsResolvedVersion'], isTrue);
     });
@@ -371,7 +371,7 @@ void main() {
       );
 
       final result = await buildHandler().call(_request({'package': 'http'}));
-      final advisories = _detail(result)['advisories'] as Map<String, Object?>;
+      final advisories = _detail(result)['advisories']! as Map<String, Object?>;
 
       expect(advisories['count'], equals(0));
       expect(advisories['ids'], isEmpty);

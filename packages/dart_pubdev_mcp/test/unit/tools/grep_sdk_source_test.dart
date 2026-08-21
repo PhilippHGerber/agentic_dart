@@ -211,7 +211,7 @@ void main() {
         _request({'sdk': 'dart', 'version': '3.12.2', 'pattern': 'isEmpty'}),
       );
 
-      final files = _matches(result).map((m) => m['file'] as String).toList();
+      final files = _matches(result).map((m) => m['file']! as String).toList();
       expect(files.any((f) => f.endsWith('.md')), isFalse);
     });
 

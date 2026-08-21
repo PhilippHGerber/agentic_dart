@@ -60,6 +60,11 @@ _Avoid_: latest version (ambiguous re pre-releases)
 
 **Advisories Summary**: Best-effort `advisories` field (`count`, `ids`, `affectsResolvedVersion`) on `get_package`, and the `advisories` row on `compare_packages`. A failed fetch omits the field rather than failing the call.
 
+**SDK Release Notes**: Structured, version-by-version change descriptions for the Dart SDK or Flutter SDK/framework, retrieved from upstream `CHANGELOG.md` files via `get_sdk_release_notes`.
+_Avoid_: release doc, changelog document
+
+**SDK Release Notes Entry**: One `get_sdk_release_notes` entry — `{ version, date?, changes, sections, breaking }` with changes organized into category sections (e.g. `Language`, `Core libraries`, `Tools`, `Breaking changes`).
+
 **OSV Affected Range**: One `affected[].ranges[]` entry — ordered range events (`introduced`, `fixed`, `last_affected`, `limit`). Evaluated via `osvRangesAffectVersion` (`pub_semver`). `introduced: "0"` means "affected since the beginning."
 
 ### Errors
@@ -75,6 +80,8 @@ _Avoid_: latest version (ambiguous re pre-releases)
 **Cache Hit / Cache Miss / Uncached Call**: A `ResponseCache.get()` returning a live entry (Hit) or none/expired (Miss), vs. a pub.dev call with no cache in front at all (Uncached Call) — the latter two render identically in the Wire Trace.
 
 **Package Info Cache**: `PubDevClient`'s cache for `GET /api/packages/{name}`, keyed by name, TTL 15 min. Shared across `resolveLatestStable`, `getPackage`, `listVersions`, `search`.
+ 
+**SDK Changelog Cache**: In-memory cache for raw SDK `CHANGELOG.md` text, keyed by SDK (`dart` / `flutter`), TTL 24 hours. Falls back to extracting `CHANGELOG.md` from `TarballDiskCache` when an SDK tarball is cached locally.
 
 ### Observability
 

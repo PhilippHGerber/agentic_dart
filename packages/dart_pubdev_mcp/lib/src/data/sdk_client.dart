@@ -10,7 +10,7 @@ library;
 
 import 'dart:async' show TimeoutException;
 import 'dart:convert';
-import 'dart:io' show File, Platform;
+import 'dart:io' show Directory, File, Platform;
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -21,6 +21,10 @@ import 'domain_error.dart';
 import 'pub_client.dart' show HttpStatusException, PubDevClient, RetryPolicy;
 
 const _kCodeloadBaseUrl = 'https://codeload.github.com';
+const _kDartChangelogUrl =
+    'https://raw.githubusercontent.com/dart-lang/sdk/main/CHANGELOG.md';
+const _kFlutterChangelogUrl =
+    'https://raw.githubusercontent.com/flutter/flutter/master/CHANGELOG.md';
 
 /// Resolves the default Dart SDK ref this process is running under.
 ///
@@ -212,6 +216,148 @@ final class SdkClient {
     await _tarballCache?.write(cacheName, ref, bytes);
 
     return extracted;
+  }
+
+  /// Fetches the raw `CHANGELOG.md` text for [sdkId] (`'dart'` or `'flutter'`).
+  ///
+  /// First attempts a lightweight HTTP fetch against the upstream GitHub
+  /// repository (`dart-lang/sdk/main/CHANGELOG.md` or
+  /// `flutter/flutter/master/CHANGELOG.md`).
+  ///
+  /// If the network request fails, falls back to reading `CHANGELOG.md` from a
+  /// locally-cached SDK tarball in [_tarballCache] if one exists.
+  ///
+  /// Returns [DomainErrors.invalidArgument] when [sdkId] is not `'dart'` or
+  /// `'flutter'`, or the appropriate network/service failure error when both
+  /// fetch and fallback fail.
+  Future<PubDevResult<String>> getChangelogText({
+    required String sdkId,
+    String? version,
+  }) async {
+    final (url, cacheName) = switch (sdkId) {
+      'dart' => (_kDartChangelogUrl, 'dart_sdk'),
+      'flutter' => (_kFlutterChangelogUrl, 'flutter_sdk'),
+      _ => (null, null),
+    };
+
+    if (url == null || cacheName == null) {
+      return PubDevFailure(
+        DomainError(
+          code: DomainErrors.invalidArgument,
+          message: 'Unknown SDK "$sdkId". Must be "dart" or "flutter".',
+          suggestion: 'Specify sdk as either "dart" or "flutter".',
+          details: {'sdk': sdkId},
+        ),
+      );
+    }
+
+    final netResult = await _retry.execute((attempt) async {
+      final uri = Uri.parse(url);
+      final response = await _http.get(uri).timeout(_timeout);
+      if (response.statusCode != 200) {
+        throw HttpStatusException(response.statusCode);
+      }
+      return response.body;
+    });
+
+    if (netResult case PubDevSuccess<String>()) {
+      return netResult;
+    }
+
+    // Network request failed — try fallback to locally cached SDK tarball
+    final fallback = await _extractChangelogFromDiskCache(cacheName, version);
+    if (fallback != null) {
+      return PubDevSuccess(fallback);
+    }
+
+    // Return the remapped network error if no fallback is available
+    if (netResult case PubDevFailure<String>(:final error)) {
+      if (error.code == DomainErrors.packageNotFound) {
+        return const PubDevFailure(
+          DomainError(
+            code: DomainErrors.serviceUnavailable,
+            message: 'Upstream SDK changelog endpoint was not found.',
+            suggestion: 'Try again later or verify upstream GitHub availability.',
+          ),
+        );
+      }
+      return PubDevFailure(error);
+    }
+
+    return const PubDevFailure(
+      DomainError(
+        code: DomainErrors.serviceUnavailable,
+        message: 'Failed to fetch SDK changelog from upstream repository.',
+        suggestion: 'Check network connectivity or try again later.',
+      ),
+    );
+  }
+
+  Future<String?> _extractChangelogFromDiskCache(String cacheName, String? version) async {
+    final cache = _tarballCache;
+    if (cache == null) return null;
+
+    if (version != null && _kSafeRef.hasMatch(version)) {
+      final bytes = await cache.read(cacheName, version);
+      if (bytes != null) {
+        final extracted = _extractChangelogFile(bytes);
+        if (extracted != null) return extracted;
+      }
+    }
+
+    final dir = Directory(cache.directoryPath);
+    if (!dir.existsSync()) return null;
+
+    try {
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) {
+            final filename = f.uri.pathSegments.isNotEmpty ? f.uri.pathSegments.last : '';
+            return filename.startsWith('$cacheName@') && filename.endsWith('.tar.gz');
+          })
+          .toList()
+        ..sort((a, b) {
+          try {
+            final aStat = a.statSync().modified;
+            final bStat = b.statSync().modified;
+            return bStat.compareTo(aStat);
+          } on Object catch (_) {
+            return 0;
+          }
+        });
+
+      for (final file in files) {
+        try {
+          final bytes = file.readAsBytesSync();
+          final extracted = _extractChangelogFile(bytes);
+          if (extracted != null) return extracted;
+        } on Object catch (_) {
+          continue;
+        }
+      }
+    } on Object catch (_) {
+      return null;
+    }
+
+    return null;
+  }
+
+  static String? _extractChangelogFile(List<int> bytes) {
+    try {
+      final decompressed = const GZipDecoder().decodeBytes(bytes);
+      final archive = TarDecoder().decodeBytes(decompressed);
+      for (final entry in archive) {
+        if (!entry.isFile) continue;
+        final stripped = _stripWrapperDir(entry.name);
+        if (stripped == 'CHANGELOG.md' || stripped == 'sdk/CHANGELOG.md') {
+          return utf8.decode(entry.content, allowMalformed: true);
+        }
+      }
+    } on Object catch (_) {
+      return null;
+    }
+    return null;
   }
 
   /// Remaps a 404-derived [DomainErrors.packageNotFound] failure (the generic

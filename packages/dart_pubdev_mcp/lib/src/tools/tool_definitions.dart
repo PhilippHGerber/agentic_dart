@@ -1451,3 +1451,71 @@ ObjectSchema _kApiDiffBucketsSchema(String description) => ObjectSchema(
     ),
   },
 );
+
+// ─── get_sdk_release_notes ───────────────────────────────────────────────────
+
+/// The `get_sdk_release_notes` [Tool] definition registered with the MCP server.
+final getSdkReleaseNotesTool = Tool(
+  name: 'get_sdk_release_notes',
+  title: 'Get SDK release notes',
+  annotations: kReadOnlyOpenWorldAnnotations,
+  description: kGetSdkReleaseNotesDescription,
+  inputSchema: ObjectSchema(
+    required: ['sdk'],
+    properties: {
+      'sdk': UntitledSingleSelectEnumSchema(
+        description:
+            'Target SDK. Use dart for Dart SDK changes (language, core libraries, dart:* tools); '
+            'use flutter for Flutter framework and engine changes.',
+        values: ['dart', 'flutter'],
+      ),
+      'version': Schema.string(
+        description:
+            'Target SDK version or tag (e.g. "3.4.0", "3.22.0"). '
+            'When omitted, anchors to the newest upstream release in the changelog.',
+      ),
+      'fromVersion': Schema.string(
+        description:
+            'Return only entries newer than this version (e.g. "3.2.0"). '
+            "Set this to the user's current SDK version for upgrade diffs. "
+            'When omitted, only the target version is returned (limit 1).',
+      ),
+      'limit': Schema.int(
+        description:
+            'Maximum number of release entries to return (default 1 when fromVersion is omitted; '
+            'default 5 when fromVersion is supplied).',
+        minimum: 1,
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: ['resolvedVersion', 'entries'],
+    properties: {
+      'resolvedVersion': _kResolvedVersionSchema,
+      'entries': Schema.list(
+        description: 'Release entries, newest first, bounded by fromVersion and limit.',
+        items: Schema.object(
+          required: ['version', 'changes', 'sections', 'breaking'],
+          properties: {
+            'version': Schema.string(description: 'The SDK version this entry documents.'),
+            'date': Schema.string(
+              description: 'ISO 8601 date parsed from the release heading. Omitted when absent.',
+            ),
+            'changes': Schema.list(
+              description: 'Flat list of changes for this release across all sections.',
+              items: Schema.string(),
+            ),
+            'sections': Schema.object(
+              description:
+                  'Categorized sections (e.g. Language, Core libraries, Tools, Breaking changes).',
+              additionalProperties: Schema.list(items: Schema.string()),
+            ),
+            'breaking': Schema.bool(
+              description: 'Whether this release was detected as containing a breaking change.',
+            ),
+          },
+        ),
+      ),
+    },
+  ),
+);

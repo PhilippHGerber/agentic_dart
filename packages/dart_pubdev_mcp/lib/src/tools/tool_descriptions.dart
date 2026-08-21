@@ -29,6 +29,7 @@ const kServerInstructions =
     'Security: get_security_advisories evaluates known advisories against a specific version, '
     'splitting affecting from other — check it before recommending or upgrading to a version. '
     'Dart/Flutter SDK source (dart:core, dart:async, package:flutter, …, not published on pub.dev): '
+    'get_sdk_release_notes retrieves structured release notes and breaking changes for Dart or Flutter SDKs. '
     'list_sdk_source_files to discover a file path when unknown, then get_sdk_throw_statements '
     'for exception surface, then get_sdk_source_slice for implementation detail. '
     'grep_sdk_source searches across the whole cached SDK/framework source tree (Dart-only by '
@@ -364,3 +365,14 @@ const kGetApiDiffDescription =
     'On DOCUMENTATION_NOT_FOUND, one version lacks dartdoc output; '
     'fall back to browse_api_symbols per version as the error suggests. '
     'For narrative release notes rather than a symbol-level diff, use get_changelog instead.';
+
+// ─── get_sdk_release_notes ───────────────────────────────────────────────────
+
+/// Description for `getSdkReleaseNotesTool`.
+const kGetSdkReleaseNotesDescription =
+    'Call this to retrieve structured release notes and changelogs for the Dart SDK or Flutter framework. '
+    'Set sdk to "dart" for language features, core library changes (dart:*), and compiler/tooling notes. '
+    'Set sdk to "flutter" for framework updates, engine changes, and hotfix notes. '
+    'Omit version to anchor to the latest upstream release notes (limit 1 by default). '
+    'Pass fromVersion (e.g. "3.2.0") to retrieve intermediate releases for upgrade analysis (limit 5 by default). '
+    'Check the breaking flag on each release entry to identify breaking changes requiring migration attention.';

@@ -340,7 +340,7 @@ void main() {
       );
 
       final result = await buildHandler().call(_request(['http', 'dio']));
-      final advisories = _matrixOf(result)['advisories'] as Map<String, Object?>;
+      final advisories = _matrixOf(result)['advisories']! as Map<String, Object?>;
 
       expect(advisories['http'], equals(1));
       expect(advisories['dio'], equals(0));
@@ -373,7 +373,7 @@ void main() {
         expect(advisories, contains('http'));
         expect(advisories, isNot(contains('dio')));
         // The package itself is unaffected by its advisories-fetch failure.
-        final names = _matrixOf(result)['name'] as Map<String, Object?>;
+        final names = _matrixOf(result)['name']! as Map<String, Object?>;
         expect(names, contains('dio'));
       },
     );

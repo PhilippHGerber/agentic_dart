@@ -28,6 +28,7 @@ import 'tools/find_symbols.dart';
 import 'tools/get_api_diff.dart';
 import 'tools/get_changelog.dart';
 import 'tools/get_package.dart';
+import 'tools/get_sdk_release_notes.dart';
 import 'tools/get_sdk_source_slice.dart';
 import 'tools/get_sdk_throw_statements.dart';
 import 'tools/get_security_advisories.dart';
@@ -560,6 +561,13 @@ base class PubMcpServer extends MCPServer
     );
     _registerTracedTool(grepSdkSourceTool, grepSdkSourceHandler.call);
     log(LoggingLevel.debug, 'registered tool: grep_sdk_source');
+
+    final getSdkReleaseNotesHandler = GetSdkReleaseNotesHandler(
+      sdkChangelog: _cacheRegistry.sdkChangelog,
+      log: log,
+    );
+    _registerTracedTool(getSdkReleaseNotesTool, getSdkReleaseNotesHandler.call);
+    log(LoggingLevel.debug, 'registered tool: get_sdk_release_notes');
   }
 
   void _registerResources() {

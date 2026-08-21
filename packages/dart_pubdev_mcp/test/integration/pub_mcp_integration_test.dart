@@ -87,11 +87,18 @@ final class _McpProcess {
     return result;
   }
 
+  Map<String, Object?> _unwrapResult(Map<String, Object?> response) {
+    final result = response['result'];
+    if (result is Map<String, Object?>) return result;
+    final error = response['error'];
+    throw StateError('JSON-RPC error in response: $error (full response: $response)');
+  }
+
   /// Sends a `tools/list` request and returns the result map.
   Future<Map<String, Object?>> listTools() async {
     final id = _nextId++;
     final response = await send({'jsonrpc': '2.0', 'id': id, 'method': 'tools/list'});
-    return response['result']! as Map<String, Object?>;
+    return _unwrapResult(response);
   }
 
   /// Sends a `tools/call` request for [toolName] with [args].
@@ -106,7 +113,7 @@ final class _McpProcess {
       'method': 'tools/call',
       'params': {'name': toolName, 'arguments': args},
     });
-    return response['result']! as Map<String, Object?>;
+    return _unwrapResult(response);
   }
 
   /// Sends a `resources/read` request for [uri] and returns the result map.
@@ -118,7 +125,7 @@ final class _McpProcess {
       'method': 'resources/read',
       'params': {'uri': uri},
     });
-    return response['result']! as Map<String, Object?>;
+    return _unwrapResult(response);
   }
 
   /// Closes stdin and waits for the process to exit, killing it after 5 s.
@@ -245,6 +252,10 @@ void main() {
 
     test('includes browse_api_symbols', () {
       expect(toolNames, contains('browse_api_symbols'));
+    });
+
+    test('includes get_sdk_release_notes', () {
+      expect(toolNames, contains('get_sdk_release_notes'));
     });
   });
 
@@ -498,13 +509,13 @@ void main() {
       });
     }, timeout: const Timeout(Duration(seconds: 30)));
 
-    // ── pub://package/http/readme ───────────────────────────────────────────────
+    // ── pub://package/http@latest/readme ───────────────────────────────────────
 
-    group('pub://package/http/readme', () {
+    group('pub://package/http@latest/readme', () {
       late Map<String, Object?> content;
 
       setUpAll(() async {
-        final result = await mcp.readResource('pub://package/http/readme');
+        final result = await mcp.readResource('pub://package/http@latest/readme');
         content = _firstResourceContent(result);
       });
 
@@ -513,24 +524,28 @@ void main() {
       });
 
       test('returns non-empty markdown content', () {
-        expect(content['text']! as String, isNotEmpty);
+        expect(content['text'], isA<String>());
+        expect(content['text'] as String?, isNotEmpty);
       });
 
       test('uri echoes the requested URI', () {
-        expect(content['uri'], equals('pub://package/http/readme'));
+        expect(content['uri'], equals('pub://package/http@latest/readme'));
       });
     }, timeout: const Timeout(Duration(seconds: 30)));
 
-    // ── pub://package/http/api ──────────────────────────────────────────────────
+    // ── pub://package/http@latest/api ───────────────────────────────────────────
 
-    group('pub://package/http/api', () {
+    group('pub://package/http@latest/api', () {
       late Map<String, Object?> content;
-      late List<Object?> symbols;
+      late List<Map<String, Object?>> symbols;
 
       setUpAll(() async {
-        final result = await mcp.readResource('pub://package/http/api');
+        final result = await mcp.readResource('pub://package/http@latest/api');
         content = _firstResourceContent(result);
-        symbols = jsonDecode(content['text']! as String) as List<Object?>;
+        final rawText = content['text'] as String? ?? '';
+        final nl = rawText.indexOf('\n');
+        final jsonText = nl < 0 ? rawText : rawText.substring(nl + 1);
+        symbols = (jsonDecode(jsonText) as List<Object?>).cast<Map<String, Object?>>();
       });
 
       test('mimeType is application/json', () {
@@ -542,12 +557,12 @@ void main() {
       });
 
       test('each symbol entry has a name field', () {
-        final first = symbols.first! as Map<String, Object?>;
+        final first = symbols.first;
         expect(first, contains('name'));
       });
 
       test('each symbol entry has a type field', () {
-        final first = symbols.first! as Map<String, Object?>;
+        final first = symbols.first;
         expect(first, contains('type'));
       });
     }, timeout: const Timeout(Duration(seconds: 30)));
