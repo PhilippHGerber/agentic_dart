@@ -3,6 +3,15 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.0]
+
+### Added
+
+- `get_sdk_release_notes` tool — retrieves structured release notes, categorized
+  sections, and computed breaking change indicators for the Dart SDK and
+  Flutter framework via raw upstream GitHub markdown, with a 24-hour in-memory
+  cache and local SDK tarball fallback.
+
 ## [0.7.2]
 
 ### Changed
