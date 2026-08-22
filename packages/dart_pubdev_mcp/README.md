@@ -3,75 +3,56 @@
 [![Pub Version](https://img.shields.io/pub/v/dart_pubdev_mcp.svg)](https://pub.dev/packages/dart_pubdev_mcp)
 [![Pub Points](https://img.shields.io/pub/points/dart_pubdev_mcp.svg)](https://pub.dev/packages/dart_pubdev_mcp/score)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MCP Protocol](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-8A2BE2.svg)](https://modelcontextprotocol.io)
 
-*Ships as the `dart_pubdev_mcp` package on pub.dev; the server and CLI
-identify themselves as `dart-pubdev-explorer`.*
+> **Package name:** [`dart_pubdev_mcp`](https://pub.dev/packages/dart_pubdev_mcp) &nbsp;|&nbsp; **Executable / MCP identity:** `dart-pubdev-explorer`
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that gives
-AI coding agents structured, version-aware access to the pub.dev Dart and
-Flutter package registry. Instead of scraping HTML, guessing package names,
-or repeating stale advice from training data, an agent can search, compare,
-and read packages — down to an exact source line — the way a careful
-maintainer would.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI coding assistants (Claude Code, Cursor, Windsurf, Zed, Roo Code, Cline, Antigravity) structured access to the [pub.dev](https://pub.dev) package registry, the Dart SDK, and the Flutter framework.
 
-## Why it exists
+Instead of guessing package names, hallucinating APIs, or relying on outdated training data, your agent can search, compare, and inspect packages down to exact AST source slices and changelogs.
 
-Without live registry access, agents tend to:
+---
 
-- Recommend deprecated or unmaintained packages.
-- Invent API method signatures that don't exist, or that changed versions ago.
-- Miss breaking changes between the version they trained on and the version
-  installed.
-- Have no access at all to Dart/Flutter SDK framework source.
+## Overview
 
-`dart-pubdev-explorer` backs every answer with a live call to pub.dev,
-dartdoc, or the package tarball itself, so the agent's answer is grounded
-instead of guessed.
+- **Package discovery and evaluation**: Search by keywords, SDK, and platform. Compare 2 to 5 packages side by side on score, popularity, and maintenance.
+- **AST-accurate API docs and source slices**: Fetch method signatures, doc comments, throw statements, and AST code slices without downloading tarballs manually.
+- **Breaking changes and version diffs**: Parse changelogs and diff symbol additions or removals between dependency versions.
+- **Dart and Flutter SDK internals**: Inspect internal framework code (`dart:core`, `dart:async`, `package:flutter`) and release notes that live outside pub.dev.
+- **Security advisories**: Check version-specific vulnerabilities directly against the Open Source Vulnerability (OSV) database.
 
-For example, ask:
-
-> "Compare `dio` and `http` for a Flutter app that needs file uploads —
-> which has better platform support and is more actively maintained?"
-
-The agent resolves this itself: `search_packages` to confirm both names
-exist, `compare_packages` for the side-by-side score/platform/maintenance
-matrix, then `get_symbol_documentation` if it needs to check a specific API
-before recommending one.
+---
 
 ## Quick start
 
 ### 1. Install
 
-Requires the Dart SDK (`>=3.9.0`).
+Requires Dart SDK `>=3.9.0`.
 
 ```bash
 dart install dart_pubdev_mcp
 ```
 
-This installs the `dart-pubdev-explorer` executable onto your `PATH`. Verify
-with:
+Verify that `dart-pubdev-explorer` is on your `PATH`:
 
 ```bash
 dart-pubdev-explorer --version
 ```
 
-To upgrade later, re-run `dart install dart_pubdev_mcp` (add `--overwrite` if
-another package has already claimed the `dart-pubdev-explorer` executable
-name).
+*(To update later, run `dart install dart_pubdev_mcp` again. Add `--overwrite` if prompted.)*
+
+---
 
 ### 2. Configure your MCP client
 
-All clients run the same stdio command with no arguments — only the config
-shape differs.
+`dart-pubdev-explorer` communicates over standard I/O (`stdio`).
 
-**Claude Code (CLI)**
-
+#### Claude Code (CLI)
 ```bash
 claude mcp add dart-pubdev-explorer -- dart-pubdev-explorer
 ```
 
-**Cursor / VS Code / Antigravity / Windsurf (`.mcp.json`)**
-
+#### Cursor / VS Code / Antigravity / Windsurf (`.mcp.json` or MCP settings)
 ```json
 {
   "mcpServers": {
@@ -82,8 +63,7 @@ claude mcp add dart-pubdev-explorer -- dart-pubdev-explorer
 }
 ```
 
-**Zed (`settings.json`)**
-
+#### Zed (`settings.json`)
 ```json
 {
   "context_servers": {
@@ -96,140 +76,125 @@ claude mcp add dart-pubdev-explorer -- dart-pubdev-explorer
 }
 ```
 
-Pass any of the [CLI flags](#configuration) below as extra args if you need
-non-default behavior (custom cache directory, verbose logging, etc.).
+#### Roo Code / Cline (`cline_mcp_settings.json`)
+```json
+{
+  "mcpServers": {
+    "dart-pubdev-explorer": {
+      "command": "dart-pubdev-explorer",
+      "args": []
+    }
+  }
+}
+```
 
-### 3. Try it
+---
 
-Once connected, ask your agent something that needs live package data
-instead of a training-data guess:
+### 3. Example prompts
 
-- "Find actively maintained Flutter state-management packages with web and
-  iOS support."
-- "Compare `dio` and `http` for file upload support, popularity, and pub
-  points."
-- "Show the signature and doc comment for `http.Client.send`."
-- "List the breaking changes in `go_router` between 12.0.0 and 14.0.0."
-- "Show how `StreamController` handles cancellation in `dart:async`."
+Once configured, you can ask your AI assistant questions such as:
 
-## Tools
+- *"Find actively maintained state-management packages for Flutter supporting Web and iOS."*
+- *"Compare `dio` and `http` for a Flutter project with file uploads: check maintenance, pub points, and platform support."*
+- *"Show the signature and doc comment for `http.Client.send`."*
+- *"What breaking changes were introduced in `go_router` between version 12.0.0 and 14.0.0?"*
+- *"How does `StreamController` handle cancellation in `dart:async`? Show the throw statements."*
 
-All tools return JSON and resolve to the latest stable version when
-`version` is omitted.
+---
+
+## Why use dart-pubdev-explorer
+
+| Challenge | Without dart-pubdev-explorer | With dart-pubdev-explorer |
+|---|---|---|
+| Package recommendations | Recommends deprecated or abandoned packages from training data. | Queries live pub.dev scores, popularity, maintenance status, and supported platforms. |
+| API signatures | Hallucinates deprecated methods or incorrect argument types. | Inspects exact doc comments, type signatures, and AST slices from the targeted version. |
+| Dependency upgrades | Guesses what broke between versions. | Performs automated API symbol diffs and extracts structured breaking-change changelogs. |
+| Exception handling | Guesses what exceptions a method might throw. | Scans AST throw statements (`get_throw_statements`) for exact exception types. |
+| SDK and framework source | Has no direct access to Dart SDK or Flutter framework code. | Navigates `dart:core`, `dart:async`, and `package:flutter` source directly. |
+
+---
+
+## Tools reference
+
+All tools return structured JSON. When `version` is omitted, tools resolve to the latest stable release.
 
 ### Package discovery and evaluation
+- `search_packages`: Search pub.dev with keyword queries, SDK filters, platform targets, and custom sorting.
+- `get_package`: Complete package metadata, pub points score breakdown, verified publisher, and dependencies.
+- `compare_packages`: Side-by-side comparison matrix (scores, platforms, maintenance, popularity) for 2 to 5 packages.
+- `list_package_versions`: All published versions bucketed into `stable`, `prerelease`, and `retracted`.
+- `get_security_advisories`: Version-specific vulnerability audits against the OSV registry.
 
-- **`search_packages`** — find packages by keyword, filtered by SDK,
-  platform, and sort order. Your starting point for "what should I use for X."
-- **`get_package`** — full metadata for one package: score, SDK constraints,
-  dependencies.
-- **`compare_packages`** — score/platform/maintenance side by side for 2–5
-  candidates, so an agent can justify a recommendation instead of asserting it.
-- **`list_package_versions`** — every published version, bucketed into
-  stable/prerelease/retracted.
-- **`get_security_advisories`** — known security advisories for a package,
-  evaluated against a specific version so the agent knows whether that
-  version is actually affected, not just whether the package has ever had one.
-
-### API and source inspection
-
-- **`browse_api_symbols`** / **`find_symbols`** — search a package's public
-  API by substring or fuzzy keyword, so the agent finds the real symbol
-  before it writes code against it.
-- **`get_symbol_documentation`** — the actual signature and doc comment for a
-  symbol, instead of a remembered (and possibly outdated) one.
-- **`get_throw_statements`** — every `throw` in a class or method, so the
-  agent can write correct `try`/`catch` handling instead of guessing at
-  exception types.
-- **`get_source_slice`** — exact source, by line range or by symbol name,
-  resolved through the analyzer AST — no manual tarball download required.
-- **`list_package_source_files`** — browse a package's file tree to find
-  examples or implementation files.
-- **`grep_package_source`** — search across a package's whole source tree for
-  a literal string or regex pattern, so an agent can find every call site of
-  a symbol without enumerating and reading files one by one.
+### API and AST source inspection
+- `browse_api_symbols` / `find_symbols`: Search and fuzzy-match public API classes, methods, and typedefs.
+- `get_symbol_documentation`: Retrieve exact declaration signatures and dartdoc comments.
+- `get_source_slice`: Extract precise source code by line range or symbol name via analyzer AST.
+- `get_throw_statements`: Extract every `throw` within a method or class for accurate `try`/`catch` blocks.
+- `list_package_source_files`: Browse package directory structure and example files.
+- `grep_package_source`: Regex and literal string search across the full extracted package source tree.
 
 ### Version diffs and upgrades
+- `get_changelog`: Structured release notes and breaking-change highlights across versions.
+- `get_api_diff`: Detailed additions, removals, and breaking changes in public API symbols between two versions.
 
-- **`get_changelog`** — structured changelog entries with a `breaking` flag,
-  so an agent can tell you what actually changed instead of paraphrasing
-  prose.
-- **`get_api_diff`** — symbols added or removed between two versions, for
-  upgrade-safety checks before bumping a dependency.
+### Dart and Flutter SDK internals
+- `get_sdk_release_notes`: Structured release notes and breaking changes for the Dart SDK and Flutter framework.
+- `list_sdk_source_files` / `get_sdk_source_slice`: Browse and slice source code in `dart:*` and `package:flutter/*`.
+- `get_sdk_throw_statements` / `grep_sdk_source`: Identify throw sites and search across SDK internals.
 
-### SDK internals
+---
 
-- **`get_sdk_release_notes`** — structured release notes, categorized sections,
-  and breaking changes for the Dart SDK and Flutter framework, bounded with
-  token-conscious defaults.
-- **`list_sdk_source_files`** / **`get_sdk_source_slice`** /
-  **`get_sdk_throw_statements`** / **`grep_sdk_source`** — the same
-  source-reading, throw-site, and search tools, but for the Dart SDK
-  (`dart:core`, `dart:async`, …) and Flutter framework (`package:flutter`,
-  …), which live outside pub.dev and are otherwise invisible to an agent.
-  `grep_sdk_source` scans `.dart` files only by default, since an SDK or
-  framework tarball is far noisier with non-Dart content than a pub.dev
-  package.
+## MCP resources
 
-Errors from any tool carry a machine-readable `code` and a `suggestion`
-field describing the next step (e.g. `AMBIGUOUS_SYMBOL` includes candidate
-qualified names to retry with).
+Exposes read-only `pub://` resources for fast markdown and yaml inspection:
 
-## Resources
-
-In addition to tools, the server exposes read-only MCP resources — raw
-README/changelog/pubspec/example content, plus a couple of reference docs.
-Read `pub://meta/resources` for the full manifest.
-
-| URI | Content |
+| Resource URI | Description |
 |---|---|
-| `pub://meta/resources` | Manifest of every resource URI, MIME type, and description. |
-| `pub://meta/scoring` | Plain-text explainer of pub.dev's 160-point scoring rubric. |
-| `pub://meta/sdk-versions` | Current stable Dart and Flutter SDK versions as JSON. |
-| `pub://package/{name}@{version}/readme` | Full README (Markdown). |
-| `pub://package/{name}@{version}/changelog` | Full raw changelog text (Markdown). |
-| `pub://package/{name}@{version}/example` | Working example code from the package's Example tab (Markdown). |
-| `pub://package/{name}@{version}/pubspec` | Verbatim `pubspec.yaml` from the version's tarball. |
+| `pub://meta/resources` | Manifest of all available MCP resources and MIME types. |
+| `pub://meta/scoring` | Detailed explainer of pub.dev's 160-point scoring rubric. |
+| `pub://meta/sdk-versions` | Current stable Dart and Flutter SDK release versions (JSON). |
+| `pub://package/{name}@{version}/readme` | Full README markdown for a specific package version (or `@latest`). |
+| `pub://package/{name}@{version}/changelog` | Verbatim `CHANGELOG.md`. |
+| `pub://package/{name}@{version}/example` | Working code from the package's Example tab. |
+| `pub://package/{name}@{version}/pubspec` | Verbatim `pubspec.yaml` from the package archive. |
 
-Package resource URIs require an explicit `@{version}` segment; use
-`@latest` to resolve the latest stable release.
+---
 
 ## Configuration
 
-All settings are optional; CLI flags take precedence over environment
-variables, which take precedence over defaults.
+Settings can be passed via CLI flags or environment variables:
 
-| Flag | Environment variable | Default | Purpose |
+| Flag | Environment Variable | Default | Description |
 |---|---|---|---|
-| `--log-level <level>` | `dart_pubdev_mcp_LOG_LEVEL` | `warning` | Minimum log severity: `debug`\|`info`\|`warning`\|`error`. |
-| `--cache-dir <path>` | `dart_pubdev_mcp_CACHE_DIR` | `$XDG_CACHE_HOME/dart_pubdev_mcp` or `~/.cache/dart_pubdev_mcp` | Directory for the on-disk tarball cache. |
-| `--max-cache-size <size>` | `dart_pubdev_mcp_MAX_CACHE_SIZE` | `500 MiB` | Total cap on the tarball disk cache. Accepts bytes or `KB`/`MB`/`GB`/`KiB`/`MiB`/`GiB` suffixes. |
-| `--max-concurrent-requests <count>` | `dart_pubdev_mcp_MAX_CONCURRENT_REQUESTS` | `5` | Cap on simultaneous in-flight pub.dev HTTP requests (1–64). |
-| `--wire-trace` | `dart_pubdev_mcp_WIRE_TRACE` | off | Enable a human-readable diagnostic log of every outbound HTTP request/response. |
-| `--wire-trace-dir <path>` | `dart_pubdev_mcp_WIRE_TRACE_DIR` | `<cache-dir>/wire-trace` | Directory for per-session Wire Trace files. |
-| `--wire-trace-max-preview <bytes>` | `dart_pubdev_mcp_WIRE_TRACE_MAX_PREVIEW` | `2048` | Cap on each logged response body preview; `0` logs metadata only. |
-| `--no-update-check` | `dart_pubdev_mcp_UPDATE_CHECK` | on | Disable the startup Update Check against pub.dev for this server's own version. |
+| `--log-level <level>` | `dart_pubdev_mcp_LOG_LEVEL` | `warning` | Minimum logging level (`debug`, `info`, `warning`, `error`). |
+| `--cache-dir <path>` | `dart_pubdev_mcp_CACHE_DIR` | `~/.cache/dart_pubdev_mcp` | Directory for disk-cached tarballs and AST index. |
+| `--max-cache-size <size>` | `dart_pubdev_mcp_MAX_CACHE_SIZE` | `500 MiB` | Maximum disk cache capacity (e.g. `1 GB`, `500 MiB`). |
+| `--max-concurrent-requests <n>` | `dart_pubdev_mcp_MAX_CONCURRENT_REQUESTS` | `5` | Cap on concurrent pub.dev HTTP requests (1 to 64). |
+| `--wire-trace` | `dart_pubdev_mcp_WIRE_TRACE` | `false` | Enable detailed diagnostic log of outbound HTTP requests. |
+| `--wire-trace-dir <path>` | `dart_pubdev_mcp_WIRE_TRACE_DIR` | `<cache-dir>/wire-trace` | Output directory for wire trace logs. |
+| `--wire-trace-max-preview <bytes>` | `dart_pubdev_mcp_WIRE_TRACE_MAX_PREVIEW` | `2048` | Preview byte limit per HTTP response in wire logs. |
+| `--no-update-check` | `dart_pubdev_mcp_UPDATE_CHECK` | `true` | Disable startup check for server version updates on pub.dev. |
 
-Run `dart-pubdev-explorer --help` for the same reference from the CLI, or
-`dart-pubdev-explorer --version` to print the installed version.
+---
 
-## How this compares
+## Complementary tooling
 
-The official Dart MCP server (`dart mcp-server`) ships a general
-`pub_dev_search` tool alongside its much broader Dart/Flutter tooling
-surface — running apps, analysis, DTD, and more. `dart-pubdev-explorer` is a
-focused, deeper tool for package research specifically: symbol-level API
-browsing, exact source reads, multi-version diffing, and side-by-side
-comparison, backed by an on-disk cache tuned for the repeated lookups a
-single research session tends to make. The two are complementary — run both.
+- **Official Dart MCP Server (`dart mcp-server`)**: Provides general runtime, debugging, DTD, and analysis tools for your local workspace.
+- **`dart-pubdev-explorer` (`dart_pubdev_mcp`)**: Focuses on package registry lookup, symbol browsing, AST source slicing, SDK internals, and multi-version dependency diffing.
 
-## Contributing
+Running both servers together in your MCP client provides a complete Dart and Flutter development setup.
 
-Source, issues, and the changelog live in the
-[`agentic_dart`](https://github.com/PhilippHGerber/agentic_dart) monorepo,
-under `packages/dart_pubdev_mcp`. Bug reports and pull requests are welcome
-via the [issue tracker](https://github.com/PhilippHGerber/agentic_dart/issues).
+---
+
+## Contributing and issues
+
+- Repository: [`agentic_dart`](https://github.com/PhilippHGerber/agentic_dart)
+- Issues and requests: [`agentic_dart/issues`](https://github.com/PhilippHGerber/agentic_dart/issues)
+
+Pull requests and bug reports are welcome.
+
+---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License. See [LICENSE](LICENSE).

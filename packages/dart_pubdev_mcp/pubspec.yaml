@@ -1,7 +1,8 @@
 name: dart_pubdev_mcp
 description: >-
-  Model Context Protocol (MCP) server for pub.dev. Gives AI agents structured
-  access to search, compare, evaluate, and inspect Dart and Flutter packages.
+  Model Context Protocol (MCP) server for pub.dev, Dart SDK, and Flutter.
+  Gives AI agents live package search, API docs,
+  AST source slices, and breaking change diffs.
 version: 0.9.0
 homepage: https://github.com/PhilippHGerber/agentic_dart
 repository: https://github.com/PhilippHGerber/agentic_dart/tree/main/packages/dart_pubdev_mcp
@@ -11,9 +12,9 @@ resolution: workspace
 topics:
   - mcp
   - pub-dev
+  - flutter
   - dart
   - ai
-  - flutter
 
 environment:
   sdk: ">=3.9.0 <4.0.0"
