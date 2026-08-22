@@ -79,7 +79,7 @@ final class SearchPackagesHandler {
   ];
 
   static Map<String, Object?> _summaryToJson(PackageSummary s) => {
-    'name': s.name,
+    'package': s.name,
     'version': s.version,
     'description': s.description,
     'likes': s.likes,

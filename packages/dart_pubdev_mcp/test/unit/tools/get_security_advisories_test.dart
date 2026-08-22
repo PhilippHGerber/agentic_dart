@@ -102,6 +102,18 @@ void main() {
 
   tearDown(() => stack.close());
 
+  // ─── package echo ──────────────────────────────────────────────────────────
+
+  group('package echo', () {
+    test('is present and echoes the requested package name', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_decode(result)['package'], equals('http'));
+    });
+  });
+
   // ─── resolvedVersion ────────────────────────────────────────────────────────
 
   group('resolvedVersion', () {

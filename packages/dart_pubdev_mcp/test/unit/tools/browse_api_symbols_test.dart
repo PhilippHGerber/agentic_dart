@@ -13,12 +13,14 @@ import 'package:dart_pubdev_mcp/src/tools/browse_api_symbols.dart';
 import 'package:dart_pubdev_mcp/src/tools/find_symbols.dart';
 import 'package:dart_pubdev_mcp/src/tools/get_api_diff.dart';
 import 'package:dart_pubdev_mcp/src/tools/get_symbol_documentation.dart';
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show browseApiSymbolsTool;
 import 'package:dart_pubdev_mcp/src/tools/version_resolver.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
 import '../../support/pub_stubs.dart';
+import '../../support/schema_conformance.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -191,7 +193,7 @@ void main() {
       expect(_symbols(result).every((s) => s.containsKey('name')), isTrue);
     });
 
-    test('each symbol entry contains a type field', () async {
+    test('each symbol entry contains a kind field', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);
 
@@ -199,7 +201,7 @@ void main() {
         _request({'package': 'http', 'query': 'client'}),
       );
 
-      expect(_symbols(result).every((s) => s.containsKey('type')), isTrue);
+      expect(_symbols(result).every((s) => s.containsKey('kind')), isTrue);
     });
 
     test('each symbol entry contains a qualifiedName field', () async {
@@ -213,7 +215,36 @@ void main() {
       expect(_symbols(result).every((s) => s.containsKey('qualifiedName')), isTrue);
     });
 
-    test('symbols with empty desc omit the desc field', () async {
+    test('each symbol entry contains all required unified fields', () async {
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'query': 'BrowserClient'}),
+      );
+
+      final match = _symbols(result).firstWhere(
+        (s) => s['name'] == 'BrowserClient',
+        orElse: () => {},
+      );
+      expect(
+        match.keys,
+        containsAll(<String>[
+          'name',
+          'qualifiedName',
+          'kind',
+          'library',
+          'enclosedBy',
+          'description',
+          'href',
+        ]),
+      );
+      expect(match['kind'], equals('class'));
+      expect(match['library'], equals('package:http/browser_client.dart'));
+      expect(match['enclosedBy'], isNull);
+    });
+
+    test('symbols with empty desc include description as empty string', () async {
       stubPackageInfo(mockHttp);
       stubIndexJson(mockHttp);
 
@@ -226,7 +257,20 @@ void main() {
         (s) => s['name'] == 'BrowserClient.new',
         orElse: () => {},
       );
-      expect(match.containsKey('desc'), isFalse);
+      expect(match['description'], equals(''));
+    });
+
+    test('echoes package in the success envelope and conforms to outputSchema', () async {
+      stubPackageInfo(mockHttp);
+      stubIndexJson(mockHttp);
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'query': 'client'}),
+      );
+
+      final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+      expect(json['package'], equals('http'));
+      expectConformsToOutputSchema(browseApiSymbolsTool, result.structuredContent);
     });
   });
 
@@ -243,7 +287,7 @@ void main() {
 
       // "close" matches only by desc ("Closes the client.")
       // name matches: browser_client, BrowserClient, BrowserClient.new
-      final symbolNames = _symbols(result).map((s) => s['name']! as String).toList();
+      final symbolNames = _symbols(result).map((s) => s['name'] as String? ?? '').toList();
       final closeIdx = symbolNames.indexOf('close');
       expect(closeIdx, greaterThan(0));
     });
@@ -256,7 +300,7 @@ void main() {
         _request({'package': 'http', 'query': 'client'}),
       );
 
-      final symbolNames = _symbols(result).map((s) => s['name']! as String).toList();
+      final symbolNames = _symbols(result).map((s) => s['name'] as String? ?? '').toList();
       final nameMatchIndices = symbolNames
           .asMap()
           .entries
@@ -280,7 +324,7 @@ void main() {
         _request({'package': 'http', 'query': 'client', 'kind': 'class'}),
       );
 
-      expect(_symbols(result).every((s) => s['type'] == 'class'), isTrue);
+      expect(_symbols(result).every((s) => s['kind'] == 'class'), isTrue);
     });
 
     test('matches kind case-insensitively', () async {
@@ -293,7 +337,7 @@ void main() {
 
       final symbols = _symbols(result);
       expect(symbols, isNotEmpty);
-      expect(symbols.every((s) => s['type'] == 'class'), isTrue);
+      expect(symbols.every((s) => s['kind'] == 'class'), isTrue);
     });
 
     test('absent kind returns all matching symbol kinds', () async {
@@ -304,7 +348,7 @@ void main() {
         _request({'package': 'http', 'query': 'client'}),
       );
 
-      final types = _symbols(result).map((s) => s['type']! as String).toSet();
+      final types = _symbols(result).map((s) => s['kind'] as String? ?? '').toSet();
       expect(types.length, greaterThan(1));
     });
 
@@ -333,7 +377,7 @@ void main() {
       // Actually: "BrowserClient" name does NOT contain "http".
       // "http" name DOES contain "http" — but it's a library.
       // desc matches with type=class: BrowserClient (desc has "HTTP client"), Abortable (desc has "HTTP request")
-      expect(_symbols(result).every((s) => s['type'] == 'class'), isTrue);
+      expect(_symbols(result).every((s) => s['kind'] == 'class'), isTrue);
     });
   });
 

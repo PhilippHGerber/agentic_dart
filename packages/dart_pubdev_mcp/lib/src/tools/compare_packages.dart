@@ -202,7 +202,7 @@ final class ComparePackagesHandler {
     for (final entry in details.entries) {
       final pkg = entry.key;
       final d = entry.value;
-      _set(matrix, 'name', pkg, d.name);
+      _set(matrix, 'package', pkg, d.name);
       _set(matrix, 'version', pkg, d.version);
       _set(matrix, 'description', pkg, d.description);
       _set(matrix, 'likes', pkg, d.score.likes);

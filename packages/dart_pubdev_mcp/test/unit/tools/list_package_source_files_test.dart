@@ -79,7 +79,7 @@ void main() {
       expect(_files(result), hasLength(5));
     });
 
-    test('response includes name and resolvedVersion fields', () async {
+    test('response includes package and resolvedVersion fields', () async {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
@@ -87,7 +87,7 @@ void main() {
       );
 
       final payload = _payload(result);
-      expect(payload['name'], equals('foo'));
+      expect(payload['package'], equals('foo'));
       expect(payload['resolvedVersion'], equals('1.0.0'));
     });
 

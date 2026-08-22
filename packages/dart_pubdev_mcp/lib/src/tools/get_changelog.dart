@@ -73,16 +73,17 @@ final class GetChangelogHandler {
 
   /// Handles a [CallToolRequest] for `get_changelog`.
   ///
-  /// Resolves the latest stable version via [VersionResolver] to include
-  /// `resolvedVersion` in the success response. Resolves the full
-  /// [ChangelogEntry] list through `changelog`. Applies the `fromVersion`
-  /// boundary and `versionLimit` cap on each call. Returns
-  /// [CallToolResult.isError] `true` on any domain failure.
+  /// Resolves the latest stable version via [VersionResolver] (or validates the
+  /// caller-supplied `version`) to include `resolvedVersion` in the success
+  /// response. Resolves the full [ChangelogEntry] list through `changelog`.
+  /// Applies the `fromVersion` boundary and `versionLimit` cap on each call.
+  /// Returns [CallToolResult.isError] `true` on any domain failure.
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final package = (args['package'] as String?) ?? '';
     final versionLimit = (args['limit'] as int?) ?? 5;
     final fromVersion = args['fromVersion'] as String?;
+    final suppliedVersion = args['version'] as String?;
 
     // Checked before touching VersionResolver/PubDevClient so an SDK package
     // name (e.g. "flutter") never reaches either.
@@ -91,16 +92,21 @@ final class GetChangelogHandler {
     _log(
       LoggingLevel.info,
       'get_changelog: package=$package'
+      '${suppliedVersion != null ? ' version=$suppliedVersion' : ''}'
       '${fromVersion != null ? ' fromVersion=$fromVersion' : ''}',
     );
 
-    // Trade-off: we resolve latest-stable up front on every call, even on a
-    // changelog cache hit. This costs one lightweight JSON GET but keeps the
+    // Trade-off: we resolve version up front on every call, even on a changelog
+    // cache hit. This costs one lightweight JSON GET but keeps the
     // `resolvedVersion` field correct and the control flow simple. Deriving the
     // version from the changelog instead would be unsound — the newest heading
     // may be a pre-release, not the latest stable.
     final String resolvedVersion;
-    switch (await _versionResolver.resolve(package: package, tool: 'get_changelog')) {
+    switch (await _versionResolver.resolve(
+      package: package,
+      supplied: suppliedVersion,
+      tool: 'get_changelog',
+    )) {
       case PubDevFailure(:final error):
         return ToolResponse.error(error);
       case PubDevSuccess(:final value):
@@ -120,21 +126,50 @@ final class GetChangelogHandler {
     }
 
     if (entries.isEmpty) return ToolResponse.error(_noDocumentation);
-    return _applyFilters(entries, versionLimit, fromVersion, resolvedVersion);
+    return _applyFilters(
+      entries: entries,
+      versionLimit: versionLimit,
+      suppliedVersion: suppliedVersion,
+      fromVersion: fromVersion,
+      resolvedVersion: resolvedVersion,
+    );
   }
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
-  static CallToolResult _applyFilters(
-    List<ChangelogEntry> entries,
-    int versionLimit,
-    String? fromVersion,
-    String resolvedVersion,
-  ) {
-    if (fromVersion == null) {
-      return _success(entries.take(versionLimit).toList(), resolvedVersion);
+  static CallToolResult _applyFilters({
+    required List<ChangelogEntry> entries,
+    required int versionLimit,
+    required String? suppliedVersion,
+    required String? fromVersion,
+    required String resolvedVersion,
+  }) {
+    final int targetIndex;
+    if (suppliedVersion == null) {
+      targetIndex = 0;
+    } else {
+      final exactIndex = entries.indexWhere((e) => _matchesVersion(e.version, resolvedVersion));
+      if (exactIndex >= 0) {
+        targetIndex = exactIndex;
+      } else {
+        final nextOlder = entries.indexWhere((e) => _isOlder(e.version, resolvedVersion));
+        targetIndex = nextOlder >= 0 ? nextOlder : 0;
+      }
     }
-    return _applyFromVersion(entries, versionLimit, fromVersion, resolvedVersion);
+
+    if (fromVersion == null) {
+      return _success(
+        entries.sublist(targetIndex).take(versionLimit).toList(),
+        resolvedVersion,
+      );
+    }
+    return _applyFromVersion(
+      entries: entries,
+      targetIndex: targetIndex,
+      versionLimit: versionLimit,
+      fromVersion: fromVersion,
+      resolvedVersion: resolvedVersion,
+    );
   }
 
   /// Applies the [fromVersion] exclusive lower bound to [entries].
@@ -142,26 +177,48 @@ final class GetChangelogHandler {
   /// Returns entries newer than [fromVersion]. When [fromVersion] is not in the
   /// list, the first entry older than it is used as the boundary. Returns
   /// [_invalidInput] when no entry older than [fromVersion] exists.
-  static CallToolResult _applyFromVersion(
-    List<ChangelogEntry> entries,
-    int versionLimit,
-    String fromVersion,
-    String resolvedVersion,
-  ) {
-    var boundaryIdx = entries.indexWhere((e) => e.version == fromVersion);
+  static CallToolResult _applyFromVersion({
+    required List<ChangelogEntry> entries,
+    required int targetIndex,
+    required int versionLimit,
+    required String fromVersion,
+    required String resolvedVersion,
+  }) {
+    var boundaryIdx = entries.indexWhere((e) => _matchesVersion(e.version, fromVersion));
 
     if (boundaryIdx < 0) {
       boundaryIdx = entries.indexWhere((e) => _isOlder(e.version, fromVersion));
       if (boundaryIdx < 0) return ToolResponse.error(_invalidInput);
     }
 
+    if (boundaryIdx < targetIndex) {
+      return ToolResponse.error(
+        DomainError(
+          code: DomainErrors.invalidArgument,
+          message:
+              'fromVersion ("$fromVersion") must be older than target version ("$resolvedVersion").',
+          suggestion:
+              'Supply a fromVersion that is older than the target version, or omit fromVersion.',
+          details: {'fromVersion': fromVersion, 'version': resolvedVersion},
+        ),
+      );
+    }
+
     return _success(
-      entries.sublist(0, boundaryIdx).take(versionLimit).toList(),
+      entries.sublist(targetIndex, boundaryIdx).take(versionLimit).toList(),
       resolvedVersion,
     );
   }
 
   // ── Version comparison ─────────────────────────────────────────────────────
+
+  /// Returns `true` when [entryVersion] matches the major.minor.patch of [target].
+  static bool _matchesVersion(String entryVersion, String target) {
+    if (entryVersion == target) return true;
+    final eParts = _versionParts(entryVersion);
+    final tParts = _versionParts(target);
+    return eParts[0] == tParts[0] && eParts[1] == tParts[1] && eParts[2] == tParts[2];
+  }
 
   /// Returns `true` when [v] is semantically older (lower) than [target].
   ///
@@ -204,6 +261,7 @@ final class GetChangelogHandler {
     'version': e.version,
     if (e.date case final d?) 'date': d.toIso8601String(),
     'changes': e.changes,
+    'rawText': e.rawText,
     'breaking': e.breaking,
   };
 }

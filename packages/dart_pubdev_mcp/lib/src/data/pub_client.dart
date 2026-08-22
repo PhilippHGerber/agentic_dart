@@ -404,7 +404,7 @@ final class PubDevClient {
   ///
   /// Calls `GET /api/search?q=...` then fetches package-info and score for
   /// each result in parallel. Failed individual lookups are silently skipped.
-  /// Sort values: `relevance` (default), `likes`, `pub_points`, `updated`.
+  /// Sort values: `relevance` (default), `likes`, `pubPoints`, `updated`.
   Future<PubDevResult<List<PackageSummary>>> search(
     String query, {
     String sort = 'relevance',
@@ -1153,7 +1153,7 @@ final class PubDevClient {
   static String? _mapSort(String sort) => switch (sort) {
     'relevance' => null,
     'likes' => 'like',
-    'pub_points' => 'points',
+    'pubPoints' || 'pub_points' => 'points',
     'updated' => 'recent',
     _ => null,
   };

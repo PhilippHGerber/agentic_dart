@@ -206,12 +206,31 @@ void main() {
       expect(versions, equals(['2.0.0', '1.0.0']));
     });
 
-    test('each entry includes a changes field', () async {
+    test('each entry includes a changes field as List<String>', () async {
       _stubSuccess(mockHttp);
 
       final result = await buildHandler().call(_request({'package': 'http'}));
 
-      expect(_entries(result).every((e) => e.containsKey('changes')), isTrue);
+      expect(_entries(result).every((e) => e['changes'] is List), isTrue);
+      expect(_entries(result).first['changes'], equals(['Breaking change: removed the old API.']));
+    });
+
+    test('each entry includes a rawText field as String', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_entries(result).every((e) => e['rawText'] is String), isTrue);
+      expect(_entries(result).first['rawText'], equals('Breaking change: removed the old API.'));
+    });
+
+    test('parses ISO date from version heading', () async {
+      const html = '<h2>2.0.0 - 2025-01-15</h2><p>Change notes.</p>';
+      _stubSuccess(mockHttp, html: html);
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_entries(result).first['date'], equals('2025-01-15T00:00:00.000Z'));
     });
 
     test('each entry includes a breaking field', () async {
@@ -243,6 +262,59 @@ void main() {
       final result = await handler.call(_request({'package': 'http'}));
 
       expect(_resolvedVersion(result), equals('1.6.0'));
+    });
+
+    test('equals the caller-supplied version when version is given', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'package': 'http', 'version': '1.5.0'}));
+
+      expect(_resolvedVersion(result), equals('1.5.0'));
+    });
+  });
+
+  // ─── version anchor ─────────────────────────────────────────────────────────
+
+  group('version anchor', () {
+    test('anchors changelog entries starting from the specified version', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'version': '1.5.0'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_resolvedVersion(result), equals('1.5.0'));
+      expect(
+        _entries(result).map((e) => e['version']).toList(),
+        equals(['1.5.0', '1.0.0']),
+      );
+    });
+
+    test('anchors changelog with fromVersion', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'version': '1.5.0', 'fromVersion': '1.0.0'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_resolvedVersion(result), equals('1.5.0'));
+      expect(
+        _entries(result).map((e) => e['version']).toList(),
+        equals(['1.5.0']),
+      );
+    });
+
+    test('returns invalidArgument when fromVersion is not older than version', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(
+        _request({'package': 'http', 'version': '1.5.0', 'fromVersion': '2.0.0'}),
+      );
+
+      expect(result.isError, isTrue);
+      expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
   });
 

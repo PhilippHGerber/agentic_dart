@@ -142,7 +142,7 @@ final class GetPackageHandler {
   );
 
   static Map<String, Object?> _detailToJson(PackageDetail d, Map<String, Object?>? advisories) => {
-    'name': d.name,
+    'package': d.name,
     'version': d.version,
     'description': d.description,
     'verified': d.verified,

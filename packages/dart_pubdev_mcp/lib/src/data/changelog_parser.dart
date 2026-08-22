@@ -10,50 +10,114 @@ import 'models.dart';
 
 /// Matches a Keep-a-Changelog version heading at the start of a line.
 ///
-/// Handles both `## 1.2.3` and `## [1.2.3]` formats; the first capture group
-/// contains the version string (without surrounding brackets when present).
-final _kHeadingPattern = RegExp(r'^## \[?(\d+\.\d+\.\d+[^\]]*)\]?');
+/// Handles `## 1.2.3`, `## [1.2.3]`, `## 1.2.3 - 2024-01-15`, `## 1.2.3 (2024-01-15)`.
+final _kVersionHeadingPattern = RegExp(
+  r'^##\s+\[?(\d+\.\d+\.\d+[a-zA-Z0-9.+_-]*)\]?(?:\s*[-–—(]\s*(\d{4}-\d{2}-\d{2})|\s*[-–—(]\s*([^)\n]+)\)?)?',
+);
+
+/// Matches an isolated ISO 8601 date string (e.g. `2024-08-06`).
+final _kDatePattern = RegExp(r'\b(\d{4}-\d{2}-\d{2})\b');
+
+/// Matches the start of a bullet or list item (`- `, `* `, `+ `, `1. `).
+final _kListItemStartPattern = RegExp(r'^\s*(?:[-*+]|\d+\.)\s+(.*)');
 
 /// Parses [text] into a newest-first list of [ChangelogEntry] values.
 ///
-/// Splits [text] line-by-line on headings matching [_kHeadingPattern]. The
-/// text between consecutive headings becomes the [ChangelogEntry.changes] for
-/// that version. Returns an empty list when no version headings are found.
+/// Splits [text] line-by-line on headings matching [_kVersionHeadingPattern].
+/// Each entry contains parsed change bullet strings in [ChangelogEntry.changes]
+/// and unparsed section markdown in [ChangelogEntry.rawText].
+/// Returns an empty list when no version headings are found.
 List<ChangelogEntry> parseChangelogText(String text) {
   final lines = text.split('\n');
   final entries = <ChangelogEntry>[];
-  String? currentVersion;
-  final currentChanges = StringBuffer();
 
-  for (final line in lines) {
-    final match = _kHeadingPattern.firstMatch(line);
-    final version = match?.group(1)?.trim();
-    if (version != null && version.isNotEmpty) {
-      if (currentVersion != null) {
-        _flushEntry(entries, currentVersion, currentChanges);
-        currentChanges.clear();
-      }
-      currentVersion = version;
-    } else if (currentVersion != null) {
-      currentChanges.writeln(line);
+  String? currentVersion;
+  DateTime? currentDate;
+  final currentChanges = <String>[];
+  final rawTextBuffer = StringBuffer();
+  String? currentItem;
+
+  void flushItem() {
+    final itemRaw = currentItem;
+    if (itemRaw == null) return;
+    final item = itemRaw.trim();
+    currentItem = null;
+    if (item.isNotEmpty) {
+      currentChanges.add(item);
     }
   }
 
-  if (currentVersion != null) {
-    _flushEntry(entries, currentVersion, currentChanges);
+  void flushEntry() {
+    flushItem();
+    final ver = currentVersion;
+    if (ver == null) return;
+
+    final rawText = rawTextBuffer.toString().trim();
+    final isBreaking = rawText.toLowerCase().contains('breaking') ||
+        currentChanges.any((c) => c.toLowerCase().contains('breaking'));
+
+    entries.add(
+      ChangelogEntry(
+        version: ver,
+        date: currentDate,
+        changes: List.unmodifiable(currentChanges),
+        rawText: rawText,
+        breaking: isBreaking,
+      ),
+    );
+
+    currentVersion = null;
+    currentDate = null;
+    currentChanges.clear();
+    rawTextBuffer.clear();
+    currentItem = null;
   }
 
-  return entries;
-}
+  for (final rawLine in lines) {
+    final line = rawLine.trimRight();
 
-void _flushEntry(List<ChangelogEntry> entries, String version, StringBuffer changesBuffer) {
-  final changes = changesBuffer.toString().trim();
-  entries.add(
-    ChangelogEntry(
-      version: version,
-      date: null,
-      changes: changes,
-      breaking: changes.toLowerCase().contains('breaking'),
-    ),
-  );
+    final versionMatch = _kVersionHeadingPattern.firstMatch(line);
+    if (versionMatch != null) {
+      flushEntry();
+      currentVersion = versionMatch.group(1)?.trim();
+
+      final dateCandidate = versionMatch.group(2) ?? versionMatch.group(3);
+      if (dateCandidate != null) {
+        final dateMatch = _kDatePattern.firstMatch(dateCandidate);
+        if (dateMatch != null) {
+          final dateStr = dateMatch.group(1);
+          if (dateStr != null) {
+            currentDate = DateTime.tryParse('${dateStr}T00:00:00.000Z') ??
+                DateTime.tryParse(dateStr)?.toUtc();
+          }
+        }
+      }
+      continue;
+    }
+
+    if (currentVersion == null) {
+      continue;
+    }
+
+    rawTextBuffer.writeln(rawLine);
+
+    final listMatch = _kListItemStartPattern.firstMatch(line);
+    if (listMatch != null) {
+      flushItem();
+      currentItem = listMatch.group(1)?.trim();
+      continue;
+    }
+
+    if (line.trim().isEmpty) {
+      flushItem();
+    } else if (currentItem != null) {
+      currentItem = '$currentItem ${line.trim()}';
+    } else if (line.trim().isNotEmpty && !line.startsWith('#')) {
+      currentItem = line.trim();
+    }
+  }
+
+  flushEntry();
+
+  return entries;
 }

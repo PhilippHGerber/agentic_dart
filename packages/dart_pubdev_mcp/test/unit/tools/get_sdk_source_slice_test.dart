@@ -146,7 +146,7 @@ void main() {
       expect(payload['file'], equals('list.dart'));
       expect(payload['mode'], equals('line-range'));
       expect(payload['lineStart'], equals(2));
-      expect(payload['effectiveLineEnd'], equals(4));
+      expect(payload['lineEnd'], equals(4));
       expect(payload['truncated'], isFalse);
       expect(
         payload['content'],
@@ -169,7 +169,7 @@ void main() {
       final payload = _payload(result);
       expect(payload['content'], equals(_listSource));
       expect(payload['lineStart'], equals(1));
-      expect(payload['effectiveLineEnd'], equals(5));
+      expect(payload['lineEnd'], equals(5));
     });
 
     test('normalizes the installed-style path, dropping non-lib/ tarball entries', () async {
@@ -196,6 +196,29 @@ void main() {
           'library': 'core',
           'file': 'widget.dart',
           'version': '3.12.2',
+          'symbol': 'Widget',
+        }),
+      );
+
+      expect(result.isError, isNull);
+      final payload = _payload(result);
+      expect(payload['mode'], equals('symbol'));
+      expect(payload['symbol'], equals('Widget'));
+      expect(payload['lineStart'], equals(1));
+      expect(payload['lineEnd'], equals(10));
+      expect(payload['truncated'], isFalse);
+      expect(payload['content'], equals(_widgetSource.trimRight()));
+    });
+
+    test('supports backwards-compatible symbolName parameter', () async {
+      stubSdkTarball(mockHttp, _rawFiles);
+
+      final result = await buildHandler().call(
+        _request({
+          'sdk': 'dart',
+          'library': 'core',
+          'file': 'widget.dart',
+          'version': '3.12.2',
           'symbolName': 'Widget',
         }),
       );
@@ -203,11 +226,7 @@ void main() {
       expect(result.isError, isNull);
       final payload = _payload(result);
       expect(payload['mode'], equals('symbol'));
-      expect(payload['symbolName'], equals('Widget'));
-      expect(payload['lineStart'], equals(1));
-      expect(payload['effectiveLineEnd'], equals(10));
-      expect(payload['truncated'], isFalse);
-      expect(payload['content'], equals(_widgetSource.trimRight()));
+      expect(payload['symbol'], equals('Widget'));
     });
 
     test('truncates to signature + omission comment + closing brace', () async {
@@ -219,14 +238,14 @@ void main() {
           'library': 'core',
           'file': 'widget.dart',
           'version': '3.12.2',
-          'symbolName': 'Widget',
+          'symbol': 'Widget',
           'maxLines': 3,
         }),
       );
 
       final payload = _payload(result);
       expect(payload['truncated'], isTrue);
-      expect(payload['effectiveLineEnd'], equals(10));
+      expect(payload['lineEnd'], equals(10));
       expect(payload['content'], equals('class Widget {\n  // ... 8 lines omitted ...\n}'));
     });
 
@@ -239,13 +258,13 @@ void main() {
           'library': 'core',
           'file': 'widget.dart',
           'version': '3.12.2',
-          'symbolName': 'Widget.compute',
+          'symbol': 'Widget.compute',
         }),
       );
 
       final payload = _payload(result);
       expect(payload['lineStart'], equals(6));
-      expect(payload['effectiveLineEnd'], equals(9));
+      expect(payload['lineEnd'], equals(9));
       expect(payload['truncated'], isFalse);
       expect(
         payload['content'],
@@ -262,7 +281,7 @@ void main() {
           'library': 'core',
           'file': 'widget.dart',
           'version': '3.12.2',
-          'symbolName': 'Widget.new',
+          'symbol': 'Widget.new',
         }),
       );
 
@@ -280,7 +299,7 @@ void main() {
           'library': 'core',
           'file': 'widget.dart',
           'version': '3.12.2',
-          'symbolName': 'DoesNotExist',
+          'symbol': 'DoesNotExist',
         }),
       );
 
@@ -437,7 +456,7 @@ void main() {
       expect(payload['file'], equals('src/widgets/framework.dart'));
       expect(payload['mode'], equals('line-range'));
       expect(payload['lineStart'], equals(2));
-      expect(payload['effectiveLineEnd'], equals(4));
+      expect(payload['lineEnd'], equals(4));
       expect(payload['truncated'], isFalse);
       expect(
         payload['content'],
@@ -474,16 +493,16 @@ void main() {
           'package': 'flutter',
           'file': 'src/widgets/widget.dart',
           'version': '3.35.1',
-          'symbolName': 'Widget',
+          'symbol': 'Widget',
         }),
       );
 
       expect(result.isError, isNull);
       final payload = _payload(result);
       expect(payload['mode'], equals('symbol'));
-      expect(payload['symbolName'], equals('Widget'));
+      expect(payload['symbol'], equals('Widget'));
       expect(payload['lineStart'], equals(1));
-      expect(payload['effectiveLineEnd'], equals(10));
+      expect(payload['lineEnd'], equals(10));
       expect(payload['truncated'], isFalse);
       expect(payload['content'], equals(_widgetSource.trimRight()));
     });
@@ -497,7 +516,7 @@ void main() {
           'package': 'flutter',
           'file': 'src/widgets/widget.dart',
           'version': '3.35.1',
-          'symbolName': 'Widget.compute',
+          'symbol': 'Widget.compute',
           'maxLines': 2,
         }),
       );
@@ -519,7 +538,7 @@ void main() {
           'package': 'flutter',
           'file': 'src/widgets/widget.dart',
           'version': '3.35.1',
-          'symbolName': 'DoesNotExist',
+          'symbol': 'DoesNotExist',
         }),
       );
 

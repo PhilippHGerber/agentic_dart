@@ -103,7 +103,14 @@ final class BrowseApiSymbolsHandler {
     final result = await _apiIndex.resolve((name: package, version: resolvedVersion));
 
     return switch (result) {
-      PubDevSuccess(:final value) => _buildResponse(value, query, kind, limit, resolvedVersion),
+      PubDevSuccess(:final value) => _buildResponse(
+        value,
+        package,
+        query,
+        kind,
+        limit,
+        resolvedVersion,
+      ),
       PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }
@@ -114,6 +121,7 @@ final class BrowseApiSymbolsHandler {
   /// when the ranked and filtered list is empty.
   CallToolResult _buildResponse(
     List<DartdocSymbol> symbols,
+    String package,
     String query,
     String? kind,
     int limit,
@@ -150,7 +158,10 @@ final class BrowseApiSymbolsHandler {
     }
 
     return ToolResponse.ok(
-      {'symbols': _symbolsToJson(filtered.take(limit).toList())},
+      {
+        'package': package,
+        'symbols': _symbolsToJson(filtered.take(limit).toList(), package),
+      },
       resolvedVersion: resolvedVersion,
     );
   }
@@ -161,15 +172,34 @@ final class BrowseApiSymbolsHandler {
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
 
-  static List<Map<String, Object?>> _symbolsToJson(List<DartdocSymbol> symbols) => [
-    for (final s in symbols) _symbolToJson(s),
+  static List<Map<String, Object?>> _symbolsToJson(
+    List<DartdocSymbol> symbols,
+    String package,
+  ) => [
+    for (final s in symbols) _symbolToJson(s, package),
   ];
 
-  static Map<String, Object?> _symbolToJson(DartdocSymbol s) => {
+  /// The dartdoc library segment a symbol belongs to, derived from the leading
+  /// dotted component of [DartdocSymbol.qualifiedName] (falling back to the
+  /// first `href` path segment).
+  static String _librarySegment(DartdocSymbol s) {
+    final qn = s.qualifiedName;
+    if (qn.isNotEmpty) {
+      final dot = qn.indexOf('.');
+      return dot == -1 ? qn : qn.substring(0, dot);
+    }
+    final href = s.href;
+    final slash = href.indexOf('/');
+    return slash == -1 ? href : href.substring(0, slash);
+  }
+
+  static Map<String, Object?> _symbolToJson(DartdocSymbol s, String package) => {
     'name': s.name,
     'qualifiedName': s.qualifiedName,
+    'kind': s.type,
+    'library': 'package:$package/${_librarySegment(s)}.dart',
+    'enclosedBy': s.enclosedBy,
+    'description': s.desc,
     'href': s.href,
-    'type': s.type,
-    if (s.desc.isNotEmpty) 'desc': s.desc,
   };
 }

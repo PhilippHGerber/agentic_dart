@@ -1,19 +1,25 @@
 /// Handler for the `get_sdk_throw_statements` MCP tool.
 ///
-/// Mirrors `get_throw_statements`'s scope semantics (`class`/`method`/both/
-/// neither) and response shape for Dart or Flutter SDK source, scanning the
-/// selected `library` (Dart) or `package` (Flutter) file by file — the same
-/// approach `get_throw_statements`'s `class`-provided path already uses.
+/// Mirrors `get_throw_statements`'s scope semantics and response shape for
+/// Dart or Flutter SDK source, scanning the selected `library` (Dart) or
+/// `package` (Flutter) file by file.
+///
+/// ## Symbol resolution
+///
+/// `symbol` accepts:
+/// - A class, mixin, enum, or extension name (e.g. `"List"`) to scan all its members.
+/// - A class member (e.g. `"List.add"`, `"List.new"`, `"List.filled"`) to scan that member.
+/// - A top-level function (e.g. `"identical"`).
 ///
 /// ## Top-level function resolution
 ///
-/// Unlike `get_throw_statements`, the `method`-only (no `class`) path cannot
-/// consult a dartdoc `apiIndex` facade — no such symbol index exists for SDK
-/// code (see ADR 0006). Instead it scans every file in the selected
-/// `library`/`package` directly for a matching top-level function
-/// declaration: zero matches → `SYMBOL_NOT_FOUND`; more than one match across
-/// files → `AMBIGUOUS_SYMBOL` with `error.details.candidates` listing the
-/// file path of each match (not a `qualifiedName`, since none exists here).
+/// Unlike `get_throw_statements`, top-level function resolution cannot consult
+/// a dartdoc `apiIndex` facade — no such symbol index exists for SDK code (see
+/// ADR 0006). Instead it scans every file in the selected `library`/`package`
+/// directly for a matching top-level function declaration: zero matches →
+/// `SYMBOL_NOT_FOUND`; more than one match across files → `AMBIGUOUS_SYMBOL`
+/// with `error.details.candidates` listing the file path of each match (not a
+/// `qualifiedName`, since none exists here).
 ///
 /// ## Response shape
 ///
@@ -22,7 +28,14 @@
 ///   "resolvedVersion": "3.12.2",
 ///   "sdk": "dart",
 ///   "library": "core",
-///   "throws": [ ... same per-record shape as get_throw_statements ... ]
+///   "throws": [
+///     {
+///       "file": "lib/core/list.dart",
+///       "symbol": "List.add",
+///       "thrownType": "RangeError",
+///       "context": "if (full) {\n  throw RangeError(\"full\");\n}"
+///     }
+///   ]
 /// }
 /// ```
 ///
@@ -41,8 +54,7 @@
 /// - `SDK_NOT_DETECTED` (Flutter only)
 /// - `SYMBOL_NOT_FOUND` (class absent, method absent from class, or no
 ///   top-level function match)
-/// - `INVALID_ARGUMENT` — neither `class` nor `method` provided, or
-///   `sdk`/`library`/`package` malformed
+/// - `INVALID_ARGUMENT` — `symbol` missing or empty, or `sdk`/`library`/`package` malformed
 /// - `AMBIGUOUS_SYMBOL` + `error.details.candidates` (file paths) — multiple
 ///   top-level functions match
 library;
@@ -102,25 +114,40 @@ final class GetSdkThrowStatementsHandler {
   Future<CallToolResult> call(CallToolRequest request) async {
     final args = request.arguments ?? const {};
     final sdk = (args['sdk'] as String?) ?? '';
-    final className = args['class'] as String?;
-    final rawMethod = args['method'] as String?;
-    // Treat an empty-string method as if it were omitted.
-    final method = (rawMethod == null || rawMethod.isEmpty) ? null : rawMethod;
+    final rawSymbol = args['symbol'] as String?;
+    final legacyClass = args['class'] as String?;
+    final legacyMethod = args['method'] as String?;
     final suppliedVersion = args['version'] as String?;
+
+    // Determine the symbol, allowing legacy class/method as fallback.
+    final String? symbol;
+    if (rawSymbol != null && rawSymbol.isNotEmpty) {
+      symbol = rawSymbol;
+    } else if (legacyClass != null && legacyClass.isNotEmpty) {
+      if (legacyMethod != null && legacyMethod.isNotEmpty) {
+        symbol = '$legacyClass.$legacyMethod';
+      } else {
+        symbol = legacyClass;
+      }
+    } else if (legacyMethod != null && legacyMethod.isNotEmpty) {
+      symbol = legacyMethod;
+    } else {
+      symbol = null;
+    }
 
     _log(
       LoggingLevel.info,
-      'get_sdk_throw_statements: sdk=$sdk class=$className method=$method',
+      'get_sdk_throw_statements: sdk=$sdk symbol=$symbol',
     );
 
-    // Validate: at least one of class or method must be provided.
-    if (className == null && method == null) {
+    // Validate: `symbol` must be provided.
+    if (symbol == null) {
       return ToolResponse.error(_kScopeRequired);
     }
 
     return switch (sdk) {
-      'dart' => _handleDart(args, suppliedVersion, className, method),
-      'flutter' => _handleFlutter(args, suppliedVersion, className, method),
+      'dart' => _handleDart(args, suppliedVersion, symbol),
+      'flutter' => _handleFlutter(args, suppliedVersion, symbol),
       _ => ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
@@ -134,8 +161,7 @@ final class GetSdkThrowStatementsHandler {
   Future<CallToolResult> _handleDart(
     Map<String, Object?> args,
     String? suppliedVersion,
-    String? className,
-    String? method,
+    String symbol,
   ) async {
     final rawLibrary = (args['library'] as String?) ?? '';
     final library = _normalizeSegment(rawLibrary);
@@ -157,8 +183,7 @@ final class GetSdkThrowStatementsHandler {
       cacheName: 'dart_sdk',
       ref: ref,
       prefix: 'lib/$library/',
-      className: className,
-      method: method,
+      symbol: symbol,
       sdk: 'dart',
       library: library,
     );
@@ -167,8 +192,7 @@ final class GetSdkThrowStatementsHandler {
   Future<CallToolResult> _handleFlutter(
     Map<String, Object?> args,
     String? suppliedVersion,
-    String? className,
-    String? method,
+    String symbol,
   ) async {
     final rawPackage = (args['package'] as String?) ?? '';
     final package = _normalizeSegment(rawPackage);
@@ -210,8 +234,7 @@ final class GetSdkThrowStatementsHandler {
       cacheName: 'flutter_sdk',
       ref: ref,
       prefix: 'packages/$package/lib/',
-      className: className,
-      method: method,
+      symbol: symbol,
       sdk: 'flutter',
       package: package,
     );
@@ -223,8 +246,7 @@ final class GetSdkThrowStatementsHandler {
     required String cacheName,
     required String ref,
     required String prefix,
-    required String? className,
-    required String? method,
+    required String symbol,
     required String sdk,
     String? library,
     String? package,
@@ -239,47 +261,75 @@ final class GetSdkThrowStatementsHandler {
 
     final scopedPaths = sortedDartPaths(allFiles.keys.where((p) => p.startsWith(prefix)));
 
-    return switch ((className, method)) {
-      // Shape 1: class only — all throws in the entire class.
-      (final c?, null) => _scanEntireClass(cacheName, ref, scopedPaths, c, sdk, library, package),
-      // Shape 2: class + method — throws in one class method.
-      (final c?, final m?) => _scanClassMethod(
-        cacheName,
-        ref,
-        scopedPaths,
-        c,
-        m,
-        sdk,
-        library,
-        package,
-      ),
-      // Shape 3: method only — throws in one top-level function.
-      (null, final m?) => _scanTopLevelFunction(
-        cacheName,
-        ref,
-        scopedPaths,
-        m,
-        sdk,
-        library,
-        package,
-      ),
-      // Already rejected by the validation guard in call(); present so the
-      // switch is exhaustive without a null-assertion.
-      (null, null) => ToolResponse.error(_kScopeRequired),
-    };
+    final dotIndex = symbol.indexOf('.');
+    if (dotIndex > 0) {
+      final prefix = symbol.substring(0, dotIndex);
+      final suffix = symbol.substring(dotIndex + 1);
+      if (_isTypeIdentifier(prefix)) {
+        return _scanClassMethod(
+          cacheName: cacheName,
+          ref: ref,
+          filePaths: scopedPaths,
+          className: prefix,
+          method: suffix,
+          sdk: sdk,
+          library: library,
+          package: package,
+        );
+      } else {
+        return _scanTopLevelFunction(
+          cacheName: cacheName,
+          ref: ref,
+          filePaths: scopedPaths,
+          method: symbol,
+          sdk: sdk,
+          library: library,
+          package: package,
+        );
+      }
+    } else {
+      if (_isTypeIdentifier(symbol)) {
+        return _scanEntireClass(
+          cacheName: cacheName,
+          ref: ref,
+          filePaths: scopedPaths,
+          className: symbol,
+          sdk: sdk,
+          library: library,
+          package: package,
+        );
+      } else {
+        return _scanTopLevelFunction(
+          cacheName: cacheName,
+          ref: ref,
+          filePaths: scopedPaths,
+          method: symbol,
+          sdk: sdk,
+          library: library,
+          package: package,
+        );
+      }
+    }
   }
 
-  // ─── Shape 1: entire class ─────────────────────────────────────────────────
+  static bool _isTypeIdentifier(String name) {
+    final clean = name.startsWith('_') ? name.substring(1) : name;
+    if (clean.isEmpty) return false;
+    final first = clean[0];
+    return first.toUpperCase() == first && first.toLowerCase() != first;
+  }
 
-  Future<CallToolResult> _scanEntireClass(
-    String cacheName,
-    String ref,
-    List<String> filePaths,
-    String className,
-    String sdk,
+  // ─── Entire class scan ─────────────────────────────────────────────────────
+
+  Future<CallToolResult> _scanEntireClass({
+    required String cacheName,
+    required String ref,
+    required List<String> filePaths,
+    required String className,
+    required String sdk,
     String? library,
     String? package,
-  ) async {
+  }) async {
     // Aggregate results across ALL files: an SDK library/package may declare
     // a class with the same name in multiple files (e.g. part files).
     // Stopping at the first match would miss throws in later homonymous
@@ -327,23 +377,30 @@ final class GetSdkThrowStatementsHandler {
     for (final member in members) {
       final name = memberName(member);
       if (name == null) continue; // skip FieldDeclaration
-      collectThrows(member, ast.lineInfo, ast.content, filePath, className, name, null, results);
+      collectThrowsForSymbol(
+        member,
+        ast.lineInfo,
+        ast.content,
+        filePath,
+        '$className.$name',
+        results,
+      );
     }
     return results;
   }
 
-  // ─── Shape 2: one class method ─────────────────────────────────────────────
+  // ─── One class method scan ─────────────────────────────────────────────────
 
-  Future<CallToolResult> _scanClassMethod(
-    String cacheName,
-    String ref,
-    List<String> filePaths,
-    String className,
-    String method,
-    String sdk,
+  Future<CallToolResult> _scanClassMethod({
+    required String cacheName,
+    required String ref,
+    required List<String> filePaths,
+    required String className,
+    required String method,
+    required String sdk,
     String? library,
     String? package,
-  ) async {
+  }) async {
     // Continue scanning ALL files: an SDK library/package may have two
     // classes with the same name in different files. Stopping at the first
     // match would return SYMBOL_NOT_FOUND from a homonymous class that
@@ -371,7 +428,7 @@ final class GetSdkThrowStatementsHandler {
               message: 'Method "$method" was not found in class "$className".',
               suggestion:
                   'Verify the method name is spelled correctly. '
-                  'Use get_sdk_source_slice with symbolName to inspect this class.',
+                  'Use get_sdk_source_slice with symbol to inspect this class.',
             ),
           )
         : ToolResponse.error(_classNotFoundError(className));
@@ -408,27 +465,35 @@ final class GetSdkThrowStatementsHandler {
     // and setter) can share `method`, and both must be scanned.
     final results = <Map<String, Object?>>[];
     for (final member in matches) {
-      collectThrows(member, ast.lineInfo, ast.content, filePath, className, method, null, results);
+      final name = memberName(member) ?? method;
+      collectThrowsForSymbol(
+        member,
+        ast.lineInfo,
+        ast.content,
+        filePath,
+        '$className.$name',
+        results,
+      );
     }
     return (result: _ok(results, ref, sdk, library, package), classFound: true);
   }
 
-  // ─── Shape 3: top-level function ──────────────────────────────────────────
+  // ─── Top-level function scan ──────────────────────────────────────────────
 
   /// Scans every file in [filePaths] for a top-level function named
   /// [method]. No dartdoc/API-index facade is involved here — this is the
   /// one place this tool deliberately diverges from mirroring
   /// `get_throw_statements`'s internals rather than just its interface (see
   /// ADR 0006).
-  Future<CallToolResult> _scanTopLevelFunction(
-    String cacheName,
-    String ref,
-    List<String> filePaths,
-    String method,
-    String sdk,
+  Future<CallToolResult> _scanTopLevelFunction({
+    required String cacheName,
+    required String ref,
+    required List<String> filePaths,
+    required String method,
+    required String sdk,
     String? library,
     String? package,
-  ) async {
+  }) async {
     final matches = <_FunctionMatch>[];
     for (final filePath in filePaths) {
       final ParseStringResult ast;
@@ -479,13 +544,11 @@ final class GetSdkThrowStatementsHandler {
     // collection stops at FunctionExpression to suppress closures. Starting
     // from the body bypasses that check for the outermost scope.
     final results = <Map<String, Object?>>[];
-    collectThrows(
+    collectThrowsForSymbol(
       match.decl.functionExpression.body,
       match.ast.lineInfo,
       match.ast.content,
       match.filePath,
-      null,
-      null,
       method,
       results,
     );
@@ -505,11 +568,11 @@ final class GetSdkThrowStatementsHandler {
 
   static const _kScopeRequired = DomainError(
     code: DomainErrors.invalidArgument,
-    message: 'Either `class` or `method` must be provided.',
+    message: 'The `symbol` parameter is required.',
     suggestion:
-        'To scan all throws in a class, provide `class`. '
-        'To scan a single class method, provide both `class` and `method`. '
-        'To scan a top-level function, provide only `method`.',
+        'To scan all throws in a class, provide symbol: "ClassName" (e.g. "List"). '
+        'To scan a single class member, provide symbol: "ClassName.memberName" (e.g. "List.add"). '
+        'To scan a top-level function, provide symbol: "functionName" (e.g. "identical").',
   );
 
   static DomainError _classNotFoundError(String className) => DomainError(

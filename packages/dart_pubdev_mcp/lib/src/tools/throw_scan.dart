@@ -34,20 +34,19 @@ List<String> sortedDartPaths(Iterable<String> paths) => [
   ...paths.where((k) => k.endsWith('.dart') && !k.startsWith('lib/')),
 ];
 
+
 /// Recursively collects throw and rethrow expressions from [node] into
-/// [results].
+/// [results] with standardized `symbol` and `thrownType` properties.
 ///
-/// [className] and [methodName] tag class-member results; [functionName]
-/// tags top-level-function results. `rethrow` statements produce a record
-/// with `thrown_type == "rethrow"`.
-void collectThrows(
+/// [symbol] tags the enclosing declaration (e.g. `"Client.send"` or
+/// `"jsonDecode"`). `rethrow` statements produce a record with
+/// `thrownType == "rethrow"`.
+void collectThrowsForSymbol(
   AstNode node,
   LineInfo lineInfo,
   String source,
   String filePath,
-  String? className,
-  String? methodName,
-  String? functionName,
+  String symbol,
   List<Map<String, Object?>> results,
 ) {
   _visitThrows(node, (Expression throwLike) {
@@ -55,10 +54,8 @@ void collectThrows(
     final thrownType = throwLike is ThrowExpression ? _thrownType(throwLike.expression) : 'rethrow';
     results.add({
       'file': filePath,
-      'class': ?className,
-      'method': ?methodName,
-      'function': ?functionName,
-      'thrown_type': thrownType,
+      'symbol': symbol,
+      'thrownType': thrownType,
       'context': _contextSnippet(contextNode, throwLike, source, lineInfo),
     });
   });

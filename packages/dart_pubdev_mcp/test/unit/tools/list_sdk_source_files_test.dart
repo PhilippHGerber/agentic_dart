@@ -171,6 +171,74 @@ void main() {
     });
   });
 
+  // ─── Directory and fileExtension filters ────────────────────────────────────
+
+  group('directory and fileExtension filters', () {
+    test('filters files by directory prefix', () async {
+      stubSdkTarball(mockHttp, _rawFiles);
+
+      final result = await buildHandler().call(
+        _request({'sdk': 'dart', 'version': '3.12.2', 'directory': 'lib/core/'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_files(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
+    });
+
+    test('filters files by exact file path passed as directory', () async {
+      stubSdkTarball(mockHttp, _rawFiles);
+
+      final result = await buildHandler().call(
+        _request({'sdk': 'dart', 'version': '3.12.2', 'directory': 'lib/core/list.dart'}),
+      );
+
+      expect(result.isError, isNull);
+      expect(_files(result), equals(['lib/core/list.dart']));
+    });
+
+    test('filters files by fileExtension', () async {
+      stubSdkTarball(mockHttp, {
+        ..._rawFiles,
+        'sdk/lib/core/doc.md': '# documentation',
+      });
+
+      final mdResult = await buildHandler().call(
+        _request({'sdk': 'dart', 'version': '3.12.2', 'fileExtension': '.md'}),
+      );
+      expect(mdResult.isError, isNull);
+      expect(_files(mdResult), equals(['lib/core/doc.md']));
+
+      final dartResult = await buildHandler().call(
+        _request({'sdk': 'dart', 'version': '3.12.2', 'fileExtension': '.dart'}),
+      );
+      expect(dartResult.isError, isNull);
+      expect(
+        _files(dartResult),
+        equals(['lib/async/future.dart', 'lib/core/list.dart', 'lib/core/map.dart']),
+      );
+    });
+
+    test('filters files by both directory and fileExtension', () async {
+      stubSdkTarball(mockHttp, {
+        ..._rawFiles,
+        'sdk/lib/core/doc.md': '# documentation',
+        'sdk/lib/async/doc.md': '# async doc',
+      });
+
+      final result = await buildHandler().call(
+        _request({
+          'sdk': 'dart',
+          'version': '3.12.2',
+          'directory': 'lib/core',
+          'fileExtension': '.dart',
+        }),
+      );
+
+      expect(result.isError, isNull);
+      expect(_files(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
+    });
+  });
+
   // ─── Argument validation ─────────────────────────────────────────────────────
 
   group('argument validation', () {

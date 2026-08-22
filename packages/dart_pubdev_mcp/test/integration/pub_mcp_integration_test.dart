@@ -274,17 +274,20 @@ void main() {
     });
 
     test('the http package appears in results', () {
-      final names = results.cast<Map<String, Object?>>().map((r) => r['name']! as String).toList();
-      expect(names, contains('http'));
+      final packages = results
+          .whereType<Map<String, Object?>>()
+          .map((r) => r['package'] as String? ?? '')
+          .toList();
+      expect(packages, contains('http'));
     });
 
-    test('returns objects with a name field', () {
-      final first = results.first! as Map<String, Object?>;
-      expect(first, contains('name'));
+    test('returns objects with a package field', () {
+      final first = results.whereType<Map<String, Object?>>().first;
+      expect(first, contains('package'));
     });
 
     test('returns objects with a pubPoints field', () {
-      final first = results.first! as Map<String, Object?>;
+      final first = results.whereType<Map<String, Object?>>().first;
       expect(first, contains('pubPoints'));
     });
   }, timeout: const Timeout(Duration(seconds: 30)));
@@ -296,11 +299,14 @@ void main() {
 
     setUpAll(() async {
       final result = await mcp.callTool('get_package', {'package': 'path'});
-      detail = _content(result)! as Map<String, Object?>;
+      detail = switch (_content(result)) {
+        final Map<String, Object?> m => m,
+        _ => const <String, Object?>{},
+      };
     });
 
     test('returns the correct package name', () {
-      expect(detail['name'], equals('path'));
+      expect(detail['package'], equals('path'));
     });
 
     test('returns a non-empty version string', () {
@@ -378,14 +384,22 @@ void main() {
       expect(first, contains('name'));
     });
 
-    test('each symbol has a type field', () {
-      final first = symbols.first! as Map<String, Object?>;
-      expect(first, contains('type'));
+    test('each symbol has a kind field', () {
+      final first = symbols.first;
+      if (first is Map<String, Object?>) {
+        expect(first, contains('kind'));
+      } else {
+        fail('expected Map for first symbol');
+      }
     });
 
     test('each symbol has an href field', () {
-      final first = symbols.first! as Map<String, Object?>;
-      expect(first, contains('href'));
+      final first = symbols.first;
+      if (first is Map<String, Object?>) {
+        expect(first, contains('href'));
+      } else {
+        fail('expected Map for first symbol');
+      }
     });
   }, timeout: const Timeout(Duration(seconds: 30)));
 

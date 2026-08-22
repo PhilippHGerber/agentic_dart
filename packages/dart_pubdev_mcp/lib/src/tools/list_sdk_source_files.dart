@@ -14,6 +14,7 @@ import 'package:dart_mcp/server.dart';
 import '../analysis/ast_access.dart';
 import '../data/domain_error.dart';
 import '../data/sdk_client.dart';
+import 'path_filters.dart';
 import 'tool_response.dart';
 
 /// Handles calls to the `list_sdk_source_files` MCP tool.
@@ -66,6 +67,8 @@ final class ListSdkSourceFilesHandler {
   ) async {
     final rawLibrary = args['library'] as String?;
     final library = (rawLibrary == null || rawLibrary.isEmpty) ? null : rawLibrary;
+    final rawDirectory = args['directory'] as String?;
+    final fileExtension = args['fileExtension'] as String?;
     if (library != null && !_isValidSegment(library)) {
       return ToolResponse.error(
         const DomainError(
@@ -84,7 +87,9 @@ final class ListSdkSourceFilesHandler {
 
     _log(
       LoggingLevel.info,
-      'list_sdk_source_files: sdk=dart ref=$ref${library != null ? ' library=$library' : ''}',
+      'list_sdk_source_files: sdk=dart ref=$ref${library != null ? ' library=$library' : ''}'
+      '${rawDirectory != null ? ' directory=$rawDirectory' : ''}'
+      '${fileExtension != null ? ' ext=$fileExtension' : ''}',
     );
 
     switch (await _astAccess.sourceFiles('dart_sdk', ref)) {
@@ -97,6 +102,8 @@ final class ListSdkSourceFilesHandler {
           library: library,
           files: value,
           prefix: library == null ? null : 'lib/$library/',
+          rawDirectory: rawDirectory,
+          fileExtension: fileExtension,
         );
     }
   }
@@ -107,6 +114,8 @@ final class ListSdkSourceFilesHandler {
   ) async {
     final rawPackage = args['package'] as String?;
     final package = (rawPackage == null || rawPackage.isEmpty) ? null : rawPackage;
+    final rawDirectory = args['directory'] as String?;
+    final fileExtension = args['fileExtension'] as String?;
     if (package != null && !_isValidSegment(package)) {
       return ToolResponse.error(
         const DomainError(
@@ -145,7 +154,9 @@ final class ListSdkSourceFilesHandler {
 
     _log(
       LoggingLevel.info,
-      'list_sdk_source_files: sdk=flutter ref=$ref${package != null ? ' package=$package' : ''}',
+      'list_sdk_source_files: sdk=flutter ref=$ref${package != null ? ' package=$package' : ''}'
+      '${rawDirectory != null ? ' directory=$rawDirectory' : ''}'
+      '${fileExtension != null ? ' ext=$fileExtension' : ''}',
     );
 
     switch (await _astAccess.sourceFiles('flutter_sdk', ref)) {
@@ -158,6 +169,8 @@ final class ListSdkSourceFilesHandler {
           package: package,
           files: value,
           prefix: package == null ? null : 'packages/$package/lib/',
+          rawDirectory: rawDirectory,
+          fileExtension: fileExtension,
         );
     }
   }
@@ -169,10 +182,16 @@ final class ListSdkSourceFilesHandler {
     String? library,
     String? package,
     String? prefix,
+    String? rawDirectory,
+    String? fileExtension,
   }) {
     var paths = files.keys.toList();
     if (prefix != null) {
       paths = paths.where((p) => p.startsWith(prefix)).toList();
+    }
+    paths = paths.where((p) => matchesDirectoryFilter(p, rawDirectory)).toList();
+    if (fileExtension != null && fileExtension.isNotEmpty) {
+      paths = paths.where((p) => p.endsWith(fileExtension)).toList();
     }
     paths.sort();
 

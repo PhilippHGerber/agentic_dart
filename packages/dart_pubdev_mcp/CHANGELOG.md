@@ -3,6 +3,17 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0]
+
+### Changed
+
+- **Breaking:** Standardized parameter names and response schemas across all tools (`package`, `symbol`, `kind`, `description`, `lineEnd`, `thrownType`, `pubPoints`) for consistent LLM tool-calling.
+
+### Added
+
+- `list_sdk_source_files`: added `directory` and `fileExtension` filters.
+- `get_changelog`: added optional `version` parameter and structured `changes` list.
+
 ## [0.8.0]
 
 ### Added

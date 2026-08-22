@@ -7,7 +7,7 @@
 /// bounds are omitted the full file is returned verbatim. This supersedes the
 /// old `get_package_source_file` tool.
 ///
-/// **Symbol-bounded mode** (`file`, `symbolName`, optional `maxLines`): parses
+/// **Symbol-bounded mode** (`file`, `symbol`, optional `maxLines`): parses
 /// the file with the Dart analyzer, locates the named declaration's AST node,
 /// and returns its source. When `maxLines` is supplied and the node spans more
 /// lines than that, the response is truncated to the signature, opening brace,
@@ -16,7 +16,7 @@
 ///
 /// ## Symbol resolution
 ///
-/// `symbolName` is matched against declarations in the given `file` only — no
+/// `symbol` is matched against declarations in the given `file` only — no
 /// API index or href resolution is involved.
 ///
 /// - A bare name (e.g. `Client`) matches a top-level class, mixin, enum,
@@ -36,18 +36,17 @@
 ///   "package": "http",
 ///   "file": "lib/http.dart",
 ///   "mode": "symbol",
-///   "symbolName": "Client",
+///   "symbol": "Client",
 ///   "lineStart": 40,
-///   "effectiveLineEnd": 120,
+///   "lineEnd": 120,
 ///   "truncated": true,
 ///   "content": "class Client {\n  // ... 78 lines omitted ...\n}"
 /// }
 /// ```
 ///
-/// `symbolName` is present only in symbol-bounded mode. `effectiveLineEnd`
-/// always reports the true last line of the returned region (the symbol's real
-/// end line even when truncated) so callers can drill in with a follow-up
-/// line-range request.
+/// `symbol` is present only in symbol-bounded mode. `lineEnd` always reports
+/// the true last line of the returned region (the symbol's real end line even
+/// when truncated) so callers can drill in with a follow-up line-range request.
 ///
 /// ## Caches
 ///
@@ -107,8 +106,8 @@ final class GetSourceSliceHandler {
     final package = (args['package'] as String?) ?? '';
     final suppliedVersion = args['version'] as String?;
     final rawFile = (args['file'] as String?) ?? '';
-    final rawSymbol = args['symbolName'] as String?;
-    final symbolName = (rawSymbol == null || rawSymbol.isEmpty) ? null : rawSymbol;
+    final rawSymbol = (args['symbol'] as String?) ?? (args['symbolName'] as String?);
+    final symbol = (rawSymbol == null || rawSymbol.isEmpty) ? null : rawSymbol;
     final lineStart = asInt(args['lineStart']);
     final lineEnd = asInt(args['lineEnd']);
     final maxLines = asInt(args['maxLines']);
@@ -148,17 +147,17 @@ final class GetSourceSliceHandler {
     _log(
       LoggingLevel.info,
       'get_source_slice: package=$package version=$resolvedVersion file=$file '
-      '${symbolName != null ? 'symbol=$symbolName' : 'lines=$lineStart..$lineEnd'}',
+      '${symbol != null ? 'symbol=$symbol' : 'lines=$lineStart..$lineEnd'}',
     );
 
     // Symbol-bounded mode needs the parsed AST; line-range mode needs only the
     // raw content, so each mode resolves through the matching AstAccess method.
-    if (symbolName != null) {
+    if (symbol != null) {
       switch (await _astAccess.unit(package, resolvedVersion, file)) {
         case PubDevFailure(:final error):
           return ToolResponse.error(error);
         case PubDevSuccess(:final value):
-          return _symbolBounded(package, resolvedVersion, file, value, symbolName, maxLines);
+          return _symbolBounded(package, resolvedVersion, file, value, symbol, maxLines);
       }
     }
 
@@ -187,7 +186,7 @@ final class GetSourceSliceHandler {
       file: file,
       mode: 'line-range',
       lineStart: slice.lineStart,
-      effectiveLineEnd: slice.effectiveLineEnd,
+      lineEnd: slice.effectiveLineEnd,
       truncated: false,
       content: slice.content,
     );
@@ -200,15 +199,15 @@ final class GetSourceSliceHandler {
     String resolvedVersion,
     String file,
     ParseStringResult ast,
-    String symbolName,
+    String symbol,
     int? maxLines,
   ) {
-    final slice = sliceSymbol(_astAccess, ast, symbolName, maxLines: maxLines);
+    final slice = sliceSymbol(_astAccess, ast, symbol, maxLines: maxLines);
     if (slice == null) {
       return ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
-          message: 'Symbol "$symbolName" was not found in $file.',
+          message: 'Symbol "$symbol" was not found in $file.',
           suggestion:
               'Verify the symbol name is spelled correctly. '
               'For a class member use "ClassName.memberName". '
@@ -223,9 +222,9 @@ final class GetSourceSliceHandler {
       package: package,
       file: file,
       mode: 'symbol',
-      symbolName: symbolName,
+      symbol: symbol,
       lineStart: slice.lineStart,
-      effectiveLineEnd: slice.effectiveLineEnd,
+      lineEnd: slice.effectiveLineEnd,
       truncated: slice.truncated,
       content: slice.content,
     );
@@ -248,17 +247,17 @@ final class GetSourceSliceHandler {
     required String file,
     required String mode,
     required int lineStart,
-    required int effectiveLineEnd,
+    required int lineEnd,
     required bool truncated,
     required String content,
-    String? symbolName,
+    String? symbol,
   }) => ToolResponse.ok({
     'package': package,
     'file': file,
     'mode': mode,
-    'symbolName': ?symbolName,
+    'symbol': ?symbol,
     'lineStart': lineStart,
-    'effectiveLineEnd': effectiveLineEnd,
+    'lineEnd': lineEnd,
     'truncated': truncated,
     'content': content,
   }, resolvedVersion: resolvedVersion);

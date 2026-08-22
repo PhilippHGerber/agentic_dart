@@ -140,7 +140,7 @@ class Config {
 /// A class whose only `throw` is in a field initializer expression.
 ///
 /// Field initializer throws are excluded from class-wide scans because there
-/// is no `method` name to attach to the record.
+/// is no member name to attach to the record.
 const _fieldThrowSource = '''
 class Config {
   static final instance = throw UnsupportedError('no instance');
@@ -151,7 +151,7 @@ class Config {
 /// A class that catches and rethrows an exception.
 ///
 /// The `rethrow;` statement is a `RethrowExpression` AST node, distinct from
-/// a `ThrowExpression`. The handler must report it with `thrown_type == "rethrow"`.
+/// a `ThrowExpression`. The handler must report it with `thrownType == "rethrow"`.
 const _rethrowSource = '''
 class Wrapper {
   dynamic callApi(String url) {
@@ -198,7 +198,7 @@ class Worker {
 /// Two classes with the same name `Repo` in different files.
 ///
 /// Only the second file contains `disconnect` — a scan that stops at the first
-/// homonymous class would incorrectly return `method_not_found`.
+/// homonymous class would incorrectly return `symbolNotFound`.
 const _repoASource = 'class Repo { void connect() {} }';
 const _repoBSource = 'class Repo { void disconnect() { throw StateError("not connected"); } }';
 
@@ -292,16 +292,16 @@ void main() {
   // ─── invalid_input ────────────────────────────────────────────────────────
 
   group('invalid_input', () {
-    test('returns invalid_input when neither class nor method is provided', () async {
+    test('returns invalid_input when symbol is omitted', () async {
       final result = await buildHandler().call(_request({'package': 'foo', 'version': '1.0.0'}));
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
-    test('returns invalid_input when method is empty string and no class', () async {
+    test('returns invalid_input when symbol is empty string', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': '', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': '', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -325,7 +325,7 @@ void main() {
 
     test('returns non-empty array for class with throws', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -333,70 +333,69 @@ void main() {
       expect(records, isNotEmpty);
     });
 
-    test('all records contain file, class, method, thrown_type, and context', () async {
+    test('all records contain file, symbol, thrownType, and context', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       final records = _records(result);
       for (final record in records) {
         expect(record, contains('file'));
-        expect(record, contains('class'));
-        expect(record, contains('method'));
-        expect(record, contains('thrown_type'));
+        expect(record, contains('symbol'));
+        expect(record, contains('thrownType'));
         expect(record, contains('context'));
       }
     });
 
     test('structuredContent conforms to the declared outputSchema', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       expectConformsToOutputSchema(getThrowStatementsTool, result.structuredContent);
     });
 
-    test('all records have class set to the scanned class name', () async {
+    test('all records have symbol prefixed with the scanned class name', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       final records = _records(result);
       for (final record in records) {
-        expect(record['class'], equals('UserService'));
+        expect((record['symbol']! as String).startsWith('UserService.'), isTrue);
       }
     });
 
-    test('collects throws from constructor (tagged as "new")', () async {
+    test('collects throws from constructor (tagged as "UserService.new")', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       final records = _records(result);
       final ctorRecord = records.firstWhere(
-        (r) => r['method'] == 'new',
+        (r) => r['symbol'] == 'UserService.new',
         orElse: () => <String, Object?>{},
       );
       expect(ctorRecord, isNotEmpty);
-      expect(ctorRecord['thrown_type'], equals('ArgumentError'));
+      expect(ctorRecord['thrownType'], equals('ArgumentError'));
     });
 
     test('collects throws from multiple methods independently', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       final records = _records(result);
-      final methods = records.map((r) => r['method']! as String).toSet();
-      expect(methods, contains('new'));
-      expect(methods, contains('getUser'));
+      final symbols = records.map((r) => r['symbol']! as String).toSet();
+      expect(symbols, contains('UserService.new'));
+      expect(symbols, contains('UserService.getUser'));
     });
 
     test('returns empty array for class with no throws', () async {
       stubTarball(mockHttp, {'lib/calc.dart': _noThrowSource});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Calculator', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Calculator', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -405,45 +404,46 @@ void main() {
 
     test('method with no throws does not appear in result', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       final records = _records(result);
-      final methods = records.map((r) => r['method']! as String).toSet();
-      expect(methods, isNot(contains('deleteUser')));
+      final symbols = records.map((r) => r['symbol']! as String).toSet();
+      expect(symbols, isNot(contains('UserService.deleteUser')));
     });
 
     test('collects throws from mixin', () async {
       stubTarball(mockHttp, {'lib/mixin.dart': _mixinSource});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Validator', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Validator', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first['thrown_type'], equals('ArgumentError'));
+      expect(records.first['symbol'], equals('Validator.validate'));
+      expect(records.first['thrownType'], equals('ArgumentError'));
     });
 
     test('collects throws from enum method', () async {
       stubTarball(mockHttp, {'lib/status.dart': _enumSource});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Status', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Status', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first['method'], equals('assertActive'));
-      expect(records.first['thrown_type'], equals('StateError'));
+      expect(records.first['symbol'], equals('Status.assertActive'));
+      expect(records.first['thrownType'], equals('StateError'));
     });
   });
 
   // ─── class + method scan ─────────────────────────────────────────────────
 
-  group('class + method — single method scan', () {
+  group('class + member — single method scan', () {
     setUp(() {
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
@@ -452,8 +452,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
@@ -462,7 +461,7 @@ void main() {
       final records = _records(result);
       expect(records, hasLength(2));
       for (final record in records) {
-        expect(record['method'], equals('getUser'));
+        expect(record['symbol'], equals('UserService.getUser'));
       }
     });
 
@@ -470,28 +469,26 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
 
       final records = _records(result);
-      final methods = records.map((r) => r['method']).toSet();
-      expect(methods, isNot(contains('new'))); // nullable-safe: comparing Object? values
+      final symbols = records.map((r) => r['symbol']).toSet();
+      expect(symbols, isNot(contains('UserService.new')));
     });
 
     test('records contain correct thrown types', () async {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
 
-      final types = _records(result).map((r) => r['thrown_type']! as String).toSet();
+      final types = _records(result).map((r) => r['thrownType']! as String).toSet();
       expect(types, containsAll(['ArgumentError', 'RangeError']));
     });
 
@@ -499,8 +496,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
@@ -514,8 +510,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'deleteUser',
+          'symbol': 'UserService.deleteUser',
           'version': '1.0.0',
         }),
       );
@@ -530,8 +525,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'Parser',
-          'method': 'parse',
+          'symbol': 'Parser.parse',
           'version': '1.0.0',
         }),
       );
@@ -539,7 +533,8 @@ void main() {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first['thrown_type'], equals('FormatException'));
+      expect(records.first['symbol'], equals('Parser.parse'));
+      expect(records.first['thrownType'], equals('FormatException'));
     });
 
     test('excludes throws inside closures within the method', () async {
@@ -548,8 +543,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'Processor',
-          'method': 'process',
+          'symbol': 'Processor.process',
           'version': '1.0.0',
         }),
       );
@@ -558,17 +552,17 @@ void main() {
       final records = _records(result);
       // Only the direct throw should be captured; closure throw is excluded.
       expect(records, hasLength(1));
-      expect(records.first['thrown_type'], equals('ArgumentError'));
+      expect(records.first['symbol'], equals('Processor.process'));
+      expect(records.first['thrownType'], equals('ArgumentError'));
     });
 
-    test('collects throw from constructor when method is "new"', () async {
+    test('collects throw from constructor when symbol is "Config.new"', () async {
       stubTarball(mockHttp, {'lib/config.dart': _constructorThrowSource});
 
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'Config',
-          'method': 'new',
+          'symbol': 'Config.new',
           'version': '1.0.0',
         }),
       );
@@ -576,7 +570,8 @@ void main() {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first['thrown_type'], equals('ArgumentError'));
+      expect(records.first['symbol'], equals('Config.new'));
+      expect(records.first['thrownType'], equals('ArgumentError'));
     });
 
     test(
@@ -587,8 +582,7 @@ void main() {
         final result = await buildHandler().call(
           _request({
             'package': 'foo',
-            'class': 'Settings',
-            'method': 'value',
+            'symbol': 'Settings.value',
             'version': '1.0.0',
           }),
         );
@@ -596,35 +590,52 @@ void main() {
         expect(result.isError, isNull);
         final records = _records(result);
         expect(records, hasLength(2));
-        final types = records.map((r) => r['thrown_type']! as String).toSet();
+        final types = records.map((r) => r['thrownType']! as String).toSet();
         expect(types, containsAll(['StateError', 'ArgumentError']));
-        expect(records.map((r) => r['method']).toSet(), equals({'value'}));
+        expect(records.map((r) => r['symbol']).toSet(), equals({'Settings.value'}));
       },
     );
+
+    test('supports legacy class and method arguments', () async {
+      final result = await buildHandler().call(
+        _request({
+          'package': 'foo',
+          'class': 'UserService',
+          'method': 'getUser',
+          'version': '1.0.0',
+        }),
+      );
+
+      expect(result.isError, isNull);
+      final records = _records(result);
+      expect(records, hasLength(2));
+      for (final record in records) {
+        expect(record['symbol'], equals('UserService.getUser'));
+      }
+    });
   });
 
-  // ─── class_not_found ─────────────────────────────────────────────────────
+  // ─── symbol_not_found ────────────────────────────────────────────────────
 
-  group('class_not_found', () {
+  group('symbol_not_found', () {
     setUp(() {
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
-    test('returns class_not_found for class-only scan of unknown class', () async {
+    test('returns symbol_not_found for bare unknown symbol', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'NonExistent', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'NonExistent', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
-    test('returns class_not_found for class+method scan of unknown class', () async {
+    test('returns symbol_not_found for dotted unknown class', () async {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'NonExistent',
-          'method': 'doSomething',
+          'symbol': 'NonExistent.doSomething',
           'version': '1.0.0',
         }),
       );
@@ -633,29 +644,20 @@ void main() {
       expect(_errorPayload(result)['code'], equals(DomainErrors.symbolNotFound));
     });
 
-    test('class_not_found payload has message and suggestion', () async {
+    test('symbol_not_found payload has message and suggestion', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Ghost', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Ghost', 'version': '1.0.0'}),
       );
 
       expect(_errorPayload(result), contains('message'));
       expect(_errorPayload(result), contains('suggestion'));
     });
-  });
 
-  // ─── method_not_found ────────────────────────────────────────────────────
-
-  group('method_not_found', () {
-    setUp(() {
-      stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
-    });
-
-    test('returns method_not_found when method absent from class', () async {
+    test('returns symbol_not_found when method absent from class', () async {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'nonExistentMethod',
+          'symbol': 'UserService.nonExistentMethod',
           'version': '1.0.0',
         }),
       );
@@ -668,8 +670,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'missing',
+          'symbol': 'UserService.missing',
           'version': '1.0.0',
         }),
       );
@@ -696,39 +697,34 @@ void main() {
 
     test('returns throws array for top-level function', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'processData', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
+      expect(records.first['symbol'], equals('processData'));
     });
 
-    test('result contains function field, not class/method fields', () async {
+    test('result contains symbol field, not class/method/function fields', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'processData', 'version': '1.0.0'}),
       );
 
       final record = _records(result).first;
-      expect(record, contains('function'));
+      expect(record, contains('symbol'));
+      expect(record['symbol'], equals('processData'));
       expect(record, isNot(contains('class')));
       expect(record, isNot(contains('method')));
+      expect(record, isNot(contains('function')));
     });
 
-    test('function field matches the requested method name', () async {
+    test('thrownType is extracted correctly', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'processData', 'version': '1.0.0'}),
       );
 
-      expect(_records(result).first['function'], equals('processData'));
-    });
-
-    test('thrown_type is extracted correctly', () async {
-      final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
-      );
-
-      expect(_records(result).first['thrown_type'], equals('StateError'));
+      expect(_records(result).first['thrownType'], equals('StateError'));
     });
 
     test('function with no throws returns empty array', () async {
@@ -743,7 +739,7 @@ void main() {
       stubTarball(mockHttp, {'lib/bar.dart': 'String noThrow() => "hello";'}, packageName: 'bar');
 
       final result = await buildHandler().call(
-        _request({'package': 'bar', 'method': 'noThrow', 'version': '1.0.0'}),
+        _request({'package': 'bar', 'symbol': 'noThrow', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -751,7 +747,7 @@ void main() {
     });
   });
 
-  // ─── top-level function — version-resolution path ────────────────────────
+  // ─── top-level function — explicit version ───────────────────────────────
 
   group('top-level function — explicit version', () {
     test('uses explicit version in API index cache key', () async {
@@ -766,7 +762,7 @@ void main() {
       stubTarball(mockHttp, {'lib/foo.dart': _utilsSource}, version: '2.0.0');
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'processData', 'version': '2.0.0'}),
+        _request({'package': 'foo', 'symbol': 'processData', 'version': '2.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -789,7 +785,7 @@ void main() {
       );
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -808,7 +804,7 @@ void main() {
       );
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       final candidates = _candidates(_errorPayload(result));
@@ -832,12 +828,13 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'foo.log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'foo.log', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
       final records = _records(result);
-      expect(records.first['thrown_type'], equals('StateError'));
+      expect(records.first['symbol'], equals('foo.log'));
+      expect(records.first['thrownType'], equals('StateError'));
     });
   });
 
@@ -855,7 +852,7 @@ void main() {
       );
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'missing', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'missing', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -878,7 +875,7 @@ void main() {
       );
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'processData', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -898,7 +895,7 @@ void main() {
       ).thenAnswer((_) async => http.Response('Not Found', 404));
 
       final result = await buildHandler().call(
-        _request({'package': 'missing', 'class': 'Bar'}),
+        _request({'package': 'missing', 'symbol': 'Bar'}),
       );
 
       expect(result.isError, isTrue);
@@ -917,8 +914,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
@@ -929,12 +925,24 @@ void main() {
       }
     });
 
+    test('package field contains the package name', () async {
+      final result = await buildHandler().call(
+        _request({
+          'package': 'foo',
+          'symbol': 'UserService.getUser',
+          'version': '1.0.0',
+        }),
+      );
+
+      final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+      expect(json['package'], equals('foo'));
+    });
+
     test('context is non-empty string', () async {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
@@ -949,8 +957,7 @@ void main() {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
@@ -961,28 +968,27 @@ void main() {
     });
   });
 
-  // ─── resolvedVersion (P1.14) ──────────────────────────────────────────────
+  // ─── resolvedVersion ─────────────────────────────────────────────────────
 
-  group('resolvedVersion — all three scan shapes', () {
-    test('class-only (entire class) scan echoes the supplied version', () async {
+  group('resolvedVersion — all scan shapes', () {
+    test('class scan echoes the supplied version', () async {
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
       expect(_resolvedVersion(result), equals('1.0.0'));
     });
 
-    test('class + method scan echoes the supplied version', () async {
+    test('class member scan echoes the supplied version', () async {
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
@@ -1003,7 +1009,7 @@ void main() {
       stubTarball(mockHttp, {'lib/foo.dart': _utilsSource});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'processData', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'processData', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -1011,22 +1017,15 @@ void main() {
     });
   });
 
-  // ─── version-resolution success path (P1.19) ─────────────────────────────
+  // ─── version-resolution success path ─────────────────────────────────────
 
-  // Shapes 1 (class-only) and 2 (class+method) with `version` omitted: the
-  // handler must resolve the latest stable version via HTTP, then key all
-  // downstream caches by that concrete version. The explicit-version tests
-  // above never exercise the resolveLatestStable success branch for these
-  // shapes (Shape 3 already does via the package-info stub elsewhere).
   group('version omitted — resolves latest stable before scanning', () {
-    test('class-only scan resolves version and echoes it in resolvedVersion', () async {
+    test('class scan resolves version and echoes it in resolvedVersion', () async {
       stubPackageInfo(mockHttp, packageName: 'foo', version: '2.5.0');
-      // Source cache is keyed by the RESOLVED version, proving the handler
-      // threads the resolved version through to source loading.
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService'}),
+        _request({'package': 'foo', 'symbol': 'UserService'}),
       );
 
       expect(result.isError, isNull);
@@ -1034,12 +1033,12 @@ void main() {
       expect(_records(result), isNotEmpty);
     });
 
-    test('class + method scan resolves version and echoes it in resolvedVersion', () async {
+    test('class member scan resolves version and echoes it in resolvedVersion', () async {
       stubPackageInfo(mockHttp, packageName: 'foo', version: '2.5.0');
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource}, version: '2.5.0');
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'method': 'getUser'}),
+        _request({'package': 'foo', 'symbol': 'UserService.getUser'}),
       );
 
       expect(result.isError, isNull);
@@ -1047,7 +1046,7 @@ void main() {
       final records = _records(result);
       expect(records, hasLength(2));
       for (final record in records) {
-        expect(record['method'], equals('getUser'));
+        expect(record['symbol'], equals('UserService.getUser'));
       }
     });
   });
@@ -1062,7 +1061,7 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -1075,7 +1074,7 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
@@ -1084,12 +1083,6 @@ void main() {
   });
 
   // ─── AST cache behavior ──────────────────────────────────────────────────
-  //
-  // KeyedCache itself is exhaustively tested for "a repeat resolve does not
-  // run the fetch" (test/unit/cache/keyed_cache_test.dart) — these tests
-  // assert the handler-visible consequence: the `ast` facade entry is warm
-  // after a call, and repeated calls for the same file issue no further
-  // tarball fetch.
 
   group('AST cache', () {
     test('caches the parsed AST for reuse across repeated calls for the same file', () async {
@@ -1097,7 +1090,7 @@ void main() {
       final handler = buildHandler();
 
       await handler.call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       expect(
@@ -1113,8 +1106,7 @@ void main() {
       await handler.call(
         _request({
           'package': 'foo',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '1.0.0',
         }),
       );
@@ -1131,9 +1123,6 @@ void main() {
     });
 
     test('reuses the source file and AST warmed by get_source_slice', () async {
-      // Simulates server-level sharing: both handlers are constructed from the
-      // same CacheRegistry, so a get_source_slice call must warm the caches
-      // get_throw_statements reads from.
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       final sourceSliceHandler = GetSourceSliceHandler(
@@ -1148,13 +1137,13 @@ void main() {
             'package': 'foo',
             'version': '1.0.0',
             'file': 'lib/service.dart',
-            'symbolName': 'UserService',
+            'symbol': 'UserService',
           },
         ),
       );
 
       await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       verify(
@@ -1176,7 +1165,7 @@ void main() {
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
 
       await buildHandler().call(
-        _request({'package': 'foo', 'class': 'UserService', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       expect(await registry.sourceFiles.peek((name: 'foo', version: '1.0.0')), isNotNull);
@@ -1192,10 +1181,10 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Foo.m', 'version': '1.0.0'}),
       );
 
-      expect(_records(result).first['thrown_type'], equals('StateError'));
+      expect(_records(result).first['thrownType'], equals('StateError'));
     });
 
     test('extracts type from named factory: throw ArgumentError.value(...)', () async {
@@ -1204,10 +1193,10 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Foo.m', 'version': '1.0.0'}),
       );
 
-      expect(_records(result).first['thrown_type'], equals('ArgumentError'));
+      expect(_records(result).first['thrownType'], equals('ArgumentError'));
     });
 
     test('extracts type from explicit new: throw new FormatException(...)', () async {
@@ -1216,10 +1205,10 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Foo.m', 'version': '1.0.0'}),
       );
 
-      expect(_records(result).first['thrown_type'], equals('FormatException'));
+      expect(_records(result).first['thrownType'], equals('FormatException'));
     });
 
     test('extracts type from variable: throw someError', () async {
@@ -1228,10 +1217,10 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Foo.m', 'version': '1.0.0'}),
       );
 
-      expect(_records(result).first['thrown_type'], equals('e'));
+      expect(_records(result).first['thrownType'], equals('e'));
     });
   });
 
@@ -1252,7 +1241,7 @@ class Foo {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Foo.m', 'version': '1.0.0'}),
       );
 
       final context = _records(result).first['context']! as String;
@@ -1267,7 +1256,7 @@ class Foo {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Foo', 'method': 'm', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Foo.m', 'version': '1.0.0'}),
       );
 
       final context = _records(result).first['context']! as String;
@@ -1278,7 +1267,7 @@ class Foo {
       stubTarball(mockHttp, {'lib/worker.dart': _wideTryContextSource});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Worker', 'method': 'run', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Worker.run', 'version': '1.0.0'}),
       );
 
       final context = _records(result).first['context']! as String;
@@ -1288,18 +1277,16 @@ class Foo {
     });
   });
 
-  // ─── Fix 4: field initializer throws ─────────────────────────────────────
+  // ─── field initializer throws ─────────────────────────────────────────────
 
-  group('field initializer throw (Fix 4)', () {
+  group('field initializer throw', () {
     test('field initializer throw is excluded from class-wide scan results', () async {
       stubTarball(mockHttp, {'lib/config.dart': _fieldThrowSource});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Config', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Config', 'version': '1.0.0'}),
       );
 
-      // No records — the only throw is inside a field initializer, which has
-      // no method name and is excluded from class-wide scans.
       expect(result.isError, isNull);
       expect(_records(result), isEmpty);
     });
@@ -1315,21 +1302,20 @@ class Config {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Config', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Config', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
       final records = _records(result);
-      // Only the method throw is included, not the field initializer throw.
       expect(records, hasLength(1));
-      expect(records.first['method'], equals('doWork'));
-      expect(records.first['thrown_type'], equals('StateError'));
+      expect(records.first['symbol'], equals('Config.doWork'));
+      expect(records.first['thrownType'], equals('StateError'));
     });
   });
 
-  // ─── Fix 3: rethrow handling ─────────────────────────────────────────────
+  // ─── rethrow handling ─────────────────────────────────────────────────────
 
-  group('rethrow handling (Fix 3)', () {
+  group('rethrow handling', () {
     setUp(() {
       stubTarball(mockHttp, {'lib/wrapper.dart': _rethrowSource});
     });
@@ -1338,8 +1324,7 @@ class Config {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'Wrapper',
-          'method': 'callApi',
+          'symbol': 'Wrapper.callApi',
           'version': '1.0.0',
         }),
       );
@@ -1347,15 +1332,14 @@ class Config {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first['thrown_type'], equals('rethrow'));
+      expect(records.first['thrownType'], equals('rethrow'));
     });
 
     test('rethrow record includes context spanning the catch block', () async {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'Wrapper',
-          'method': 'callApi',
+          'symbol': 'Wrapper.callApi',
           'version': '1.0.0',
         }),
       );
@@ -1366,21 +1350,21 @@ class Config {
 
     test('class-wide scan includes rethrow records', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Wrapper', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Wrapper', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
-      final types = _records(result).map((r) => r['thrown_type']! as String).toSet();
+      final types = _records(result).map((r) => r['thrownType']! as String).toSet();
       expect(types, contains('rethrow'));
     });
 
-    test('rethrow record has method field set to the enclosing method name', () async {
+    test('rethrow record has symbol field set to the enclosing declaration', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Wrapper', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Wrapper', 'version': '1.0.0'}),
       );
 
       final records = _records(result);
-      expect(records.first['method'], equals('callApi'));
+      expect(records.first['symbol'], equals('Wrapper.callApi'));
     });
 
     test('explicit throw and rethrow in same method both appear in results', () async {
@@ -1401,21 +1385,20 @@ class Svc {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
-          'class': 'Svc',
-          'method': 'run',
+          'symbol': 'Svc.run',
           'version': '1.0.0',
         }),
       );
 
       expect(result.isError, isNull);
-      final types = _records(result).map((r) => r['thrown_type']! as String).toSet();
+      final types = _records(result).map((r) => r['thrownType']! as String).toSet();
       expect(types, containsAll(['ArgumentError', 'rethrow']));
     });
   });
 
-  // ─── Fix 2: homonymous class scanning ────────────────────────────────────
+  // ─── homonymous class scanning ───────────────────────────────────────────
 
-  group('homonymous class — class+method scan (Fix 2)', () {
+  group('homonymous class — single member scan', () {
     test(
       'finds method in second file when first file has same-named class without that method',
       () async {
@@ -1427,8 +1410,7 @@ class Svc {
         final result = await buildHandler().call(
           _request({
             'package': 'foo',
-            'class': 'Repo',
-            'method': 'disconnect',
+            'symbol': 'Repo.disconnect',
             'version': '1.0.0',
           }),
         );
@@ -1436,23 +1418,23 @@ class Svc {
         expect(result.isError, isNull);
         final records = _records(result);
         expect(records, hasLength(1));
-        expect(records.first['thrown_type'], equals('StateError'));
+        expect(records.first['symbol'], equals('Repo.disconnect'));
+        expect(records.first['thrownType'], equals('StateError'));
       },
     );
 
     test(
-      'returns method_not_found when method is absent from ALL homonymous classes',
+      'returns symbol_not_found when method is absent from ALL homonymous classes',
       () async {
         stubTarball(mockHttp, {
-          'lib/a.dart': _repoASource, // has connect(), not disconnect()
-          'lib/b.dart': _repoASource, // also has connect(), not disconnect()
+          'lib/a.dart': _repoASource,
+          'lib/b.dart': _repoASource,
         });
 
         final result = await buildHandler().call(
           _request({
             'package': 'foo',
-            'class': 'Repo',
-            'method': 'disconnect',
+            'symbol': 'Repo.disconnect',
             'version': '1.0.0',
           }),
         );
@@ -1463,7 +1445,7 @@ class Svc {
     );
 
     test(
-      'returns class_not_found when class is absent from all files (not method_not_found)',
+      'returns symbol_not_found when class is absent from all files',
       () async {
         stubTarball(mockHttp, {
           'lib/a.dart': 'class Other { void m() {} }',
@@ -1472,8 +1454,7 @@ class Svc {
         final result = await buildHandler().call(
           _request({
             'package': 'foo',
-            'class': 'Repo',
-            'method': 'disconnect',
+            'symbol': 'Repo.disconnect',
             'version': '1.0.0',
           }),
         );
@@ -1484,7 +1465,7 @@ class Svc {
     );
   });
 
-  group('homonymous class — class-wide scan (Fix 2)', () {
+  group('homonymous class — class-wide scan', () {
     test('aggregates throws from both files when class name appears in two files', () async {
       stubTarball(mockHttp, {
         'lib/a.dart': 'class Repo { void connect() { throw StateError("a"); } }',
@@ -1492,26 +1473,23 @@ class Svc {
       });
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'class': 'Repo', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'Repo', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(2));
-      final types = records.map((r) => r['thrown_type']! as String).toSet();
+      final types = records.map((r) => r['thrownType']! as String).toSet();
       expect(types, containsAll(['StateError', 'ArgumentError']));
     });
   });
 
-  // ─── Fix 1: concurrent in-flight cache poisoning ─────────────────────────
+  // ─── concurrent in-flight cache poisoning ────────────────────────────────
 
-  group('concurrent calls — API index (Fix 1)', () {
+  group('concurrent calls — API index', () {
     test(
       'two concurrent calls that share a cold API-index key both receive the error',
       () async {
-        // Use a Completer so both handler calls start before the HTTP request
-        // resolves, exercising the window that previously was vulnerable to cache
-        // poisoning.
         final completer = Completer<http.Response>();
         when(
           () => mockHttp.get(
@@ -1526,27 +1504,24 @@ class Svc {
 
         final handler = buildHandler();
         final f1 = handler.call(
-          _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+          _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
         );
         final f2 = handler.call(
-          _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+          _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
         );
 
-        // Resolve the shared in-flight HTTP request with a 429.
         completer.complete(http.Response('', 429));
 
         final r1 = await f1;
         final r2 = await f2;
 
-        // Both calls must surface the real error — neither may return
-        // no_documentation or an empty array masquerading as success.
         expect(_errorPayload(r1)['code'], equals(DomainErrors.rateLimited));
         expect(_errorPayload(r2)['code'], equals(DomainErrors.rateLimited));
       },
     );
   });
 
-  group('concurrent calls — source files (Fix 1)', () {
+  group('concurrent calls — source files', () {
     test(
       'two concurrent calls that share a cold source-file key both receive the error',
       () async {
@@ -1572,10 +1547,10 @@ class Svc {
 
         final handler = buildHandler();
         final f1 = handler.call(
-          _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+          _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
         );
         final f2 = handler.call(
-          _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+          _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
         );
 
         completer.complete(http.StreamedResponse(const Stream.empty(), 429));
@@ -1592,11 +1567,6 @@ class Svc {
   // ─── API index transport errors ──────────────────────────────────────────
 
   group('top-level function — API index transport failure', () {
-    // The shared `apiIndex` facade remaps a `package_not_found` index failure
-    // into a cached empty-list success (see CacheRegistry.apiIndex) — a package
-    // permanently missing dartdoc output is itself a stable, cacheable fact.
-    // The empty symbol list then falls through to `no_documentation`, matching
-    // every other `apiIndex` consumer (`browse_api_symbols`, `find_symbols`, …).
     test('404 from API index returns no_documentation', () async {
       when(
         () => mockHttp.get(
@@ -1610,7 +1580,7 @@ class Svc {
       ).thenAnswer((_) async => http.Response('Not Found', 404));
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -1630,7 +1600,7 @@ class Svc {
       ).thenAnswer((_) async => http.Response('', 429));
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -1651,10 +1621,10 @@ class Svc {
 
       final handler = buildHandler();
       final first = await handler.call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
       final second = await handler.call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(_errorPayload(first)['code'], equals(DomainErrors.rateLimited));
@@ -1688,7 +1658,7 @@ class Svc {
       ).thenAnswer((_) async => throw TimeoutException('network timeout'));
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -1707,7 +1677,7 @@ class Svc {
       ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 429));
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -1726,7 +1696,7 @@ class Svc {
       ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 404));
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(result.isError, isTrue);
@@ -1745,7 +1715,7 @@ class Svc {
       ).thenAnswer((_) async => http.StreamedResponse(const Stream.empty(), 429));
 
       await buildHandler().call(
-        _request({'package': 'foo', 'method': 'log', 'version': '1.0.0'}),
+        _request({'package': 'foo', 'symbol': 'log', 'version': '1.0.0'}),
       );
 
       expect(await registry.sourceFiles.peek((name: 'foo', version: '1.0.0')), isNull);

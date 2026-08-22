@@ -27,6 +27,7 @@ String? normalizeDirectory(String? raw) {
 bool matchesDirectoryFilter(String path, String? rawDirectory) {
   if (rawDirectory == null || rawDirectory.isEmpty) return true;
   final exact = rawDirectory.startsWith('/') ? rawDirectory.substring(1) : rawDirectory;
-  final prefix = normalizeDirectory(rawDirectory)!;
+  final prefix = normalizeDirectory(rawDirectory);
+  if (prefix == null) return true;
   return path.startsWith(prefix) || path == exact;
 }

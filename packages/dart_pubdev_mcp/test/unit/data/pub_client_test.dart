@@ -251,7 +251,19 @@ void main() {
       ).called(1);
     });
 
-    test('sort pub_points maps to points', () async {
+    test('sort pubPoints maps to points', () async {
+      await _client(mock).search('http', sort: 'pubPoints');
+      verify(
+        () => mock.get(
+          any(
+            that: predicate<Uri>((u) => u.toString().contains('sort=points')),
+          ),
+          headers: any(named: 'headers'),
+        ),
+      ).called(1);
+    });
+
+    test('sort pub_points maps to points for backward compatibility', () async {
       await _client(mock).search('http', sort: 'pub_points');
       verify(
         () => mock.get(

@@ -549,6 +549,8 @@ final class PackageVersion {
 
 /// A single version entry from a package changelog.
 ///
+/// [changes] is the parsed list of change bullet/item strings for this version.
+/// [rawText] is the raw unparsed changelog section text for this version.
 /// [breaking] is `true` when the entry text contains explicit breaking-change
 /// markers (e.g. `BREAKING`, `BREAKING CHANGE`).
 final class ChangelogEntry {
@@ -557,6 +559,7 @@ final class ChangelogEntry {
     required this.version,
     required this.date,
     required this.changes,
+    required this.rawText,
     required this.breaking,
   });
 
@@ -564,7 +567,12 @@ final class ChangelogEntry {
   factory ChangelogEntry.fromJson(Map<String, Object?> json) => ChangelogEntry(
     version: _optStr(json, 'version') ?? '',
     date: DateTime.tryParse(_optStr(json, 'date') ?? ''),
-    changes: _optStr(json, 'changes') ?? '',
+    changes: switch (json['changes']) {
+      final List<Object?> l => l.whereType<String>().toList(),
+      final String s when s.isNotEmpty => [s],
+      _ => const <String>[],
+    },
+    rawText: _optStr(json, 'rawText') ?? '',
     breaking: (json['breaking'] as bool?) ?? false,
   );
 
@@ -574,8 +582,11 @@ final class ChangelogEntry {
   /// The release date for this version, or `null` when the field is absent or unparseable.
   final DateTime? date;
 
-  /// The changelog text for this version.
-  final String changes;
+  /// The parsed list of change bullet/item strings for this version.
+  final List<String> changes;
+
+  /// The raw unparsed changelog section text for this version.
+  final String rawText;
 
   /// Whether this version contains breaking changes.
   final bool breaking;
@@ -584,12 +595,14 @@ final class ChangelogEntry {
   ChangelogEntry copyWith({
     String? version,
     DateTime? date,
-    String? changes,
+    List<String>? changes,
+    String? rawText,
     bool? breaking,
   }) => ChangelogEntry(
     version: version ?? this.version,
     date: date ?? this.date,
     changes: changes ?? this.changes,
+    rawText: rawText ?? this.rawText,
     breaking: breaking ?? this.breaking,
   );
 }

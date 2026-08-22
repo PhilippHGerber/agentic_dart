@@ -148,7 +148,8 @@ void main() {
 
       final result = await buildHandler().call(_request({'package': 'http'}));
 
-      expect(_detail(result)['name'], equals('http'));
+      expect(_detail(result)['package'], equals('http'));
+      expect(_detail(result).containsKey('name'), isFalse);
     });
 
     test('structuredContent conforms to the declared outputSchema', () async {
@@ -463,7 +464,7 @@ void main() {
       final result = await buildHandler().call(_request({'package': 'http', 'version': '1.5.0'}));
 
       expect(result.isError, isNull);
-      expect(_detail(result)['name'], equals('http'));
+      expect(_detail(result)['package'], equals('http'));
     });
   });
 

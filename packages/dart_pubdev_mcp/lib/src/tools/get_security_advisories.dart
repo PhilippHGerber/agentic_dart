@@ -107,6 +107,7 @@ final class GetSecurityAdvisoriesHandler {
 
     return ToolResponse.ok(
       {
+        'package': package,
         'affecting': affecting.map(_advisoryToJson).toList(),
         'other': other.map(_advisoryToJson).toList(),
       },

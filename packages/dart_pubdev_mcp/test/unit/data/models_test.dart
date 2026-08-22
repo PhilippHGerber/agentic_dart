@@ -409,17 +409,21 @@ void main() {
       final entry = ChangelogEntry.fromJson({
         'version': '1.0.0',
         'date': '2024-01-01T00:00:00Z',
-        'changes': 'Initial release.',
+        'changes': ['Initial release.'],
+        'rawText': 'Initial release.',
         'breaking': false,
       });
       expect(entry.version, equals('1.0.0'));
+      expect(entry.changes, equals(['Initial release.']));
+      expect(entry.rawText, equals('Initial release.'));
     });
 
     test('date is parsed as DateTime', () {
       final entry = ChangelogEntry.fromJson({
         'version': '1.0.0',
         'date': '2024-06-15T00:00:00Z',
-        'changes': '',
+        'changes': <String>[],
+        'rawText': '',
         'breaking': false,
       });
       expect(entry.date, equals(DateTime.parse('2024-06-15T00:00:00Z')));
@@ -429,7 +433,8 @@ void main() {
       final entry = ChangelogEntry.fromJson({
         'version': '2.0.0',
         'date': '2024-01-01',
-        'changes': 'BREAKING: removed old API.',
+        'changes': ['BREAKING: removed old API.'],
+        'rawText': 'BREAKING: removed old API.',
         'breaking': true,
       });
       expect(entry.breaking, isTrue);
@@ -439,7 +444,8 @@ void main() {
       final entry = ChangelogEntry.fromJson({
         'version': '1.0.0',
         'date': '2024-01-01',
-        'changes': 'Minor fix.',
+        'changes': ['Minor fix.'],
+        'rawText': 'Minor fix.',
       });
       expect(entry.breaking, isFalse);
     });
@@ -447,7 +453,8 @@ void main() {
     test('date is null when the field is absent', () {
       final entry = ChangelogEntry.fromJson({
         'version': '1.0.0',
-        'changes': '',
+        'changes': <String>[],
+        'rawText': '',
         'breaking': false,
       });
       expect(entry.date, isNull);
@@ -457,20 +464,24 @@ void main() {
       final entry = ChangelogEntry.fromJson({
         'version': '1.0.0',
         'date': 'not-a-date',
-        'changes': '',
+        'changes': <String>[],
+        'rawText': '',
         'breaking': false,
       });
       expect(entry.date, isNull);
     });
 
-    test('copyWith replaces changes', () {
+    test('copyWith replaces changes and rawText', () {
       final base = ChangelogEntry.fromJson({
         'version': '1.0.0',
         'date': '2024-01-01',
-        'changes': 'Old.',
+        'changes': ['Old.'],
+        'rawText': 'Old.',
         'breaking': false,
       });
-      expect(base.copyWith(changes: 'New.').changes, equals('New.'));
+      final copy = base.copyWith(changes: ['New.'], rawText: 'New.');
+      expect(copy.changes, equals(['New.']));
+      expect(copy.rawText, equals('New.'));
     });
   });
 

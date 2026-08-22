@@ -160,6 +160,7 @@ void main() {
         _request({'package': 'http', 'query': 'client'}),
       );
 
+      expect(_body(result)['package'], equals('http'));
       expectConformsToOutputSchema(findSymbolsTool, result.structuredContent);
     });
 

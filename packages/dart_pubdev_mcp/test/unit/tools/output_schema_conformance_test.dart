@@ -17,7 +17,7 @@ void main() {
     test('get_package', () {
       expectConformsToOutputSchema(getPackageTool, {
         'resolvedVersion': '1.2.0',
-        'name': 'http',
+        'package': 'http',
         'version': '1.2.0',
         'description': 'A composable, multi-platform HTTP client.',
         'verified': true,
@@ -48,7 +48,7 @@ void main() {
     test('get_package (optional fields omitted)', () {
       expectConformsToOutputSchema(getPackageTool, {
         'resolvedVersion': '1.2.0',
-        'name': 'http',
+        'package': 'http',
         'version': '1.2.0',
         'description': 'A composable, multi-platform HTTP client.',
         'verified': false,
@@ -73,10 +73,16 @@ void main() {
           {
             'version': '1.2.0',
             'date': '2024-01-01T00:00:00.000Z',
-            'changes': '- Added foo\n- Fixed bar',
+            'changes': ['Added foo', 'Fixed bar'],
+            'rawText': '- Added foo\n- Fixed bar',
             'breaking': false,
           },
-          {'version': '1.1.0', 'changes': '- Initial release', 'breaking': true},
+          {
+            'version': '1.1.0',
+            'changes': ['Initial release'],
+            'rawText': '- Initial release',
+            'breaking': true,
+          },
         ],
       });
     });
@@ -84,6 +90,7 @@ void main() {
     test('get_security_advisories', () {
       expectConformsToOutputSchema(getSecurityAdvisoriesTool, {
         'resolvedVersion': '0.12.0',
+        'package': 'http',
         'affecting': [
           {
             'id': 'GHSA-4rgh-jx4f-qfcq',
@@ -107,6 +114,7 @@ void main() {
     test('get_security_advisories (zero advisories)', () {
       expectConformsToOutputSchema(getSecurityAdvisoriesTool, {
         'resolvedVersion': '1.6.0',
+        'package': 'http',
         'affecting': <Object?>[],
         'other': <Object?>[],
       });
@@ -115,19 +123,25 @@ void main() {
     test('browse_api_symbols', () {
       expectConformsToOutputSchema(browseApiSymbolsTool, {
         'resolvedVersion': '1.2.0',
+        'package': 'http',
         'symbols': [
           {
             'name': 'Client',
             'qualifiedName': 'http.Client',
+            'kind': 'class',
+            'library': 'package:http/http.dart',
+            'enclosedBy': null,
+            'description': 'An HTTP client.',
             'href': 'http/Client-class.html',
-            'type': 'class',
-            'desc': 'An HTTP client.',
           },
           {
             'name': 'get',
             'qualifiedName': 'http.get',
+            'kind': 'function',
+            'library': 'package:http/http.dart',
+            'enclosedBy': null,
+            'description': '',
             'href': 'http/get.html',
-            'type': 'function',
           },
         ],
       });
@@ -136,6 +150,7 @@ void main() {
     test('find_symbols', () {
       expectConformsToOutputSchema(findSymbolsTool, {
         'resolvedVersion': '1.2.0',
+        'package': 'http',
         'hasMore': true,
         'symbols': [
           {
@@ -163,6 +178,8 @@ void main() {
     test('get_symbol_documentation', () {
       expectConformsToOutputSchema(getSymbolDocumentationTool, {
         'resolvedVersion': '1.2.0',
+        'package': 'http',
+        'symbol': 'Client',
         'documentation': 'class Client\n\nAn HTTP client...',
       });
     });
@@ -174,7 +191,7 @@ void main() {
         'file': 'lib/http.dart',
         'mode': 'line-range',
         'lineStart': 1,
-        'effectiveLineEnd': 40,
+        'lineEnd': 40,
         'truncated': false,
         'content': 'library http;\n',
       });
@@ -186,9 +203,9 @@ void main() {
         'package': 'http',
         'file': 'lib/http.dart',
         'mode': 'symbol',
-        'symbolName': 'Client',
+        'symbol': 'Client',
         'lineStart': 40,
-        'effectiveLineEnd': 120,
+        'lineEnd': 120,
         'truncated': true,
         'content': 'class Client {\n  // ... 78 lines omitted ...\n}',
       });
@@ -202,7 +219,7 @@ void main() {
         'file': 'list.dart',
         'mode': 'line-range',
         'lineStart': 1,
-        'effectiveLineEnd': 40,
+        'lineEnd': 40,
         'truncated': false,
         'content': 'class List<E> {\n',
       });
@@ -216,7 +233,7 @@ void main() {
         'file': 'src/widgets/framework.dart',
         'mode': 'line-range',
         'lineStart': 1,
-        'effectiveLineEnd': 40,
+        'lineEnd': 40,
         'truncated': false,
         'content': 'abstract class Widget {\n',
       });
@@ -229,9 +246,9 @@ void main() {
         'library': 'core',
         'file': 'list.dart',
         'mode': 'symbol',
-        'symbolName': 'MyList',
+        'symbol': 'MyList',
         'lineStart': 1,
-        'effectiveLineEnd': 40,
+        'lineEnd': 40,
         'truncated': true,
         'content': 'class MyList {\n  // ... 38 lines omitted ...\n}',
       });
@@ -244,9 +261,9 @@ void main() {
         'package': 'flutter',
         'file': 'src/widgets/framework.dart',
         'mode': 'symbol',
-        'symbolName': 'State.setState',
+        'symbol': 'State.setState',
         'lineStart': 40,
-        'effectiveLineEnd': 60,
+        'lineEnd': 60,
         'truncated': false,
         'content': 'void setState(VoidCallback fn) {\n  fn();\n}',
       });
@@ -272,7 +289,7 @@ void main() {
     test('list_package_source_files', () {
       expectConformsToOutputSchema(listPackageSourceFilesTool, {
         'resolvedVersion': '1.2.0',
-        'name': 'http',
+        'package': 'http',
         'files': ['lib/http.dart', 'lib/src/client.dart'],
       });
     });
@@ -280,18 +297,18 @@ void main() {
     test('get_throw_statements', () {
       expectConformsToOutputSchema(getThrowStatementsTool, {
         'resolvedVersion': '1.2.0',
+        'package': 'http',
         'throws': [
           {
             'file': 'lib/src/client.dart',
-            'class': 'Client',
-            'method': 'send',
-            'thrown_type': 'ClientException',
+            'symbol': 'Client.send',
+            'thrownType': 'ClientException',
             'context': 'if (closed) {\n  throw ClientException("closed");\n}',
           },
           {
             'file': 'lib/src/utils.dart',
-            'function': 'parseHeader',
-            'thrown_type': 'rethrow',
+            'symbol': 'parseHeader',
+            'thrownType': 'rethrow',
             'context': 'rethrow;',
           },
         ],
@@ -306,9 +323,8 @@ void main() {
         'throws': [
           {
             'file': 'lib/core/list.dart',
-            'class': 'MyList',
-            'method': 'add',
-            'thrown_type': 'RangeError',
+            'symbol': 'MyList.add',
+            'thrownType': 'RangeError',
             'context': 'if (full) {\n  throw RangeError("full");\n}',
           },
         ],
@@ -323,8 +339,8 @@ void main() {
         'throws': [
           {
             'file': 'packages/flutter/lib/src/widgets/framework.dart',
-            'function': 'debugChecksAreDisabled',
-            'thrown_type': 'rethrow',
+            'symbol': 'debugChecksAreDisabled',
+            'thrownType': 'rethrow',
             'context': 'rethrow;',
           },
         ],

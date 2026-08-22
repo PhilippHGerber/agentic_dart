@@ -116,7 +116,7 @@ void main() {
   group('argument validation', () {
     test('rejects sdk values other than "dart"/"flutter" with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'kotlin', 'library': 'core', 'class': 'Foo'}),
+        _request({'sdk': 'kotlin', 'library': 'core', 'symbol': 'Foo'}),
       );
 
       expect(result.isError, isTrue);
@@ -125,7 +125,7 @@ void main() {
 
     test('rejects a missing library (dart) with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'class': 'Foo'}),
+        _request({'sdk': 'dart', 'symbol': 'Foo'}),
       );
 
       expect(result.isError, isTrue);
@@ -134,14 +134,14 @@ void main() {
 
     test('rejects a missing package (flutter) with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'flutter', 'class': 'Foo'}),
+        _request({'sdk': 'flutter', 'symbol': 'Foo'}),
       );
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
-    test('returns INVALID_ARGUMENT when neither class nor method is provided', () async {
+    test('returns INVALID_ARGUMENT when symbol is omitted', () async {
       final result = await buildHandler().call(
         _request({'sdk': 'dart', 'library': 'core'}),
       );
@@ -150,9 +150,9 @@ void main() {
       expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
-    test('treats an empty-string method as omitted', () async {
+    test('treats an empty-string symbol as omitted', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'method': ''}),
+        _request({'sdk': 'dart', 'library': 'core', 'symbol': ''}),
       );
 
       expect(result.isError, isTrue);
@@ -172,6 +172,24 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
+          'symbol': 'UserService',
+          'version': '3.12.2',
+        }),
+      );
+
+      expect(result.isError, isNull);
+      final records = _records(result);
+      expect(records, hasLength(2));
+      final symbols = records.map((r) => r['symbol']! as String).toSet();
+      expect(symbols, containsAll(['UserService.new', 'UserService.getUser']));
+      expect(records.every((r) => r.containsKey('thrownType')), isTrue);
+    });
+
+    test('supports backwards-compatible class parameter', () async {
+      final result = await buildHandler().call(
+        _request({
+          'sdk': 'dart',
+          'library': 'core',
           'class': 'UserService',
           'version': '3.12.2',
         }),
@@ -180,8 +198,6 @@ void main() {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(2));
-      final methods = records.map((r) => r['method']! as String).toSet();
-      expect(methods, containsAll(['new', 'getUser']));
     });
 
     test('response carries sdk and library fields', () async {
@@ -189,7 +205,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'UserService',
+          'symbol': 'UserService',
           'version': '3.12.2',
         }),
       );
@@ -205,7 +221,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'UserService',
+          'symbol': 'UserService',
           'version': '3.12.2',
         }),
       );
@@ -218,7 +234,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'NoSuchClass',
+          'symbol': 'NoSuchClass',
           'version': '3.12.2',
         }),
       );
@@ -236,7 +252,7 @@ void main() {
         });
 
         final result = await buildHandler().call(
-          _request({'sdk': 'dart', 'library': 'core', 'class': 'Other', 'version': '3.12.2'}),
+          _request({'sdk': 'dart', 'library': 'core', 'symbol': 'Other', 'version': '3.12.2'}),
         );
 
         expect(result.isError, isTrue);
@@ -257,6 +273,23 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
+          'symbol': 'UserService.getUser',
+          'version': '3.12.2',
+        }),
+      );
+
+      expect(result.isError, isNull);
+      final records = _records(result);
+      expect(records, hasLength(1));
+      expect(records.first['symbol'], equals('UserService.getUser'));
+      expect(records.first['thrownType'], equals('ArgumentError'));
+    });
+
+    test('supports backwards-compatible class + method parameters', () async {
+      final result = await buildHandler().call(
+        _request({
+          'sdk': 'dart',
+          'library': 'core',
           'class': 'UserService',
           'method': 'getUser',
           'version': '3.12.2',
@@ -266,8 +299,8 @@ void main() {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first['method'], equals('getUser'));
-      expect(records.first['thrown_type'], equals('ArgumentError'));
+      expect(records.first['symbol'], equals('UserService.getUser'));
+      expect(records.first['thrownType'], equals('ArgumentError'));
     });
 
     test('resolves the unnamed constructor via "new"', () async {
@@ -275,8 +308,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'UserService',
-          'method': 'new',
+          'symbol': 'UserService.new',
           'version': '3.12.2',
         }),
       );
@@ -290,8 +322,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'UserService',
-          'method': 'missing',
+          'symbol': 'UserService.missing',
           'version': '3.12.2',
         }),
       );
@@ -310,8 +341,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'Repo',
-          'method': 'disconnect',
+          'symbol': 'Repo.disconnect',
           'version': '3.12.2',
         }),
       );
@@ -319,7 +349,7 @@ void main() {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first['thrown_type'], equals('StateError'));
+      expect(records.first['thrownType'], equals('StateError'));
     });
   });
 
@@ -330,23 +360,34 @@ void main() {
       stubSdkTarball(mockHttp, {'sdk/lib/core/utils.dart': _utilsSource});
 
       final result = await buildHandler().call(
+        _request({'sdk': 'dart', 'library': 'core', 'symbol': 'processData', 'version': '3.12.2'}),
+      );
+
+      expect(result.isError, isNull);
+      final records = _records(result);
+      expect(records, hasLength(1));
+      expect(records.first['symbol'], equals('processData'));
+      expect(records.first['thrownType'], equals('StateError'));
+    });
+
+    test('supports backwards-compatible method parameter for top-level function', () async {
+      stubSdkTarball(mockHttp, {'sdk/lib/core/utils.dart': _utilsSource});
+
+      final result = await buildHandler().call(
         _request({'sdk': 'dart', 'library': 'core', 'method': 'processData', 'version': '3.12.2'}),
       );
 
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
-      expect(records.first, contains('function'));
-      expect(records.first, isNot(contains('class')));
-      expect(records.first['function'], equals('processData'));
-      expect(records.first['thrown_type'], equals('StateError'));
+      expect(records.first['symbol'], equals('processData'));
     });
 
     test('function with no throws returns an empty array', () async {
       stubSdkTarball(mockHttp, {'sdk/lib/core/utils.dart': _utilsSource});
 
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'method': 'noThrow', 'version': '3.12.2'}),
+        _request({'sdk': 'dart', 'library': 'core', 'symbol': 'noThrow', 'version': '3.12.2'}),
       );
 
       expect(result.isError, isNull);
@@ -357,7 +398,7 @@ void main() {
       stubSdkTarball(mockHttp, {'sdk/lib/core/utils.dart': _utilsSource});
 
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'method': 'doesNotExist', 'version': '3.12.2'}),
+        _request({'sdk': 'dart', 'library': 'core', 'symbol': 'doesNotExist', 'version': '3.12.2'}),
       );
 
       expect(result.isError, isTrue);
@@ -371,7 +412,7 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'method': 'log', 'version': '3.12.2'}),
+        _request({'sdk': 'dart', 'library': 'core', 'symbol': 'log', 'version': '3.12.2'}),
       );
 
       expect(result.isError, isTrue);
@@ -385,18 +426,18 @@ void main() {
       });
 
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'method': 'log', 'version': '3.12.2'}),
+        _request({'sdk': 'dart', 'library': 'core', 'symbol': 'log', 'version': '3.12.2'}),
       );
 
       final candidates = _candidates(_errorPayload(result));
       expect(candidates, containsAll(['lib/core/a.dart', 'lib/core/b.dart']));
     });
 
-    test('method-only scan never issues a dartdoc/API-index HTTP request', () async {
+    test('top-level function scan never issues a dartdoc/API-index HTTP request', () async {
       stubSdkTarball(mockHttp, {'sdk/lib/core/utils.dart': _utilsSource});
 
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'method': 'processData', 'version': '3.12.2'}),
+        _request({'sdk': 'dart', 'library': 'core', 'symbol': 'processData', 'version': '3.12.2'}),
       );
 
       expect(result.isError, isNull);
@@ -417,7 +458,7 @@ void main() {
 
       final result = await buildHandler(
         platformVersion: '3.9.0 (stable) (...) on "linux_x64"',
-      ).call(_request({'sdk': 'dart', 'library': 'core', 'class': 'UserService'}));
+      ).call(_request({'sdk': 'dart', 'library': 'core', 'symbol': 'UserService'}));
 
       expect(result.isError, isNull);
       expect(_payload(result)['resolvedVersion'], equals('3.9.0'));
@@ -435,7 +476,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'UserService',
+          'symbol': 'UserService',
           'version': '999.0.0',
         }),
       );
@@ -463,7 +504,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'class': 'UserService',
+          'symbol': 'UserService',
           'version': '3.35.1',
         }),
       );
@@ -489,7 +530,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'method': 'processData',
+          'symbol': 'processData',
           'version': '3.35.1',
         }),
       );
@@ -500,7 +541,7 @@ void main() {
 
     test('returns SDK_NOT_DETECTED when no install is found and no version is given', () async {
       final result = await buildHandler(flutterEnvironment: const {}).call(
-        _request({'sdk': 'flutter', 'package': 'flutter', 'class': 'Foo'}),
+        _request({'sdk': 'flutter', 'package': 'flutter', 'symbol': 'Foo'}),
       );
 
       expect(result.isError, isTrue);
@@ -521,7 +562,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'UserService',
+          'symbol': 'UserService',
           'version': '3.12.2',
         }),
       );
@@ -529,8 +570,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'class': 'UserService',
-          'method': 'getUser',
+          'symbol': 'UserService.getUser',
           'version': '3.12.2',
         }),
       );

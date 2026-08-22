@@ -172,6 +172,7 @@ final class GetSymbolDocumentationHandler {
       ),
       SingleSymbolMatch(symbol: final resolved) => await _fetchDoc(
         package,
+        symbol,
         resolved.href,
         resolvedVersion,
       ),
@@ -180,14 +181,19 @@ final class GetSymbolDocumentationHandler {
 
   // ── Symbol doc fetch ───────────────────────────────────────────────────────
 
-  Future<CallToolResult> _fetchDoc(String package, String href, String resolvedVersion) async {
+  Future<CallToolResult> _fetchDoc(
+    String package,
+    String symbol,
+    String href,
+    String resolvedVersion,
+  ) async {
     final result = await _symbolDoc.resolve((
       package: package,
       version: resolvedVersion,
       href: href,
     ));
     return switch (result) {
-      PubDevSuccess(:final value) => _successResult(value, resolvedVersion),
+      PubDevSuccess(:final value) => _successResult(package, symbol, value, resolvedVersion),
       PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }
@@ -200,6 +206,14 @@ final class GetSymbolDocumentationHandler {
     suggestion: 'Verify the package name and that it has dartdoc output on pub.dev.',
   );
 
-  static CallToolResult _successResult(String text, String resolvedVersion) =>
-      ToolResponse.ok({'documentation': text}, resolvedVersion: resolvedVersion);
+  static CallToolResult _successResult(
+    String package,
+    String symbol,
+    String text,
+    String resolvedVersion,
+  ) => ToolResponse.ok({
+    'package': package,
+    'symbol': symbol,
+    'documentation': text,
+  }, resolvedVersion: resolvedVersion);
 }

@@ -131,6 +131,15 @@ void main() {
       expect(_summaries(result), hasLength(1));
     });
 
+    test('result contains package field matching package name', () async {
+      _stubSingleResult(mockHttp);
+
+      final result = await buildHandler().call(_request({'query': 'http'}));
+
+      expect(_summaries(result).first['package'], equals('http'));
+      expect(_summaries(result).first.containsKey('name'), isFalse);
+    });
+
     test('result contains activeMaintenance field', () async {
       _stubSingleResult(mockHttp);
 
@@ -262,10 +271,10 @@ void main() {
       ).called(1);
     });
 
-    test('maps pub_points sort to the "points" query parameter', () async {
+    test('maps pubPoints sort to the "points" query parameter', () async {
       _stubSingleResult(mockHttp);
 
-      await buildHandler().call(_request({'query': 'json', 'sort': 'pub_points'}));
+      await buildHandler().call(_request({'query': 'json', 'sort': 'pubPoints'}));
 
       verify(
         () => mockHttp.get(

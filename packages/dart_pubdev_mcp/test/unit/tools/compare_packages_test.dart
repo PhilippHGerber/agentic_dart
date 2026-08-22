@@ -184,18 +184,18 @@ void main() {
       expect(_payload(result)['errors'], equals({}));
     });
 
-    test('matrix contains the name field', () async {
+    test('matrix contains the package field', () async {
       final result = await buildHandler().call(_request(['http', 'dio']));
 
-      expect(_matrixOf(result), contains('name'));
+      expect(_matrixOf(result), contains('package'));
     });
 
-    test('matrix name field maps each package to its name', () async {
+    test('matrix package field maps each package to its name', () async {
       final result = await buildHandler().call(_request(['http', 'dio']));
-      final names = _matrixOf(result)['name']! as Map<String, Object?>;
+      final packages = (_matrixOf(result)['package'] as Map<String, Object?>?) ?? const {};
 
-      expect(names['http'], equals('http'));
-      expect(names['dio'], equals('dio'));
+      expect(packages['http'], equals('http'));
+      expect(packages['dio'], equals('dio'));
     });
 
     test('matrix contains the version field', () async {
@@ -373,8 +373,8 @@ void main() {
         expect(advisories, contains('http'));
         expect(advisories, isNot(contains('dio')));
         // The package itself is unaffected by its advisories-fetch failure.
-        final names = _matrixOf(result)['name']! as Map<String, Object?>;
-        expect(names, contains('dio'));
+        final packages = (_matrixOf(result)['package'] as Map<String, Object?>?) ?? const {};
+        expect(packages, contains('dio'));
       },
     );
 
@@ -410,30 +410,30 @@ void main() {
 
     test('failed package appears in the errors map', () async {
       final result = await buildHandler().call(_request(['http', 'unknown']));
-      final errors = _payload(result)['errors']! as Map<String, Object?>;
+      final errors = (_payload(result)['errors'] as Map<String, Object?>?) ?? const {};
 
       expect(errors, contains('unknown'));
     });
 
     test('errors map contains the domain error code for the failed package', () async {
       final result = await buildHandler().call(_request(['http', 'unknown']));
-      final errors = _payload(result)['errors']! as Map<String, Object?>;
+      final errors = (_payload(result)['errors'] as Map<String, Object?>?) ?? const {};
 
       expect(errors['unknown'], equals(DomainErrors.packageNotFound));
     });
 
     test('successful package is present in the matrix', () async {
       final result = await buildHandler().call(_request(['http', 'unknown']));
-      final names = _matrixOf(result)['name']! as Map<String, Object?>;
+      final packages = (_matrixOf(result)['package'] as Map<String, Object?>?) ?? const {};
 
-      expect(names, contains('http'));
+      expect(packages, contains('http'));
     });
 
     test('failed package is absent from the matrix', () async {
       final result = await buildHandler().call(_request(['http', 'unknown']));
-      final names = _matrixOf(result)['name']! as Map<String, Object?>;
+      final packages = (_matrixOf(result)['package'] as Map<String, Object?>?) ?? const {};
 
-      expect(names, isNot(contains('unknown')));
+      expect(packages, isNot(contains('unknown')));
     });
 
     test('structuredContent conforms to the declared outputSchema', () async {
@@ -550,8 +550,8 @@ void main() {
         // The matrix is keyed by field; each field's inner map is folded in
         // request order, so package columns stay in input order regardless of
         // which package's fetch completed first.
-        final nameColumn = _matrixOf(result)['name']! as Map<String, Object?>;
-        expect(nameColumn.keys.toList(), equals(['aaa', 'zzz']));
+        final packageColumn = (_matrixOf(result)['package'] as Map<String, Object?>?) ?? const {};
+        expect(packageColumn.keys.toList(), equals(['aaa', 'zzz']));
       },
       timeout: const Timeout(Duration(seconds: 10)),
     );

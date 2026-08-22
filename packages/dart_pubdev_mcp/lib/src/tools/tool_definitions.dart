@@ -92,10 +92,10 @@ final searchPackagesTool = Tool(
       'sort': UntitledSingleSelectEnumSchema(
         description:
             'Sort order (default relevance). '
-            'Use updated to find recently maintained packages; use likes or pub_points to find '
+            'Use updated to find recently maintained packages; use likes or pubPoints to find '
             'well-established ones, but only with a loose or absent query — non-relevance sorts '
             'rank globally, so a narrow query can return top-ranked but unrelated packages.',
-        values: ['relevance', 'likes', 'pub_points', 'updated'],
+        values: ['relevance', 'likes', 'pubPoints', 'updated'],
         defaultValue: 'relevance',
       ),
       'platform': UntitledSingleSelectEnumSchema(
@@ -131,7 +131,7 @@ final getPackageTool = Tool(
   outputSchema: ObjectSchema(
     required: [
       'resolvedVersion',
-      'name',
+      'package',
       'version',
       'description',
       'verified',
@@ -149,7 +149,7 @@ final getPackageTool = Tool(
     ],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
-      'name': _kPackageNameSchema,
+      'package': _kPackageNameSchema,
       'version': Schema.string(
         description: 'The package version described — equals resolvedVersion.',
       ),
@@ -258,6 +258,11 @@ final getChangelogTool = Tool(
             'Maximum number of entries to return (default 5). '
             'Increase when fromVersion is many releases behind.',
       ),
+      'version': Schema.string(
+        description:
+            'A specific target or anchor version string (e.g. "1.2.0"). '
+            'Omit to anchor to the latest published version.',
+      ),
       'fromVersion': Schema.string(
         description:
             'Return only entries newer than this version (e.g. "1.2.0"). '
@@ -273,13 +278,19 @@ final getChangelogTool = Tool(
       'entries': Schema.list(
         description: 'Changelog entries, newest first, bounded by fromVersion and limit.',
         items: Schema.object(
-          required: ['version', 'changes', 'breaking'],
+          required: ['version', 'changes', 'rawText', 'breaking'],
           properties: {
             'version': Schema.string(description: 'The version this entry documents.'),
             'date': Schema.string(
               description: 'ISO 8601 date parsed from the changelog heading. Omitted when absent.',
             ),
-            'changes': Schema.string(description: 'The raw changelog text for this version.'),
+            'changes': Schema.list(
+              description: 'Parsed list of change bullet/item strings.',
+              items: Schema.string(),
+            ),
+            'rawText': Schema.string(
+              description: 'The raw unparsed changelog section text for this version.',
+            ),
             'breaking': Schema.bool(
               description: 'Whether this entry was detected as containing a breaking change.',
             ),
@@ -312,9 +323,10 @@ final getSecurityAdvisoriesTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'affecting', 'other'],
+    required: ['resolvedVersion', 'package', 'affecting', 'other'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
+      'package': _kPackageNameSchema,
       'affecting': Schema.list(
         description: 'Advisories whose OSV affected ranges include the Resolved Version.',
         items: _kSecurityAdvisorySchema,
@@ -419,27 +431,43 @@ final browseApiSymbolsTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'symbols'],
+    required: ['resolvedVersion', 'package', 'symbols'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
+      'package': _kPackageNameSchema,
       'symbols': Schema.list(
         description: 'Matching symbols, name matches ranked before description-only matches.',
         items: Schema.object(
-          required: ['name', 'qualifiedName', 'href', 'type'],
+          required: [
+            'name',
+            'qualifiedName',
+            'kind',
+            'library',
+            'enclosedBy',
+            'description',
+            'href',
+          ],
           properties: {
             'name': Schema.string(description: "The symbol's short (unqualified) name."),
             'qualifiedName': Schema.string(
               description: 'The fully-qualified name, suitable for get_symbol_documentation.',
             ),
+            'kind': Schema.string(
+              description: 'The dartdoc symbol kind, e.g. "class", "method", "enum".',
+            ),
+            'library': Schema.string(
+              description: 'The package: URI of the library this symbol belongs to.',
+            ),
+            'enclosedBy': _nullableString(
+              'The enclosing container name (e.g. a class name) for methods, constructors, and '
+              'accessors; null for top-level symbols.',
+            ),
+            'description': Schema.string(
+              description: "The symbol's dartdoc description, possibly empty.",
+            ),
             'href': Schema.string(
               description:
                   'The dartdoc-relative link for this symbol, not a fetchable source file path.',
-            ),
-            'type': Schema.string(
-              description: 'The dartdoc symbol kind, e.g. "class", "method", "enum".',
-            ),
-            'desc': Schema.string(
-              description: 'A short description excerpt. Omitted when dartdoc has none.',
             ),
           },
         ),
@@ -475,9 +503,10 @@ final findSymbolsTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'symbols'],
+    required: ['resolvedVersion', 'package', 'symbols'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
+      'package': _kPackageNameSchema,
       'hasMore': Schema.bool(
         description:
             'Present and true only when more than 20 matches exist beyond the returned list.',
@@ -554,9 +583,13 @@ final getSymbolDocumentationTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'documentation'],
+    required: ['resolvedVersion', 'package', 'symbol', 'documentation'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
+      'package': _kPackageNameSchema,
+      'symbol': Schema.string(
+        description: 'The resolved symbol name.',
+      ),
       'documentation': Schema.string(
         description:
             'The rendered dartdoc page as text: signature and doc comment always, plus an '
@@ -600,7 +633,7 @@ final getSourceSliceTool = Tool(
       'lineEnd': Schema.int(
         description: 'Line-range mode: 1-based inclusive last line.',
       ),
-      'symbolName': Schema.string(
+      'symbol': Schema.string(
         description:
             'Symbol-bounded mode: the declaration to extract. '
             'A bare name (e.g. "Client") matches a top-level declaration; '
@@ -622,7 +655,7 @@ final getSourceSliceTool = Tool(
       'file',
       'mode',
       'lineStart',
-      'effectiveLineEnd',
+      'lineEnd',
       'truncated',
       'content',
     ],
@@ -634,11 +667,11 @@ final getSourceSliceTool = Tool(
         description: 'Which mode produced this response.',
         values: ['line-range', 'symbol'],
       ),
-      'symbolName': Schema.string(
+      'symbol': Schema.string(
         description: 'The resolved symbol name. Present only in symbol-bounded mode.',
       ),
       'lineStart': Schema.int(description: '1-based inclusive first line of the returned region.'),
-      'effectiveLineEnd': Schema.int(
+      'lineEnd': Schema.int(
         description:
             "The true last line of the region — the symbol's real end line even when "
             'truncated — so callers can drill in with a follow-up line-range request.',
@@ -700,7 +733,7 @@ final getSdkSourceSliceTool = Tool(
       'lineEnd': Schema.int(
         description: 'Line-range mode: 1-based inclusive last line.',
       ),
-      'symbolName': Schema.string(
+      'symbol': Schema.string(
         description:
             'Symbol-bounded mode: the declaration to extract. '
             'A bare name (e.g. "State") matches a top-level declaration; '
@@ -722,7 +755,7 @@ final getSdkSourceSliceTool = Tool(
       'file',
       'mode',
       'lineStart',
-      'effectiveLineEnd',
+      'lineEnd',
       'truncated',
       'content',
     ],
@@ -750,11 +783,11 @@ final getSdkSourceSliceTool = Tool(
         description: 'Which mode produced this response.',
         values: ['line-range', 'symbol'],
       ),
-      'symbolName': Schema.string(
+      'symbol': Schema.string(
         description: 'The resolved symbol name. Present only in symbol-bounded mode.',
       ),
       'lineStart': Schema.int(description: '1-based inclusive first line of the returned region.'),
-      'effectiveLineEnd': Schema.int(
+      'lineEnd': Schema.int(
         description:
             "The true last line of the region — the symbol's real end line even when "
             'truncated — so callers can drill in with a follow-up line-range request.',
@@ -800,6 +833,18 @@ final listSdkSourceFilesTool = Tool(
             'A Dart or Flutter tag or commit SHA (e.g. "3.12.2"), matching sdk. '
             "Omit to auto-detect: the running server's Dart SDK version, or the local "
             "Flutter install's framework version.",
+      ),
+      'directory': Schema.string(
+        description:
+            'Path prefix filter (e.g. "lib/core/"), or a full file path '
+            '(e.g. "lib/core/list.dart") to scope to that one file. '
+            'Set this to avoid scanning the full tree. '
+            'Trailing slash is added automatically if absent from a prefix.',
+      ),
+      'fileExtension': Schema.string(
+        description:
+            'Extension filter (e.g. ".dart"). '
+            'AND-combined with directory when both are supplied.',
       ),
     },
   ),
@@ -863,10 +908,10 @@ final listPackageSourceFilesTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'name', 'files'],
+    required: ['resolvedVersion', 'package', 'files'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
-      'name': _kPackageNameSchema,
+      'package': _kPackageNameSchema,
       'files': Schema.list(
         description: 'Matching file paths within the package tarball, sorted alphabetically.',
         items: Schema.string(),
@@ -979,20 +1024,10 @@ final getThrowStatementsTool = Tool(
       'package': Schema.string(
         description: 'The pub.dev package name. Verify with get_package if uncertain.',
       ),
-      'class': Schema.string(
+      'symbol': Schema.string(
         description:
-            'The class, mixin, enum, or extension name to scan. '
-            'Omit to scan a top-level function instead. '
-            'Provide without `method` to scan all throws in the entire class.',
-      ),
-      'method': Schema.string(
-        description:
-            'The method or top-level function name to scan. '
-            'When combined with `class`, scans that specific method only. '
-            'For operators, pass either "==" or "operator ==". '
-            'For the default (unnamed) constructor, pass "new". '
-            'For named constructors, pass only the constructor suffix (e.g. "fromJson"). '
-            'When `class` is omitted, treats this as a top-level function name. '
+            'The target class (e.g. "Client"), class member (e.g. "Client.send"), or '
+            'top-level function (e.g. "jsonDecode") to scan. '
             'On AMBIGUOUS_SYMBOL, pass the full qualifiedName from error.details.candidates.',
       ),
       'version': Schema.string(
@@ -1003,27 +1038,21 @@ final getThrowStatementsTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'throws'],
+    required: ['resolvedVersion', 'package', 'throws'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
+      'package': _kPackageNameSchema,
       'throws': Schema.list(
         description: 'Every throw or rethrow expression found, in source order.',
         items: Schema.object(
-          required: ['file', 'thrown_type', 'context'],
+          required: ['file', 'symbol', 'thrownType', 'context'],
           properties: {
             'file': Schema.string(description: 'The source file the throw was found in.'),
-            'class': Schema.string(
+            'symbol': Schema.string(
               description:
-                  'The enclosing class, mixin, enum, or extension name. Omitted for top-level functions.',
+                  'The enclosing declaration (e.g. "Client.send" or "jsonDecode").',
             ),
-            'method': Schema.string(
-              description:
-                  'The enclosing method name. Omitted for top-level functions or class-wide scans.',
-            ),
-            'function': Schema.string(
-              description: 'The enclosing top-level function name. Omitted for class members.',
-            ),
-            'thrown_type': Schema.string(
+            'thrownType': Schema.string(
               description:
                   'The static type of the thrown expression, or "rethrow" for a bare rethrow statement.',
             ),
@@ -1064,20 +1093,10 @@ final getSdkThrowStatementsTool = Tool(
             '"flutter_test", "flutter_driver") — scopes the scan to the '
             'packages/<package>/lib/ directory. Required for sdk: "flutter"; omit for Dart.',
       ),
-      'class': Schema.string(
+      'symbol': Schema.string(
         description:
-            'The class, mixin, enum, or extension name to scan. '
-            'Omit to scan a top-level function instead. '
-            'Provide without `method` to scan all throws in the entire class.',
-      ),
-      'method': Schema.string(
-        description:
-            'The method or top-level function name to scan. '
-            'When combined with `class`, scans that specific method only. '
-            'For operators, pass either "==" or "operator ==". '
-            'For the default (unnamed) constructor, pass "new". '
-            'For named constructors, pass only the constructor suffix (e.g. "fromJson"). '
-            'When `class` is omitted, treats this as a top-level function name. '
+            'The target class (e.g. "List"), class member (e.g. "List.add"), or '
+            'top-level function (e.g. "identical") to scan. '
             'On AMBIGUOUS_SYMBOL, inspect error.details.candidates (file paths) and retry with '
             'a narrower scope, e.g. via get_sdk_source_slice.',
       ),
@@ -1110,21 +1129,14 @@ final getSdkThrowStatementsTool = Tool(
       'throws': Schema.list(
         description: 'Every throw or rethrow expression found, in source order.',
         items: Schema.object(
-          required: ['file', 'thrown_type', 'context'],
+          required: ['file', 'symbol', 'thrownType', 'context'],
           properties: {
             'file': Schema.string(description: 'The source file the throw was found in.'),
-            'class': Schema.string(
+            'symbol': Schema.string(
               description:
-                  'The enclosing class, mixin, enum, or extension name. Omitted for top-level functions.',
+                  'The enclosing declaration (e.g. "List.add" or "identical").',
             ),
-            'method': Schema.string(
-              description:
-                  'The enclosing method name. Omitted for top-level functions or class-wide scans.',
-            ),
-            'function': Schema.string(
-              description: 'The enclosing top-level function name. Omitted for class members.',
-            ),
-            'thrown_type': Schema.string(
+            'thrownType': Schema.string(
               description:
                   'The static type of the thrown expression, or "rethrow" for a bare rethrow statement.',
             ),

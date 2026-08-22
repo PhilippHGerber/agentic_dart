@@ -162,6 +162,7 @@ final class FindSymbolsHandler {
     final hasMore = ranked.length > _kMaxResults;
 
     return ToolResponse.ok({
+      'package': package,
       if (hasMore) 'hasMore': true,
       'symbols': [
         for (final s in ranked.take(_kMaxResults)) _symbolToJson(s, package),

@@ -7,12 +7,12 @@
 /// exact requested 1-based inclusive line range with no truncation. When both
 /// bounds are omitted the full file is returned verbatim.
 ///
-/// **Symbol-bounded mode** (`file`, `symbolName`, optional `maxLines`): parses
+/// **Symbol-bounded mode** (`file`, `symbol`, optional `maxLines`): parses
 /// the file with the Dart analyzer, locates the named declaration's AST node,
 /// and returns its source. When `maxLines` is supplied and the node spans more
 /// lines than that, the response is truncated to the signature, opening
 /// brace, a `// ... N lines omitted ...` comment, and the closing brace.
-/// `symbolName` resolution follows the same rules as `get_source_slice`'s
+/// `symbol` resolution follows the same rules as `get_source_slice`'s
 /// symbol-bounded mode — see `symbol_bounded_slice.dart`.
 ///
 /// ## Path contract
@@ -40,7 +40,7 @@
 ///   "file": "list.dart",
 ///   "mode": "line-range",
 ///   "lineStart": 1,
-///   "effectiveLineEnd": 40,
+///   "lineEnd": 40,
 ///   "truncated": false,
 ///   "content": "..."
 /// }
@@ -112,15 +112,15 @@ final class GetSdkSourceSliceHandler {
     final args = request.arguments ?? const {};
     final sdk = (args['sdk'] as String?) ?? '';
     final suppliedVersion = args['version'] as String?;
-    final rawSymbol = args['symbolName'] as String?;
-    final symbolName = (rawSymbol == null || rawSymbol.isEmpty) ? null : rawSymbol;
+    final rawSymbol = (args['symbol'] as String?) ?? (args['symbolName'] as String?);
+    final symbol = (rawSymbol == null || rawSymbol.isEmpty) ? null : rawSymbol;
     final lineStart = asInt(args['lineStart']);
     final lineEnd = asInt(args['lineEnd']);
     final maxLines = asInt(args['maxLines']);
 
     return switch (sdk) {
-      'dart' => _handleDart(args, suppliedVersion, symbolName, maxLines, lineStart, lineEnd),
-      'flutter' => _handleFlutter(args, suppliedVersion, symbolName, maxLines, lineStart, lineEnd),
+      'dart' => _handleDart(args, suppliedVersion, symbol, maxLines, lineStart, lineEnd),
+      'flutter' => _handleFlutter(args, suppliedVersion, symbol, maxLines, lineStart, lineEnd),
       _ => ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
@@ -134,7 +134,7 @@ final class GetSdkSourceSliceHandler {
   Future<CallToolResult> _handleDart(
     Map<String, Object?> args,
     String? suppliedVersion,
-    String? symbolName,
+    String? symbol,
     int? maxLines,
     int? lineStart,
     int? lineEnd,
@@ -173,10 +173,10 @@ final class GetSdkSourceSliceHandler {
     _log(
       LoggingLevel.info,
       'get_sdk_source_slice: sdk=dart library=$library file=$file ref=$ref '
-      '${symbolName != null ? 'symbol=$symbolName' : 'lines=$lineStart..$lineEnd'}',
+      '${symbol != null ? 'symbol=$symbol' : 'lines=$lineStart..$lineEnd'}',
     );
 
-    if (symbolName != null) {
+    if (symbol != null) {
       switch (await _astAccess.unit('dart_sdk', ref, lookupPath)) {
         case PubDevFailure(:final error):
           return ToolResponse.error(error);
@@ -187,7 +187,7 @@ final class GetSdkSourceSliceHandler {
             library: library,
             file: file,
             ast: value,
-            symbolName: symbolName,
+            symbol: symbol,
             maxLines: maxLines,
           );
       }
@@ -212,7 +212,7 @@ final class GetSdkSourceSliceHandler {
   Future<CallToolResult> _handleFlutter(
     Map<String, Object?> args,
     String? suppliedVersion,
-    String? symbolName,
+    String? symbol,
     int? maxLines,
     int? lineStart,
     int? lineEnd,
@@ -273,10 +273,10 @@ final class GetSdkSourceSliceHandler {
     _log(
       LoggingLevel.info,
       'get_sdk_source_slice: sdk=flutter package=$package file=$file ref=$ref '
-      '${symbolName != null ? 'symbol=$symbolName' : 'lines=$lineStart..$lineEnd'}',
+      '${symbol != null ? 'symbol=$symbol' : 'lines=$lineStart..$lineEnd'}',
     );
 
-    if (symbolName != null) {
+    if (symbol != null) {
       switch (await _astAccess.unit('flutter_sdk', ref, lookupPath)) {
         case PubDevFailure(:final error):
           return ToolResponse.error(error);
@@ -287,7 +287,7 @@ final class GetSdkSourceSliceHandler {
             package: package,
             file: file,
             ast: value,
-            symbolName: symbolName,
+            symbol: symbol,
             maxLines: maxLines,
           );
       }
@@ -327,7 +327,7 @@ final class GetSdkSourceSliceHandler {
       'file': file,
       'mode': 'line-range',
       'lineStart': slice.lineStart,
-      'effectiveLineEnd': slice.effectiveLineEnd,
+      'lineEnd': slice.effectiveLineEnd,
       'truncated': false,
       'content': slice.content,
     }, resolvedVersion: resolvedVersion);
@@ -338,17 +338,17 @@ final class GetSdkSourceSliceHandler {
     required String sdk,
     required String file,
     required ParseStringResult ast,
-    required String symbolName,
+    required String symbol,
     String? library,
     String? package,
     int? maxLines,
   }) {
-    final slice = sliceSymbol(_astAccess, ast, symbolName, maxLines: maxLines);
+    final slice = sliceSymbol(_astAccess, ast, symbol, maxLines: maxLines);
     if (slice == null) {
       return ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
-          message: 'Symbol "$symbolName" was not found in $file.',
+          message: 'Symbol "$symbol" was not found in $file.',
           suggestion:
               'Verify the symbol name is spelled correctly, or use grep_sdk_source to find it '
               'by name/content. '
@@ -364,9 +364,9 @@ final class GetSdkSourceSliceHandler {
       'package': ?package,
       'file': file,
       'mode': 'symbol',
-      'symbolName': symbolName,
+      'symbol': symbol,
       'lineStart': slice.lineStart,
-      'effectiveLineEnd': slice.effectiveLineEnd,
+      'lineEnd': slice.effectiveLineEnd,
       'truncated': slice.truncated,
       'content': slice.content,
     }, resolvedVersion: resolvedVersion);
