@@ -30,7 +30,8 @@
 ///   "library": "core",
 ///   "throws": [
 ///     {
-///       "file": "lib/core/list.dart",
+///       "path": "lib/core/list.dart",
+///       "line": 42,
 ///       "symbol": "List.add",
 ///       "thrownType": "RangeError",
 ///       "context": "if (full) {\n  throw RangeError(\"full\");\n}"
@@ -531,7 +532,7 @@ final class GetSdkThrowStatementsHandler {
           suggestion:
               'Multiple files declare a top-level function named "$method". '
               'Inspect error.details.candidates and use get_sdk_source_slice with an '
-              'explicit file to read one directly.',
+              'explicit path to read one directly.',
           details: {'candidates': matches.map((m) => m.filePath).toList()},
         ),
       );

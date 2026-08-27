@@ -37,7 +37,7 @@
 ///   "pattern": "isEmpty",
 ///   "matches": [
 ///     {
-///       "file": "lib/src/client.dart",
+///       "path": "lib/src/client.dart",
 ///       "line": 42,
 ///       "matchedLine": "    if (uri.path.isEmpty) {",
 ///       "contextBefore": [],
@@ -279,7 +279,7 @@ final class GrepPackageSourceHandler {
           : i + 1 + contextLines;
 
       into.add({
-        'file': path,
+        'path': path,
         'line': i + 1,
         'matchedLine': line,
         'contextBefore': lines.sublist(beforeStart, i),

@@ -3,6 +3,22 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0]
+
+### Changed
+
+- **Breaking:** Standardized file path parameters and response properties from `file`/`files` to `path`/`paths` across all source slice, grep, list, and throw tools.
+- **Breaking:** `search_packages` response wrapped into a `{ "packages": [...] }` object.
+- Declared formal `outputSchema` contracts across all 19 tools.
+- Standardized parameter descriptions with concrete inline examples across all 19 tool definitions.
+- Enhanced server-level schema validation error handling to generate self-healing `INVALID_ARGUMENT` suggestions and detailed schema diffs under `error.details`.
+
+### Added
+
+- `get_throw_statements`, `get_sdk_throw_statements`: added 1-based `line` number to throw items.
+- `get_changelog`, `get_sdk_release_notes`: added `package` / `sdk` echo properties to responses.
+- Argument validation schema diffs in `error.details` (`receivedKeys`, `missingRequired`, `expectedRequired`, `expectedOptional`, `unknownKeys`) for self-healing error recovery.
+
 ## [0.9.0]
 
 ### Changed

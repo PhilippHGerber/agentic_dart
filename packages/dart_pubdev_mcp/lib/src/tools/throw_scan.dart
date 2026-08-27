@@ -53,7 +53,8 @@ void collectThrowsForSymbol(
     final contextNode = _contextNodeFor(throwLike);
     final thrownType = throwLike is ThrowExpression ? _thrownType(throwLike.expression) : 'rethrow';
     results.add({
-      'file': filePath,
+      'path': filePath,
+      'line': lineInfo.getLocation(throwLike.offset).lineNumber,
       'symbol': symbol,
       'thrownType': thrownType,
       'context': _contextSnippet(contextNode, throwLike, source, lineInfo),

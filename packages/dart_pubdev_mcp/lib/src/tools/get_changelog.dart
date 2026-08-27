@@ -128,6 +128,7 @@ final class GetChangelogHandler {
     if (entries.isEmpty) return ToolResponse.error(_noDocumentation);
     return _applyFilters(
       entries: entries,
+      package: package,
       versionLimit: versionLimit,
       suppliedVersion: suppliedVersion,
       fromVersion: fromVersion,
@@ -139,6 +140,7 @@ final class GetChangelogHandler {
 
   static CallToolResult _applyFilters({
     required List<ChangelogEntry> entries,
+    required String package,
     required int versionLimit,
     required String? suppliedVersion,
     required String? fromVersion,
@@ -160,11 +162,13 @@ final class GetChangelogHandler {
     if (fromVersion == null) {
       return _success(
         entries.sublist(targetIndex).take(versionLimit).toList(),
+        package,
         resolvedVersion,
       );
     }
     return _applyFromVersion(
       entries: entries,
+      package: package,
       targetIndex: targetIndex,
       versionLimit: versionLimit,
       fromVersion: fromVersion,
@@ -179,6 +183,7 @@ final class GetChangelogHandler {
   /// [_invalidInput] when no entry older than [fromVersion] exists.
   static CallToolResult _applyFromVersion({
     required List<ChangelogEntry> entries,
+    required String package,
     required int targetIndex,
     required int versionLimit,
     required String fromVersion,
@@ -206,6 +211,7 @@ final class GetChangelogHandler {
 
     return _success(
       entries.sublist(targetIndex, boundaryIdx).take(versionLimit).toList(),
+      package,
       resolvedVersion,
     );
   }
@@ -251,9 +257,16 @@ final class GetChangelogHandler {
 
   // ── Serialisation ──────────────────────────────────────────────────────────
 
-  static CallToolResult _success(List<ChangelogEntry> entries, String resolvedVersion) =>
+  static CallToolResult _success(
+    List<ChangelogEntry> entries,
+    String package,
+    String resolvedVersion,
+  ) =>
       ToolResponse.ok(
-        {'entries': entries.map(_entryToJson).toList()},
+        {
+          'package': package,
+          'entries': entries.map(_entryToJson).toList(),
+        },
         resolvedVersion: resolvedVersion,
       );
 

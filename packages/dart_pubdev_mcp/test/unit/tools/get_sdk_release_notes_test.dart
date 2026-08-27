@@ -100,6 +100,10 @@ String? _resolvedVersion(CallToolResult result) {
   return _payload(result)['resolvedVersion'] as String?;
 }
 
+String? _sdk(CallToolResult result) {
+  return _payload(result)['sdk'] as String?;
+}
+
 Map<String, Object?> _errorPayload(CallToolResult result) {
   final outer = _payload(result);
   final inner = outer['error'];
@@ -199,6 +203,28 @@ void main() {
       expect(result.isError, isTrue);
       final error = _errorPayload(result);
       expect(error['code'], equals(DomainErrors.invalidArgument));
+    });
+  });
+
+  group('sdk echo', () {
+    test('is present and echoes the requested sdk', () async {
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: 'dart-lang/sdk/main/CHANGELOG.md',
+        response: ok(_dartChangelogMarkdown),
+      );
+
+      final dartResult = await buildHandler().call(_request({'sdk': 'dart'}));
+      expect(_sdk(dartResult), equals('dart'));
+
+      stubUrl(
+        mock: mockHttp,
+        urlFragment: 'flutter/flutter/master/CHANGELOG.md',
+        response: ok(_flutterChangelogMarkdown),
+      );
+
+      final flutterResult = await buildHandler().call(_request({'sdk': 'flutter'}));
+      expect(_sdk(flutterResult), equals('flutter'));
     });
   });
 

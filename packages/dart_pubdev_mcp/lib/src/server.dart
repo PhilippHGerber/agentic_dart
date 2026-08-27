@@ -350,7 +350,7 @@ base class PubMcpServer extends MCPServer
   ///   - No notice is pending.
   ///   - [result] is a Tool Error (`isError: true`).
   ///   - [result]'s body is not a single JSON object — covers
-  ///     `search_packages`'s bare JSON array, which defers to the next
+  ///     non-object payloads (if any), which defer to the next
   ///     eligible call rather than dropping the notice.
   ///
   /// The notice is added to the text block only, never to
@@ -388,7 +388,8 @@ base class PubMcpServer extends MCPServer
   ///
   /// A schema violation short-circuits to an ADR-0002 `INVALID_ARGUMENT` Tool
   /// Error built via [ToolResponse.error], joining every [ValidationError]
-  /// into the error message. A valid call reaches [impl] unchanged.
+  /// into the error message, providing a rich schema diff in [DomainError.details]
+  /// and an actionable suggestion. A valid call reaches [impl] unchanged.
   static FutureOr<CallToolResult> Function(CallToolRequest) _validated(
     Tool tool,
     FutureOr<CallToolResult> Function(CallToolRequest) impl,
@@ -396,11 +397,49 @@ base class PubMcpServer extends MCPServer
     return (request) {
       final errors = tool.inputSchema.validate(request.arguments ?? const <String, Object?>{});
       if (errors.isEmpty) return impl(request);
+
+      final receivedKeys = (request.arguments?.keys.toList() ?? <String>[])..sort();
+      final expectedRequired = (tool.inputSchema.required?.toList() ?? <String>[])..sort();
+      final allProperties = (tool.inputSchema.properties?.keys.toList() ?? <String>[])..sort();
+      final expectedOptional =
+          allProperties.where((k) => !expectedRequired.contains(k)).toList()..sort();
+      final missingRequired =
+          expectedRequired.where((k) => !receivedKeys.contains(k)).toList()..sort();
+      final unknownKeys =
+          receivedKeys.where((k) => !allProperties.contains(k)).toList()..sort();
+
+      final String suggestion;
+      if (missingRequired.isNotEmpty && unknownKeys.isNotEmpty) {
+        suggestion =
+            "Tool '${tool.name}' requires parameter(s): [${missingRequired.join(', ')}]. "
+            "Received unrecognized key(s): [${unknownKeys.join(', ')}]. "
+            "Expected properties: [${allProperties.join(', ')}].";
+      } else if (missingRequired.isNotEmpty && unknownKeys.isEmpty) {
+        suggestion =
+            "Tool '${tool.name}' requires parameter(s): [${missingRequired.join(', ')}]. "
+            "Expected properties: [${allProperties.join(', ')}].";
+      } else if (unknownKeys.isNotEmpty && missingRequired.isEmpty) {
+        suggestion =
+            "Tool '${tool.name}' received unrecognized key(s): [${unknownKeys.join(', ')}]. "
+            "Expected properties: [${allProperties.join(', ')}].";
+      } else {
+        suggestion = "Check the arguments against the '${tool.name}' tool's input schema.";
+      }
+
+      final details = <String, Object?>{
+        'receivedKeys': receivedKeys,
+        'missingRequired': missingRequired,
+        'expectedRequired': expectedRequired,
+        'expectedOptional': expectedOptional,
+        if (unknownKeys.isNotEmpty) 'unknownKeys': unknownKeys,
+      };
+
       return ToolResponse.error(
         DomainError(
           code: DomainErrors.invalidArgument,
           message: errors.map((e) => e.toErrorString()).join('; '),
-          suggestion: "Check the arguments against the '${tool.name}' tool's input schema.",
+          suggestion: suggestion,
+          details: details,
         ),
       );
     };

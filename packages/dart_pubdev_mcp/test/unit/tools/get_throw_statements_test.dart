@@ -333,14 +333,15 @@ void main() {
       expect(records, isNotEmpty);
     });
 
-    test('all records contain file, symbol, thrownType, and context', () async {
+    test('all records contain path, line, symbol, thrownType, and context', () async {
       final result = await buildHandler().call(
         _request({'package': 'foo', 'symbol': 'UserService', 'version': '1.0.0'}),
       );
 
       final records = _records(result);
       for (final record in records) {
-        expect(record, contains('file'));
+        expect(record, contains('path'));
+        expect(record, contains('line'));
         expect(record, contains('symbol'));
         expect(record, contains('thrownType'));
         expect(record, contains('context'));
@@ -910,7 +911,7 @@ void main() {
       stubTarball(mockHttp, {'lib/service.dart': _serviceSource});
     });
 
-    test('file field contains the relative source path', () async {
+    test('path field contains the relative source path', () async {
       final result = await buildHandler().call(
         _request({
           'package': 'foo',
@@ -921,8 +922,23 @@ void main() {
 
       final records = _records(result);
       for (final record in records) {
-        expect(record['file'], equals('lib/service.dart'));
+        expect(record['path'], equals('lib/service.dart'));
       }
+    });
+
+    test('line field contains the 1-based line number of the throw statement', () async {
+      final result = await buildHandler().call(
+        _request({
+          'package': 'foo',
+          'symbol': 'UserService.getUser',
+          'version': '1.0.0',
+        }),
+      );
+
+      final records = _records(result);
+      expect(records, hasLength(2));
+      expect(records[0]['line'], equals(10));
+      expect(records[1]['line'], equals(13));
     });
 
     test('package field contains the package name', () async {
@@ -1136,7 +1152,7 @@ void main() {
           arguments: {
             'package': 'foo',
             'version': '1.0.0',
-            'file': 'lib/service.dart',
+            'path': 'lib/service.dart',
             'symbol': 'UserService',
           },
         ),

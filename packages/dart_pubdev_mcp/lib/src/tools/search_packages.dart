@@ -1,8 +1,8 @@
 /// Handler for the `search_packages` MCP tool.
 ///
 /// Searches pub.dev by keyword with optional SDK, platform, and sort filters.
-/// Returns a `List<PackageSummary>` with computed [PackageSummary.activeMaintenance]
-/// and [PackageSummary.daysSinceUpdate] fields.
+/// Returns a JSON object with `'packages'` containing a `List<PackageSummary>` with
+/// computed [PackageSummary.activeMaintenance] and [PackageSummary.daysSinceUpdate] fields.
 ///
 /// Results are resolved through the shared `searchResults` [KeyedCache] facade
 /// (from `CacheRegistry`), keyed by the full query tuple ([SearchResultsId]) —
@@ -69,7 +69,7 @@ final class SearchPackagesHandler {
     ));
 
     return switch (result) {
-      PubDevSuccess(:final value) => ToolResponse.ok(_summariesToJson(value)),
+      PubDevSuccess(:final value) => ToolResponse.ok({'packages': _summariesToJson(value)}),
       PubDevFailure(:final error) => ToolResponse.error(error),
     };
   }

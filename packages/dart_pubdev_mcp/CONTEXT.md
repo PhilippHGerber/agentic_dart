@@ -26,7 +26,7 @@ _Avoid_: API element, declaration
 **Latest Stable Version**: Newest published version with no pre-release suffix (`-alpha`/`-beta`/`-rc`/`-dev`). Default fallback when `version` is omitted.
 _Avoid_: latest version (ambiguous re pre-releases)
 
-**Resolved Version**: The exact semver string a tool call actually used, returned as top-level `resolvedVersion`. Absent on `search_packages` and `compare_packages` (per-package `version` instead).
+**Resolved Version**: The exact semver string a tool call actually used, returned as top-level `resolvedVersion`. Absent on `search_packages`, `compare_packages` (per-package `version` instead), and `get_api_diff` (`fromVersion`/`toVersion` instead).
 
 **Update Check**: Rate-limited (~24h) background lookup of this server's own Latest Stable Version, once per startup. Disableable via `--no-update-check` / `dart_pubdev_mcp_UPDATE_CHECK`. Failures are silent.
 
@@ -40,7 +40,11 @@ _Avoid_: latest version (ambiguous re pre-releases)
 
 **Version Listing**: `list_package_versions` output — `stable`/`prerelease`/`retracted` lists, newest-first, each with version + `publishedAt`.
 
+**Package Search Result**: `search_packages` output — `{ packages: [ PackageSummary, ... ] }` containing matching packages sorted by relevance or specified metric.
+
 ### Symbols and source
+
+**Source Path**: Canonical relative path to a source file within a package or SDK distribution, always named `path` (single) or `paths` (list). Prohibits `file`/`files` parameter and return property names. Rejects absolute paths and `..` segments.
 
 **Symbol Identity**: Fully-qualified name + library URI + package version, e.g. `CueTimelineController`, `package:cue/cue.dart`, `1.2.0`. Returned by `find_symbols`; consumed by `get_symbol_documentation`/`get_source_slice`.
 
@@ -48,9 +52,11 @@ _Avoid_: latest version (ambiguous re pre-releases)
 
 **Symbol Search Result**: One `find_symbols` entry — `{ name, qualifiedName, kind, library, enclosedBy, description, href }`.
 
-**Source Slice**: A `get_source_slice` extract — line-range mode (`lineStart`/`lineEnd`, exact) or symbol-bounded mode (AST-located, optional `maxLines` truncation with `truncated`/`effectiveLineEnd`).
+**Source Slice**: A `get_source_slice` or `get_sdk_source_slice` extract — line-range mode (`lineStart`/`lineEnd`, exact) or symbol-bounded mode (AST-located, optional `maxLines` truncation with `truncated`/`effectiveLineEnd`).
 
-**Grep Match**: One `grep_package_source` match — `{ file, line, matchedLine, contextBefore, contextAfter }`. Literal substring by default, `RegExp` when `regex: true`; case-sensitive unless `caseInsensitive: true`.
+**Grep Match**: One `grep_package_source` or `grep_sdk_source` match — `{ path, line, matchedLine, contextBefore, contextAfter }`. Literal substring by default, `RegExp` when `regex: true`; case-sensitive unless `caseInsensitive: true`.
+
+**Throw Statement**: One `get_throw_statements` or `get_sdk_throw_statements` entry — `{ path, line, symbol, thrownType, context }` identifying a `throw` or `rethrow` expression, its enclosing declaration, 1-based line number, static thrown type, and surrounding code context.
 
 **API Diff**: `get_api_diff` output — added/removed libraries, classes, fields, methods between two versions (presence-based, not structural). `DOCUMENTATION_NOT_FOUND` if dartdoc is missing for either version. Opt-in `includeSignatureChanges` + `symbol` adds a Signature Change for one declaration.
 
@@ -72,6 +78,10 @@ _Avoid_: release doc, changelog document
 **Tool Error**: A failed `CallToolResult` (`isError: true`) with body `{ error: { code, message, retryable, suggestion?, suggestedNextStep?, details? } }`. See ADR 0002.
 
 **Error Code**: `SCREAMING_SNAKE_CASE` failure category. Defined: `AMBIGUOUS_SYMBOL`, `SYMBOL_NOT_FOUND`, `PACKAGE_NOT_FOUND`, `DOCUMENTATION_NOT_FOUND`, `RATE_LIMITED`, `PACKAGE_TOO_LARGE`, `INVALID_ARGUMENT`, `SERVICE_UNAVAILABLE`, `REQUEST_TIMEOUT`, `NO_DOCUMENTATION`, `UNEXPECTED_RESPONSE`.
+
+**Argument Validation Details**: The structured schema diff object (`{ receivedKeys, missingRequired, expectedRequired, expectedOptional, unknownKeys? }`) returned under `error.details` when an incoming tool call fails input schema validation (`INVALID_ARGUMENT`), enabling LLM agents to programmatically compare received arguments against declared tool properties and self-heal in the subsequent turn.
+
+**Retryable Invariant**: The invariant governing `error.retryable`: `retryable: false` signifies deterministic failure upon verbatim replay without parameter modification (such as `INVALID_ARGUMENT` or `PACKAGE_NOT_FOUND`). It informs the caller that repeating the exact same payload will not succeed, while caller-side argument correction based on `suggestion` and `details` is standard error recovery. In contrast, `retryable: true` is strictly reserved for transient transport/server disruptions (`RATE_LIMITED`, `SERVICE_UNAVAILABLE`, `REQUEST_TIMEOUT`).
 
 ### Caching and infrastructure
 

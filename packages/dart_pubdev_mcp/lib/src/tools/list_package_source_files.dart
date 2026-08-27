@@ -86,6 +86,6 @@ final class ListPackageSourceFilesHandler {
     }
 
     paths.sort();
-    return ToolResponse.ok({'package': package, 'files': paths}, resolvedVersion: resolvedVersion);
+    return ToolResponse.ok({'package': package, 'paths': paths}, resolvedVersion: resolvedVersion);
   }
 }

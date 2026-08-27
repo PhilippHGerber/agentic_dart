@@ -6,11 +6,13 @@ import 'dart:convert';
 import 'package:dart_mcp/server.dart';
 import 'package:dart_pubdev_mcp/src/cache/cache_registry.dart';
 import 'package:dart_pubdev_mcp/src/tools/search_packages.dart';
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
 import '../../support/harness.dart';
+import '../../support/schema_conformance.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,10 +45,12 @@ CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'search_packages', arguments: args);
 
 /// Decodes the first content item of [result] as a JSON list of summaries.
-List<Map<String, Object?>> _summaries(CallToolResult result) =>
-    (jsonDecode((result.content.first as TextContent).text) as List<Object?>)
-        .cast<Map<String, Object?>>()
-        .toList();
+List<Map<String, Object?>> _summaries(CallToolResult result) {
+  final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  final packages = outer['packages'];
+  if (packages is! List<Object?>) throw StateError('No packages list in response');
+  return packages.cast<Map<String, Object?>>().toList();
+}
 
 /// Decodes the first content item of [result] as a JSON error payload.
 Map<String, Object?> _errorPayload(CallToolResult result) {
@@ -122,12 +126,14 @@ void main() {
   // ─── Successful search ──────────────────────────────────────────────────────
 
   group('successful search', () {
-    test('returns a JSON array with one PackageSummary entry', () async {
+    test('returns a JSON object with a packages array containing one PackageSummary entry', () async {
       _stubSingleResult(mockHttp);
 
       final result = await buildHandler().call(_request({'query': 'http'}));
 
       expect(result.isError, isNull);
+      final decoded = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+      expect(decoded.containsKey('packages'), isTrue);
       expect(_summaries(result), hasLength(1));
     });
 
@@ -199,6 +205,14 @@ void main() {
       final result = await buildHandler().call(_request({'query': 'http'}));
 
       expect(_summaries(result).first.containsKey('publisher'), isFalse);
+    });
+
+    test('structuredContent conforms to the declared outputSchema', () async {
+      _stubSingleResult(mockHttp);
+
+      final result = await buildHandler().call(_request({'query': 'http'}));
+
+      expectConformsToOutputSchema(searchPackagesTool, result.structuredContent);
     });
   });
 

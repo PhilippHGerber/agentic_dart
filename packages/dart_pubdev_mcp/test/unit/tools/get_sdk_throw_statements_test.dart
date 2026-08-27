@@ -180,9 +180,11 @@ void main() {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(2));
-      final symbols = records.map((r) => r['symbol']! as String).toSet();
+      final symbols = records.map((r) => (r['symbol'] as String?) ?? '').toSet();
       expect(symbols, containsAll(['UserService.new', 'UserService.getUser']));
       expect(records.every((r) => r.containsKey('thrownType')), isTrue);
+      expect(records.every((r) => r['path'] == 'lib/core/service.dart'), isTrue);
+      expect(records.every((r) => r['line'] is int), isTrue);
     });
 
     test('supports backwards-compatible class parameter', () async {
@@ -281,6 +283,8 @@ void main() {
       expect(result.isError, isNull);
       final records = _records(result);
       expect(records, hasLength(1));
+      expect(records.first['path'], equals('lib/core/service.dart'));
+      expect(records.first['line'], equals(10));
       expect(records.first['symbol'], equals('UserService.getUser'));
       expect(records.first['thrownType'], equals('ArgumentError'));
     });

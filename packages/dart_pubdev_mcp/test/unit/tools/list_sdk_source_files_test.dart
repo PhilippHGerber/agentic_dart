@@ -47,8 +47,8 @@ CallToolRequest _request(Map<String, Object?> args) =>
 Map<String, Object?> _payload(CallToolResult result) =>
     jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
 
-List<String> _files(CallToolResult result) =>
-    ((_payload(result)['files'] as List<Object?>?) ?? const []).cast<String>();
+List<String> _paths(CallToolResult result) =>
+    ((_payload(result)['paths'] as List<Object?>?) ?? const []).cast<String>();
 
 Map<String, Object?> _errorPayload(CallToolResult result) {
   final outer = _payload(result);
@@ -91,7 +91,7 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      expect(_files(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
+      expect(_paths(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
     });
 
     test('response includes sdk, library, and resolvedVersion', () async {
@@ -116,7 +116,7 @@ void main() {
       );
 
       expect(
-        _files(result),
+        _paths(result),
         equals(['lib/async/future.dart', 'lib/core/list.dart', 'lib/core/map.dart']),
       );
     });
@@ -128,8 +128,8 @@ void main() {
         _request({'sdk': 'dart', 'version': '3.12.2'}),
       );
 
-      final files = _files(result);
-      expect(files, equals([...files]..sort()));
+      final paths = _paths(result);
+      expect(paths, equals([...paths]..sort()));
     });
   });
 
@@ -144,7 +144,7 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      expect(_files(result), equals(['packages/flutter_test/lib/flutter_test.dart']));
+      expect(_paths(result), equals(['packages/flutter_test/lib/flutter_test.dart']));
     });
 
     test('response includes sdk, package, and resolvedVersion', () async {
@@ -167,7 +167,7 @@ void main() {
         _request({'sdk': 'flutter', 'version': '3.35.1'}),
       );
 
-      expect(_files(result), hasLength(3));
+      expect(_paths(result), hasLength(3));
     });
   });
 
@@ -182,7 +182,7 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      expect(_files(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
+      expect(_paths(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
     });
 
     test('filters files by exact file path passed as directory', () async {
@@ -193,7 +193,7 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      expect(_files(result), equals(['lib/core/list.dart']));
+      expect(_paths(result), equals(['lib/core/list.dart']));
     });
 
     test('filters files by fileExtension', () async {
@@ -206,14 +206,14 @@ void main() {
         _request({'sdk': 'dart', 'version': '3.12.2', 'fileExtension': '.md'}),
       );
       expect(mdResult.isError, isNull);
-      expect(_files(mdResult), equals(['lib/core/doc.md']));
+      expect(_paths(mdResult), equals(['lib/core/doc.md']));
 
       final dartResult = await buildHandler().call(
         _request({'sdk': 'dart', 'version': '3.12.2', 'fileExtension': '.dart'}),
       );
       expect(dartResult.isError, isNull);
       expect(
-        _files(dartResult),
+        _paths(dartResult),
         equals(['lib/async/future.dart', 'lib/core/list.dart', 'lib/core/map.dart']),
       );
     });
@@ -235,7 +235,7 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      expect(_files(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
+      expect(_paths(result), equals(['lib/core/list.dart', 'lib/core/map.dart']));
     });
   });
 
@@ -344,7 +344,7 @@ void main() {
           arguments: {
             'sdk': 'dart',
             'library': 'core',
-            'file': 'list.dart',
+            'path': 'list.dart',
             'version': '3.12.2',
           },
         ),

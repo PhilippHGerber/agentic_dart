@@ -102,7 +102,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'lineStart': 6,
           'lineEnd': 9,
         }),
@@ -110,6 +110,8 @@ void main() {
 
       expect(result.isError, isNull);
       final payload = _payload(result);
+      expect(payload['package'], equals('foo'));
+      expect(payload['path'], equals('lib/src/widget.dart'));
       expect(payload['mode'], equals('line-range'));
       expect(payload['lineStart'], equals(6));
       expect(payload['lineEnd'], equals(9));
@@ -124,7 +126,7 @@ void main() {
       stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'version': '1.0.0', 'file': 'lib/src/widget.dart'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'path': 'lib/src/widget.dart'}),
       );
 
       final payload = _payload(result);
@@ -141,7 +143,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'lineStart': 9,
         }),
       );
@@ -159,7 +161,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'lineStart': 10,
           'lineEnd': 999,
         }),
@@ -182,7 +184,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbol': 'Widget',
         }),
       );
@@ -203,7 +205,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbolName': 'Widget',
         }),
       );
@@ -222,7 +224,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbol': 'Widget',
           'maxLines': 3,
         }),
@@ -245,7 +247,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbol': 'Widget.compute',
         }),
       );
@@ -267,7 +269,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbol': 'Widget.compute',
           'maxLines': 2,
         }),
@@ -288,7 +290,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbol': 'Widget.new',
         }),
       );
@@ -305,7 +307,7 @@ void main() {
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbol': 'DoesNotExist',
         }),
       );
@@ -323,7 +325,7 @@ void main() {
       stubTarball(mockHttp, _files, version: '2.0.0');
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'file': 'lib/src/widget.dart', 'lineStart': 1, 'lineEnd': 1}),
+        _request({'package': 'foo', 'path': 'lib/src/widget.dart', 'lineStart': 1, 'lineEnd': 1}),
       );
 
       expect(result.isError, isNull);
@@ -336,7 +338,7 @@ void main() {
       ).thenAnswer((_) async => notFound());
 
       final result = await buildHandler().call(
-        _request({'package': 'missing', 'file': 'lib/src/widget.dart'}),
+        _request({'package': 'missing', 'path': 'lib/src/widget.dart'}),
       );
 
       expect(result.isError, isTrue);
@@ -349,7 +351,7 @@ void main() {
   group('SDK package guard', () {
     test('rejects an SDK package name with no version supplied', () async {
       final result = await buildHandler().call(
-        _request({'package': 'flutter', 'file': 'lib/src/widget.dart'}),
+        _request({'package': 'flutter', 'path': 'lib/src/widget.dart'}),
       );
 
       expect(result.isError, isTrue);
@@ -359,7 +361,7 @@ void main() {
 
     test('rejects an SDK package name even with an explicit version', () async {
       final result = await buildHandler().call(
-        _request({'package': 'flutter', 'version': '3.35.0', 'file': 'lib/src/widget.dart'}),
+        _request({'package': 'flutter', 'version': '3.35.0', 'path': 'lib/src/widget.dart'}),
       );
 
       expect(result.isError, isTrue);
@@ -371,7 +373,7 @@ void main() {
   // ─── Argument validation ───────────────────────────────────────────────────
 
   group('argument validation', () {
-    test('rejects a missing file with INVALID_ARGUMENT', () async {
+    test('rejects a missing path with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(_request({'package': 'foo', 'version': '1.0.0'}));
 
       expect(result.isError, isTrue);
@@ -380,7 +382,7 @@ void main() {
 
     test('rejects a path containing ".." with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'version': '1.0.0', 'file': '../etc/passwd'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'path': '../etc/passwd'}),
       );
 
       expect(result.isError, isTrue);
@@ -395,7 +397,7 @@ void main() {
       stubTarball(mockHttp, _files);
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'version': '1.0.0', 'file': 'lib/src/missing.dart'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'path': 'lib/src/missing.dart'}),
       );
 
       expect(result.isError, isTrue);
@@ -406,7 +408,7 @@ void main() {
       stubTarball(mockHttp, {'lib/src/server/widget.dart': 'class Widget {}'});
 
       final result = await buildHandler().call(
-        _request({'package': 'foo', 'version': '1.0.0', 'file': 'lib/widget.dart'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'path': 'lib/widget.dart'}),
       );
 
       expect(
@@ -424,13 +426,13 @@ void main() {
       final handler = buildHandler();
 
       await handler.call(
-        _request({'package': 'foo', 'version': '1.0.0', 'file': 'lib/src/widget.dart'}),
+        _request({'package': 'foo', 'version': '1.0.0', 'path': 'lib/src/widget.dart'}),
       );
       await handler.call(
         _request({
           'package': 'foo',
           'version': '1.0.0',
-          'file': 'lib/src/widget.dart',
+          'path': 'lib/src/widget.dart',
           'symbol': 'Widget',
         }),
       );

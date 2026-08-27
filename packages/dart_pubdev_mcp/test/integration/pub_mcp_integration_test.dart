@@ -266,7 +266,10 @@ void main() {
 
     setUpAll(() async {
       final result = await mcp.callTool('search_packages', {'query': 'http'});
-      results = _content(result)! as List<Object?>;
+      results = switch (_content(result)) {
+        {'packages': final List<Object?> list} => list,
+        _ => const <Object?>[],
+      };
     });
 
     test('returns a non-empty list', () {
@@ -282,12 +285,14 @@ void main() {
     });
 
     test('returns objects with a package field', () {
-      final first = results.whereType<Map<String, Object?>>().first;
+      final first = results.whereType<Map<String, Object?>>().firstOrNull;
+      expect(first, isNotNull);
       expect(first, contains('package'));
     });
 
     test('returns objects with a pubPoints field', () {
-      final first = results.whereType<Map<String, Object?>>().first;
+      final first = results.whereType<Map<String, Object?>>().firstOrNull;
+      expect(first, isNotNull);
       expect(first, contains('pubPoints'));
     });
   }, timeout: const Timeout(Duration(seconds: 30)));

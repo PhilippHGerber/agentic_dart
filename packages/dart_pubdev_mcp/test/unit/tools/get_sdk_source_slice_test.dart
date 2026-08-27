@@ -131,7 +131,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'list.dart',
+          'path': 'list.dart',
           'version': '3.12.2',
           'lineStart': 2,
           'lineEnd': 4,
@@ -143,7 +143,7 @@ void main() {
       expect(payload['resolvedVersion'], equals('3.12.2'));
       expect(payload['sdk'], equals('dart'));
       expect(payload['library'], equals('core'));
-      expect(payload['file'], equals('list.dart'));
+      expect(payload['path'], equals('list.dart'));
       expect(payload['mode'], equals('line-range'));
       expect(payload['lineStart'], equals(2));
       expect(payload['lineEnd'], equals(4));
@@ -161,7 +161,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'list.dart',
+          'path': 'list.dart',
           'version': '3.12.2',
         }),
       );
@@ -176,7 +176,7 @@ void main() {
       stubSdkTarball(mockHttp, _rawFiles);
 
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'file': 'README.md', 'version': '3.12.2'}),
+        _request({'sdk': 'dart', 'library': 'core', 'path': 'README.md', 'version': '3.12.2'}),
       );
 
       expect(result.isError, isNull);
@@ -194,7 +194,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'widget.dart',
+          'path': 'widget.dart',
           'version': '3.12.2',
           'symbol': 'Widget',
         }),
@@ -217,7 +217,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'widget.dart',
+          'path': 'widget.dart',
           'version': '3.12.2',
           'symbolName': 'Widget',
         }),
@@ -236,7 +236,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'widget.dart',
+          'path': 'widget.dart',
           'version': '3.12.2',
           'symbol': 'Widget',
           'maxLines': 3,
@@ -256,7 +256,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'widget.dart',
+          'path': 'widget.dart',
           'version': '3.12.2',
           'symbol': 'Widget.compute',
         }),
@@ -279,7 +279,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'widget.dart',
+          'path': 'widget.dart',
           'version': '3.12.2',
           'symbol': 'Widget.new',
         }),
@@ -297,7 +297,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'widget.dart',
+          'path': 'widget.dart',
           'version': '3.12.2',
           'symbol': 'DoesNotExist',
         }),
@@ -314,7 +314,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'widget.dart',
+          'path': 'widget.dart',
           'version': '3.12.2',
           'lineStart': 6,
           'lineEnd': 9,
@@ -338,7 +338,7 @@ void main() {
 
       final result = await buildHandler(
         platformVersion: '3.9.0 (stable) (...) on "linux_x64"',
-      ).call(_request({'sdk': 'dart', 'library': 'core', 'file': 'list.dart'}));
+      ).call(_request({'sdk': 'dart', 'library': 'core', 'path': 'list.dart'}));
 
       expect(result.isError, isNull);
       expect(_payload(result)['resolvedVersion'], equals('3.9.0'));
@@ -352,7 +352,7 @@ void main() {
             _request({
               'sdk': 'dart',
               'library': 'core',
-              'file': 'list.dart',
+              'path': 'list.dart',
               'version': '3.12.2',
             }),
           );
@@ -368,7 +368,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'list.dart',
+          'path': 'list.dart',
           'version': '999.0.0',
         }),
       );
@@ -386,7 +386,7 @@ void main() {
   group('argument validation', () {
     test('rejects sdk values other than "dart"/"flutter" with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'kotlin', 'library': 'core', 'file': 'foo.dart'}),
+        _request({'sdk': 'kotlin', 'library': 'core', 'path': 'foo.dart'}),
       );
 
       expect(result.isError, isTrue);
@@ -395,7 +395,7 @@ void main() {
 
     test('rejects a missing library with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'file': 'list.dart'}),
+        _request({'sdk': 'dart', 'path': 'list.dart'}),
       );
 
       expect(result.isError, isTrue);
@@ -404,14 +404,14 @@ void main() {
 
     test('rejects a library containing a path separator with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core/nested', 'file': 'list.dart'}),
+        _request({'sdk': 'dart', 'library': 'core/nested', 'path': 'list.dart'}),
       );
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
-    test('rejects a missing file with INVALID_ARGUMENT', () async {
+    test('rejects a missing path with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
         _request({'sdk': 'dart', 'library': 'core'}),
       );
@@ -420,9 +420,9 @@ void main() {
       expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
-    test('rejects a file containing ".." with INVALID_ARGUMENT', () async {
+    test('rejects a path containing ".." with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'dart', 'library': 'core', 'file': '../../etc/passwd'}),
+        _request({'sdk': 'dart', 'library': 'core', 'path': '../../etc/passwd'}),
       );
 
       expect(result.isError, isTrue);
@@ -440,7 +440,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'file': 'src/widgets/framework.dart',
+          'path': 'src/widgets/framework.dart',
           'version': '3.35.1',
           'lineStart': 2,
           'lineEnd': 4,
@@ -453,7 +453,7 @@ void main() {
       expect(payload['sdk'], equals('flutter'));
       expect(payload['package'], equals('flutter'));
       expect(payload.containsKey('library'), isFalse);
-      expect(payload['file'], equals('src/widgets/framework.dart'));
+      expect(payload['path'], equals('src/widgets/framework.dart'));
       expect(payload['mode'], equals('line-range'));
       expect(payload['lineStart'], equals(2));
       expect(payload['lineEnd'], equals(4));
@@ -471,7 +471,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'file': 'src/widgets/README.md',
+          'path': 'src/widgets/README.md',
           'version': '3.35.1',
         }),
       );
@@ -491,7 +491,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'file': 'src/widgets/widget.dart',
+          'path': 'src/widgets/widget.dart',
           'version': '3.35.1',
           'symbol': 'Widget',
         }),
@@ -514,7 +514,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'file': 'src/widgets/widget.dart',
+          'path': 'src/widgets/widget.dart',
           'version': '3.35.1',
           'symbol': 'Widget.compute',
           'maxLines': 2,
@@ -536,7 +536,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'file': 'src/widgets/widget.dart',
+          'path': 'src/widgets/widget.dart',
           'version': '3.35.1',
           'symbol': 'DoesNotExist',
         }),
@@ -578,7 +578,7 @@ void main() {
             _request({
               'sdk': 'flutter',
               'package': 'flutter',
-              'file': 'src/widgets/framework.dart',
+              'path': 'src/widgets/framework.dart',
             }),
           );
 
@@ -595,7 +595,7 @@ void main() {
             _request({
               'sdk': 'flutter',
               'package': 'flutter',
-              'file': 'src/widgets/framework.dart',
+              'path': 'src/widgets/framework.dart',
               'version': '3.35.1',
             }),
           );
@@ -609,7 +609,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'file': 'src/widgets/framework.dart',
+          'path': 'src/widgets/framework.dart',
         }),
       );
 
@@ -635,7 +635,7 @@ void main() {
         _request({
           'sdk': 'flutter',
           'package': 'flutter',
-          'file': 'src/widgets/framework.dart',
+          'path': 'src/widgets/framework.dart',
           'version': '999.0.0',
         }),
       );
@@ -653,7 +653,7 @@ void main() {
   group('flutter argument validation', () {
     test('rejects a missing package with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'flutter', 'file': 'framework.dart'}),
+        _request({'sdk': 'flutter', 'path': 'framework.dart'}),
       );
 
       expect(result.isError, isTrue);
@@ -662,14 +662,14 @@ void main() {
 
     test('rejects a package containing a path separator with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
-        _request({'sdk': 'flutter', 'package': 'flutter/nested', 'file': 'framework.dart'}),
+        _request({'sdk': 'flutter', 'package': 'flutter/nested', 'path': 'framework.dart'}),
       );
 
       expect(result.isError, isTrue);
       expect(_errorPayload(result)['code'], equals(DomainErrors.invalidArgument));
     });
 
-    test('rejects a missing file with INVALID_ARGUMENT', () async {
+    test('rejects a missing path with INVALID_ARGUMENT', () async {
       final result = await buildHandler().call(
         _request({'sdk': 'flutter', 'package': 'flutter'}),
       );
@@ -689,7 +689,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'does_not_exist.dart',
+          'path': 'does_not_exist.dart',
           'version': '3.12.2',
         }),
       );
@@ -710,7 +710,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'list.dart',
+          'path': 'list.dart',
           'version': '3.12.2',
         }),
       );
@@ -718,7 +718,7 @@ void main() {
         _request({
           'sdk': 'dart',
           'library': 'core',
-          'file': 'README.md',
+          'path': 'README.md',
           'version': '3.12.2',
         }),
       );

@@ -18,21 +18,18 @@ import '../data/domain_error.dart';
 abstract final class ToolResponse {
   /// Builds a success [CallToolResult] from [payload].
   ///
-  /// [payload] is almost always a `Map<String, Object?>`; `search_packages` is
-  /// the sole exception, whose response body is a bare JSON array of package
-  /// summaries — [payload] is typed `Object` to admit it.
+  /// [payload] is typically a `Map<String, Object?>` representing the structured
+  /// tool response.
   ///
   /// When [resolvedVersion] is supplied, it is inserted ahead of every key
   /// already in [payload] as `resolvedVersion` — the Resolved Version
   /// invariant every version-accepting tool response carries. [payload] must
-  /// be a `Map<String, Object?>` in that case. Omit [resolvedVersion] for the
-  /// two version-agnostic tools, `search_packages` and `compare_packages`.
+  /// be a `Map<String, Object?>` in that case. Omit [resolvedVersion] for
+  /// version-agnostic tools, such as `search_packages` and `compare_packages`.
   ///
   /// When the resulting body is a `Map<String, Object?>`, it is also set as
   /// `CallToolResult.structuredContent`, conforming to the tool's declared
-  /// `outputSchema` (every tool but `search_packages`, whose bare-array body
-  /// cannot be represented as `structuredContent`, which the spec types as an
-  /// object).
+  /// `outputSchema`.
   static CallToolResult ok(Object payload, {String? resolvedVersion}) {
     final Object body;
     if (resolvedVersion == null) {

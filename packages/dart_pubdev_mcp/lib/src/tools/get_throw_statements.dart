@@ -23,7 +23,8 @@
 ///   "package": "http",
 ///   "throws": [
 ///     {
-///       "file": "lib/src/client.dart",
+///       "path": "lib/src/client.dart",
+///       "line": 42,
 ///       "symbol": "Client.send",
 ///       "thrownType": "ClientException",
 ///       "context": "if (closed) {\n  throw ClientException(\"closed\");\n}"

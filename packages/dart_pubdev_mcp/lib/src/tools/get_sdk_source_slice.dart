@@ -3,11 +3,11 @@
 /// Extracts Dart or Flutter SDK source from a single file in one of two
 /// modes, mirroring `get_source_slice` exactly.
 ///
-/// **Line-range mode** (`file`, optional `lineStart`/`lineEnd`): returns the
+/// **Line-range mode** (`path`, optional `lineStart`/`lineEnd`): returns the
 /// exact requested 1-based inclusive line range with no truncation. When both
 /// bounds are omitted the full file is returned verbatim.
 ///
-/// **Symbol-bounded mode** (`file`, `symbol`, optional `maxLines`): parses
+/// **Symbol-bounded mode** (`path`, `symbol`, optional `maxLines`): parses
 /// the file with the Dart analyzer, locates the named declaration's AST node,
 /// and returns its source. When `maxLines` is supplied and the node spans more
 /// lines than that, the response is truncated to the signature, opening
@@ -18,14 +18,14 @@
 /// ## Path contract
 ///
 /// For `sdk: 'dart'`, `library` selects a `dart:` library (`core`, `async`,
-/// `io`, …) and `file` is the path relative to that library's directory —
-/// e.g. `library: 'core', file: 'list.dart'` resolves to the SDK's
+/// `io`, …) and `path` is the path relative to that library's directory —
+/// e.g. `library: 'core', path: 'list.dart'` resolves to the SDK's
 /// `lib/core/list.dart`.
 ///
 /// For `sdk: 'flutter'`, `package` selects a Flutter package
-/// (`flutter`, `flutter_test`, `flutter_driver`, …) and `file` is the path
+/// (`flutter`, `flutter_test`, `flutter_driver`, …) and `path` is the path
 /// relative to that package's `lib/` directory — e.g. `package: 'flutter',
-/// file: 'src/widgets/framework.dart'` resolves to
+/// path: 'src/widgets/framework.dart'` resolves to
 /// `packages/flutter/lib/src/widgets/framework.dart`.
 ///
 /// ## Response shape
@@ -37,7 +37,7 @@
 ///   "resolvedVersion": "3.12.2",
 ///   "sdk": "dart",
 ///   "library": "core",
-///   "file": "list.dart",
+///   "path": "list.dart",
 ///   "mode": "line-range",
 ///   "lineStart": 1,
 ///   "lineEnd": 40,
@@ -64,7 +64,7 @@
 /// - `SOURCE_FILE_NOT_FOUND` (file absent from the SDK source tree)
 /// - `SYMBOL_NOT_FOUND` (symbol-bounded mode, declaration not in the file)
 /// - `INVALID_ARGUMENT` (`sdk` other than `'dart'`/`'flutter'`,
-///   `library`/`package`/`file` missing or containing `..` segments)
+///   `library`/`package`/`path` missing or containing `..` segments)
 library;
 
 import 'dart:io' show Platform;
@@ -140,7 +140,7 @@ final class GetSdkSourceSliceHandler {
     int? lineEnd,
   ) async {
     final rawLibrary = (args['library'] as String?) ?? '';
-    final rawFile = (args['file'] as String?) ?? '';
+    final rawPath = (args['path'] as String?) ?? '';
 
     final library = _normalizeSegment(rawLibrary);
     if (library == null) {
@@ -155,12 +155,12 @@ final class GetSdkSourceSliceHandler {
       );
     }
 
-    final file = _normalizeRelativePath(rawFile);
-    if (file == null) {
+    final path = _normalizeRelativePath(rawPath);
+    if (path == null) {
       return ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
-          message: 'The `file` parameter is required and must not contain ".." segments.',
+          message: 'The `path` parameter is required and must not contain ".." segments.',
           suggestion:
               'Provide a path relative to the library directory (e.g. "list.dart" for dart:core).',
         ),
@@ -168,11 +168,11 @@ final class GetSdkSourceSliceHandler {
     }
 
     final ref = suppliedVersion ?? resolveDartSdkRef(platformVersion: _platformVersion);
-    final lookupPath = 'lib/$library/$file';
+    final lookupPath = 'lib/$library/$path';
 
     _log(
       LoggingLevel.info,
-      'get_sdk_source_slice: sdk=dart library=$library file=$file ref=$ref '
+      'get_sdk_source_slice: sdk=dart library=$library path=$path ref=$ref '
       '${symbol != null ? 'symbol=$symbol' : 'lines=$lineStart..$lineEnd'}',
     );
 
@@ -185,7 +185,7 @@ final class GetSdkSourceSliceHandler {
             resolvedVersion: ref,
             sdk: 'dart',
             library: library,
-            file: file,
+            path: path,
             ast: value,
             symbol: symbol,
             maxLines: maxLines,
@@ -201,7 +201,7 @@ final class GetSdkSourceSliceHandler {
           resolvedVersion: ref,
           sdk: 'dart',
           library: library,
-          file: file,
+          path: path,
           content: value,
           lineStart: lineStart,
           lineEnd: lineEnd,
@@ -218,7 +218,7 @@ final class GetSdkSourceSliceHandler {
     int? lineEnd,
   ) async {
     final rawPackage = (args['package'] as String?) ?? '';
-    final rawFile = (args['file'] as String?) ?? '';
+    final rawPath = (args['path'] as String?) ?? '';
 
     final package = _normalizeSegment(rawPackage);
     if (package == null) {
@@ -233,12 +233,12 @@ final class GetSdkSourceSliceHandler {
       );
     }
 
-    final file = _normalizeRelativePath(rawFile);
-    if (file == null) {
+    final path = _normalizeRelativePath(rawPath);
+    if (path == null) {
       return ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
-          message: 'The `file` parameter is required and must not contain ".." segments.',
+          message: 'The `path` parameter is required and must not contain ".." segments.',
           suggestion:
               "Provide a path relative to the package's lib/ directory "
               '(e.g. "src/widgets/framework.dart" for package:flutter).',
@@ -268,11 +268,11 @@ final class GetSdkSourceSliceHandler {
       ref = detected;
     }
 
-    final lookupPath = 'packages/$package/lib/$file';
+    final lookupPath = 'packages/$package/lib/$path';
 
     _log(
       LoggingLevel.info,
-      'get_sdk_source_slice: sdk=flutter package=$package file=$file ref=$ref '
+      'get_sdk_source_slice: sdk=flutter package=$package path=$path ref=$ref '
       '${symbol != null ? 'symbol=$symbol' : 'lines=$lineStart..$lineEnd'}',
     );
 
@@ -285,7 +285,7 @@ final class GetSdkSourceSliceHandler {
             resolvedVersion: ref,
             sdk: 'flutter',
             package: package,
-            file: file,
+            path: path,
             ast: value,
             symbol: symbol,
             maxLines: maxLines,
@@ -301,7 +301,7 @@ final class GetSdkSourceSliceHandler {
           resolvedVersion: ref,
           sdk: 'flutter',
           package: package,
-          file: file,
+          path: path,
           content: value,
           lineStart: lineStart,
           lineEnd: lineEnd,
@@ -312,7 +312,7 @@ final class GetSdkSourceSliceHandler {
   CallToolResult _lineRange({
     required String resolvedVersion,
     required String sdk,
-    required String file,
+    required String path,
     required String content,
     String? library,
     String? package,
@@ -324,7 +324,7 @@ final class GetSdkSourceSliceHandler {
       'sdk': sdk,
       'library': ?library,
       'package': ?package,
-      'file': file,
+      'path': path,
       'mode': 'line-range',
       'lineStart': slice.lineStart,
       'lineEnd': slice.effectiveLineEnd,
@@ -336,7 +336,7 @@ final class GetSdkSourceSliceHandler {
   CallToolResult _symbolBounded({
     required String resolvedVersion,
     required String sdk,
-    required String file,
+    required String path,
     required ParseStringResult ast,
     required String symbol,
     String? library,
@@ -348,7 +348,7 @@ final class GetSdkSourceSliceHandler {
       return ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
-          message: 'Symbol "$symbol" was not found in $file.',
+          message: 'Symbol "$symbol" was not found in $path.',
           suggestion:
               'Verify the symbol name is spelled correctly, or use grep_sdk_source to find it '
               'by name/content. '
@@ -362,7 +362,7 @@ final class GetSdkSourceSliceHandler {
       'sdk': sdk,
       'library': ?library,
       'package': ?package,
-      'file': file,
+      'path': path,
       'mode': 'symbol',
       'symbol': symbol,
       'lineStart': slice.lineStart,

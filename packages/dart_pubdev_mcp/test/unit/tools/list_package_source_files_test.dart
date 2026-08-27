@@ -32,8 +32,8 @@ CallToolRequest _request(Map<String, Object?> args) =>
 Map<String, Object?> _payload(CallToolResult result) =>
     jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
 
-List<String> _files(CallToolResult result) =>
-    ((_payload(result)['files'] as List<Object?>?) ?? const []).cast<String>();
+List<String> _paths(CallToolResult result) =>
+    ((_payload(result)['paths'] as List<Object?>?) ?? const []).cast<String>();
 
 Map<String, Object?> _errorPayload(CallToolResult result) {
   final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
@@ -76,10 +76,10 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      expect(_files(result), hasLength(5));
+      expect(_paths(result), hasLength(5));
     });
 
-    test('response includes package and resolvedVersion fields', () async {
+    test('response includes package, paths, and resolvedVersion fields', () async {
       stubTarball(mockHttp, _defaultFiles);
 
       final result = await buildHandler().call(
@@ -89,6 +89,7 @@ void main() {
       final payload = _payload(result);
       expect(payload['package'], equals('foo'));
       expect(payload['resolvedVersion'], equals('1.0.0'));
+      expect(payload['paths'], isA<List<Object?>>());
     });
 
     test('file paths are sorted alphabetically', () async {
@@ -98,8 +99,8 @@ void main() {
         _request({'package': 'foo', 'version': '1.0.0'}),
       );
 
-      final files = _files(result);
-      expect(files, equals([...files]..sort()));
+      final paths = _paths(result);
+      expect(paths, equals([...paths]..sort()));
     });
   });
 
@@ -113,7 +114,7 @@ void main() {
         _request({'package': 'foo', 'version': '1.0.0', 'directory': 'lib/src/'}),
       );
 
-      for (final path in _files(result)) {
+      for (final path in _paths(result)) {
         expect(path, startsWith('lib/src/'));
       }
     });
@@ -125,7 +126,7 @@ void main() {
         _request({'package': 'foo', 'version': '1.0.0', 'directory': 'lib/src'}),
       );
 
-      expect(_files(result), hasLength(3));
+      expect(_paths(result), hasLength(3));
     });
 
     test('filters to subdirectory', () async {
@@ -135,7 +136,7 @@ void main() {
         _request({'package': 'foo', 'version': '1.0.0', 'directory': 'lib/src/server/'}),
       );
 
-      expect(_files(result), equals(['lib/src/server/server.dart']));
+      expect(_paths(result), equals(['lib/src/server/server.dart']));
     });
   });
 
@@ -149,7 +150,7 @@ void main() {
         _request({'package': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
       );
 
-      for (final path in _files(result)) {
+      for (final path in _paths(result)) {
         expect(path, endsWith('.dart'));
       }
     });
@@ -161,7 +162,7 @@ void main() {
         _request({'package': 'foo', 'version': '1.0.0', 'fileExtension': '.dart'}),
       );
 
-      expect(_files(result).any((p) => p.endsWith('.md')), isFalse);
+      expect(_paths(result).any((p) => p.endsWith('.md')), isFalse);
     });
   });
 
@@ -184,7 +185,7 @@ void main() {
         }),
       );
 
-      expect(_files(result), equals(['lib/src/foo.dart']));
+      expect(_paths(result), equals(['lib/src/foo.dart']));
     });
   });
 

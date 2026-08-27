@@ -3,8 +3,8 @@
 /// This is the complete LLM-facing prompt surface of the server: the
 /// [kServerInstructions] string passed during the MCP handshake, plus the
 /// [Tool] + [ObjectSchema] pairs that describe each tool's name, title,
-/// description, annotations, parameter descriptions, and (for every tool but
-/// `search_packages`) the `outputSchema` its `structuredContent` conforms to.
+/// description, annotations, parameter descriptions, and the `outputSchema`
+/// its `structuredContent` conforms to.
 ///
 /// Edit this file to tune how the server and its tools are presented to LLM
 /// agents — no handler logic lives here.
@@ -55,11 +55,6 @@ final StringSchema _kPackageNameSchema = Schema.string(
 // ─── search_packages ──────────────────────────────────────────────────────────
 
 /// The `search_packages` [Tool] definition registered with the MCP server.
-///
-/// The sole tool with no `outputSchema`: its response body is a bare JSON
-/// array, but `CallToolResult.structuredContent` is typed as a JSON object —
-/// wrapping the array to fit would change the wire contract, so this tool is
-/// exempt rather than reshaped to accommodate it.
 final searchPackagesTool = Tool(
   name: 'search_packages',
   title: 'Search pub.dev packages',
@@ -70,28 +65,29 @@ final searchPackagesTool = Tool(
     properties: {
       'query': Schema.string(
         description:
-            'Keyword or partial package name to search for. '
+            'Keyword or partial package name to search for (e.g. "http", "state management"). '
             'Try different keywords if results are empty or unexpected.',
       ),
       'limit': Schema.int(
         description:
-            'Maximum number of results (default 5, max 20). '
+            'Maximum number of results to return (e.g. 5, 10; default 5, max 20). '
             'Increase when collecting candidates for compare_packages.',
         minimum: 1,
         maximum: 20,
       ),
       'page': Schema.int(
-        description: '1-indexed result page (default 1).',
+        description: '1-indexed result page (e.g. 1, 2; default 1).',
         minimum: 1,
       ),
       'sdk': UntitledSingleSelectEnumSchema(
         description:
-            'Restrict to packages supporting this SDK. Set when the target environment is known.',
+            'Restrict to packages supporting this SDK (e.g. "dart" or "flutter"). '
+            'Set when the target environment is known.',
         values: ['dart', 'flutter'],
       ),
       'sort': UntitledSingleSelectEnumSchema(
         description:
-            'Sort order (default relevance). '
+            'Sort order (e.g. "relevance", "updated", "likes", "pubPoints"; default "relevance"). '
             'Use updated to find recently maintained packages; use likes or pubPoints to find '
             'well-established ones, but only with a loose or absent query — non-relevance sorts '
             'rank globally, so a narrow query can return top-ranked but unrelated packages.',
@@ -100,8 +96,52 @@ final searchPackagesTool = Tool(
       ),
       'platform': UntitledSingleSelectEnumSchema(
         description:
-            "Restrict to packages supporting this platform. Set when the user's target platform is known.",
+            'Restrict to packages supporting this platform (e.g. "android", "ios", "web", "linux", "macos", "windows"). '
+            "Set when the user's target platform is known.",
         values: ['android', 'ios', 'web', 'linux', 'macos', 'windows'],
+      ),
+    },
+  ),
+  outputSchema: ObjectSchema(
+    required: ['packages'],
+    properties: {
+      'packages': Schema.list(
+        description:
+            'Matching package summaries sorted by relevance or specified sort criterion.',
+        items: Schema.object(
+          required: [
+            'package',
+            'version',
+            'description',
+            'likes',
+            'pubPoints',
+            'popularity',
+            'verified',
+            'sdks',
+            'platforms',
+            'topics',
+            'isFlutterFavorite',
+            'daysSinceUpdate',
+            'activeMaintenance',
+          ],
+          properties: {
+            'package': Schema.string(description: 'The pub.dev package name.'),
+            'version': Schema.string(description: 'Latest published stable version.'),
+            'description': Schema.string(description: 'Package description from pubspec.'),
+            'likes': Schema.int(description: 'pub.dev like count.'),
+            'pubPoints': Schema.int(description: 'pub.dev analysis score (0-160).'),
+            'popularity': Schema.int(description: '30-day download count.'),
+            'verified': Schema.bool(description: 'Whether published by a verified publisher.'),
+            'sdks': Schema.list(description: 'Supported SDKs.', items: Schema.string()),
+            'platforms': Schema.list(description: 'Supported platforms.', items: Schema.string()),
+            'topics': Schema.list(description: 'Package topics.', items: Schema.string()),
+            'isFlutterFavorite': Schema.bool(description: 'Whether package is a Flutter Favorite.'),
+            'daysSinceUpdate': Schema.int(description: 'Days since the latest release.'),
+            'activeMaintenance': Schema.bool(description: 'Whether updated within the last 180 days.'),
+            'publisher': Schema.string(description: 'Publisher domain name if verified.'),
+            'license': Schema.string(description: 'Detected SPDX license identifier.'),
+          },
+        ),
       ),
     },
   ),
@@ -119,7 +159,9 @@ final getPackageTool = Tool(
     required: ['package'],
     properties: {
       'package': Schema.string(
-        description: 'Exact package name on pub.dev. Obtain it from search_packages; never guess.',
+        description:
+            'Exact package name on pub.dev (e.g. "http", "riverpod", "path"). '
+            'Obtain it from search_packages; never guess.',
       ),
       'version': Schema.string(
         description:
@@ -251,11 +293,13 @@ final getChangelogTool = Tool(
     required: ['package'],
     properties: {
       'package': Schema.string(
-        description: 'Exact package name. Obtain it from search_packages or get_package.',
+        description:
+            'Exact package name (e.g. "http", "riverpod", "path"). '
+            'Obtain it from search_packages or get_package.',
       ),
       'limit': Schema.int(
         description:
-            'Maximum number of entries to return (default 5). '
+            'Maximum number of entries to return (e.g. 5, 10; default 5). '
             'Increase when fromVersion is many releases behind.',
       ),
       'version': Schema.string(
@@ -272,9 +316,10 @@ final getChangelogTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'entries'],
+    required: ['resolvedVersion', 'package', 'entries'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
+      'package': _kPackageNameSchema,
       'entries': Schema.list(
         description: 'Changelog entries, newest first, bounded by fromVersion and limit.',
         items: Schema.object(
@@ -313,7 +358,9 @@ final getSecurityAdvisoriesTool = Tool(
     required: ['package'],
     properties: {
       'package': Schema.string(
-        description: 'Exact package name on pub.dev. Obtain it from search_packages; never guess.',
+        description:
+            'Exact package name on pub.dev (e.g. "http", "riverpod", "path"). '
+            'Obtain it from search_packages; never guess.',
       ),
       'version': Schema.string(
         description:
@@ -403,23 +450,26 @@ final browseApiSymbolsTool = Tool(
     required: ['package', 'query'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+        description:
+            'The pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Verify with get_package if uncertain.',
       ),
       'query': Schema.string(
         description:
-            'A single symbol name or keyword to search for. '
+            'A single symbol name or keyword to search for (e.g. "Client", "get", "Response"). '
             'Do not combine a class name with a method name in one query.',
       ),
       'kind': Schema.string(
         description:
-            'Filter by dartdoc symbol kind, matched case-insensitively. '
+            'Filter by dartdoc symbol kind, matched case-insensitively '
+            '(e.g. "class", "method", "enum", "function", "typedef"). '
             'Known values: class, mixin, enum, function, constant, method, property, '
             'extension, accessor, constructor, typedef, library. '
             'Omit to return all matching symbol kinds. '
             'Unknown values are accepted without error.',
       ),
       'limit': Schema.int(
-        description: 'Maximum number of results to return (default 10, max 25).',
+        description: 'Maximum number of results to return (e.g. 10, 25; default 10, max 25).',
         minimum: 1,
         maximum: 25,
       ),
@@ -488,12 +538,14 @@ final findSymbolsTool = Tool(
     required: ['package', 'query'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+        description:
+            'The pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Verify with get_package if uncertain.',
       ),
       'query': Schema.string(
         description:
-            'A symbol name or keyword to search for. Matched case-insensitively '
-            'against symbol names first, then against short descriptions.',
+            'A symbol name or keyword to search for (e.g. "Client", "send", "timeout"). '
+            'Matched case-insensitively against symbol names first, then against short descriptions.',
       ),
       'version': Schema.string(
         description:
@@ -565,7 +617,9 @@ final getSymbolDocumentationTool = Tool(
     required: ['package', 'symbol'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+        description:
+            'The pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Verify with get_package if uncertain.',
       ),
       'symbol': Schema.string(
         description:
@@ -608,15 +662,17 @@ final getSourceSliceTool = Tool(
   annotations: kReadOnlyOpenWorldAnnotations,
   description: kGetSourceSliceDescription,
   inputSchema: ObjectSchema(
-    required: ['package', 'file'],
+    required: ['package', 'path'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+        description:
+            'The pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Verify with get_package if uncertain.',
       ),
-      'file': Schema.string(
+      'path': Schema.string(
         description:
             'File path relative to the package root '
-            '(e.g. "lib/src/server/prompts_support.dart"). '
+            '(e.g. "lib/http.dart", "lib/src/client.dart"). '
             'Derive it from a browse_api_symbols or find_symbols href. '
             'Leading slash is stripped automatically. ".." segments are rejected.',
       ),
@@ -627,11 +683,11 @@ final getSourceSliceTool = Tool(
       ),
       'lineStart': Schema.int(
         description:
-            'Line-range mode: 1-based inclusive first line. '
+            'Line-range mode: 1-based inclusive first line (e.g. 1, 40). '
             'Omit with lineEnd to return the full file.',
       ),
       'lineEnd': Schema.int(
-        description: 'Line-range mode: 1-based inclusive last line.',
+        description: 'Line-range mode: 1-based inclusive last line (e.g. 50, 100).',
       ),
       'symbol': Schema.string(
         description:
@@ -644,7 +700,7 @@ final getSourceSliceTool = Tool(
       'maxLines': Schema.int(
         description:
             'Symbol-bounded mode: truncate the symbol to signature + closing brace '
-            'when it spans more than this many lines. Omit for the full symbol body.',
+            'when it spans more than this many lines (e.g. 50, 100). Omit for the full symbol body.',
       ),
     },
   ),
@@ -652,7 +708,7 @@ final getSourceSliceTool = Tool(
     required: [
       'resolvedVersion',
       'package',
-      'file',
+      'path',
       'mode',
       'lineStart',
       'lineEnd',
@@ -662,7 +718,7 @@ final getSourceSliceTool = Tool(
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
       'package': _kPackageNameSchema,
-      'file': Schema.string(description: 'The file path, as given (leading slash stripped).'),
+      'path': Schema.string(description: 'The file path, as given (leading slash stripped).'),
       'mode': UntitledSingleSelectEnumSchema(
         description: 'Which mode produced this response.',
         values: ['line-range', 'symbol'],
@@ -694,10 +750,10 @@ final getSdkSourceSliceTool = Tool(
   annotations: kReadOnlyOpenWorldAnnotations,
   description: kGetSdkSourceSliceDescription,
   inputSchema: ObjectSchema(
-    required: ['sdk', 'file'],
+    required: ['sdk', 'path'],
     properties: {
       'sdk': UntitledSingleSelectEnumSchema(
-        description: 'Which SDK to read from.',
+        description: 'Which SDK to read from (e.g. "dart" or "flutter").',
         values: ['dart', 'flutter'],
       ),
       'library': Schema.string(
@@ -712,7 +768,7 @@ final getSdkSourceSliceTool = Tool(
             '"flutter_test", "flutter_driver") — selects the packages/<package>/lib/ '
             'directory. Required for sdk: "flutter"; omit for Dart.',
       ),
-      'file': Schema.string(
+      'path': Schema.string(
         description:
             "File path relative to the selected library's or package's lib/ directory "
             '(e.g. "list.dart" for dart:core\'s List implementation, or '
@@ -727,11 +783,11 @@ final getSdkSourceSliceTool = Tool(
       ),
       'lineStart': Schema.int(
         description:
-            'Line-range mode: 1-based inclusive first line. '
+            'Line-range mode: 1-based inclusive first line (e.g. 1, 40). '
             'Omit with lineEnd to return the full file.',
       ),
       'lineEnd': Schema.int(
-        description: 'Line-range mode: 1-based inclusive last line.',
+        description: 'Line-range mode: 1-based inclusive last line (e.g. 50, 100).',
       ),
       'symbol': Schema.string(
         description:
@@ -744,7 +800,7 @@ final getSdkSourceSliceTool = Tool(
       'maxLines': Schema.int(
         description:
             'Symbol-bounded mode: truncate the symbol to signature + closing brace '
-            'when it spans more than this many lines. Omit for the full symbol body.',
+            'when it spans more than this many lines (e.g. 50, 100). Omit for the full symbol body.',
       ),
     },
   ),
@@ -752,7 +808,7 @@ final getSdkSourceSliceTool = Tool(
     required: [
       'resolvedVersion',
       'sdk',
-      'file',
+      'path',
       'mode',
       'lineStart',
       'lineEnd',
@@ -775,7 +831,7 @@ final getSdkSourceSliceTool = Tool(
       'package': Schema.string(
         description: 'The Flutter package name, as given. Present only for sdk: "flutter".',
       ),
-      'file': Schema.string(
+      'path': Schema.string(
         description:
             "The file path relative to the library's or package's lib/ directory, as given.",
       ),
@@ -814,7 +870,7 @@ final listSdkSourceFilesTool = Tool(
     required: ['sdk'],
     properties: {
       'sdk': UntitledSingleSelectEnumSchema(
-        description: 'Which SDK to list files from.',
+        description: 'Which SDK to list files from (e.g. "dart" or "flutter").',
         values: ['dart', 'flutter'],
       ),
       'library': Schema.string(
@@ -849,7 +905,7 @@ final listSdkSourceFilesTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'sdk', 'files'],
+    required: ['resolvedVersion', 'sdk', 'paths'],
     properties: {
       'resolvedVersion': Schema.string(
         description:
@@ -866,7 +922,7 @@ final listSdkSourceFilesTool = Tool(
       'package': Schema.string(
         description: 'The Flutter package filter, as given. Present only when supplied.',
       ),
-      'files': Schema.list(
+      'paths': Schema.list(
         description:
             'Matching file paths within the SDK source tree, sorted alphabetically, in '
             "installed-style shape (e.g. 'lib/core/list.dart', 'packages/flutter/lib/src/...').",
@@ -887,7 +943,9 @@ final listPackageSourceFilesTool = Tool(
   inputSchema: ObjectSchema(
     required: ['package'],
     properties: {
-      'package': Schema.string(description: 'The pub.dev package name.'),
+      'package': Schema.string(
+        description: 'The pub.dev package name (e.g. "http", "riverpod", "path").',
+      ),
       'version': Schema.string(
         description:
             'A specific version string (e.g. "1.2.0"). '
@@ -895,8 +953,8 @@ final listPackageSourceFilesTool = Tool(
       ),
       'directory': Schema.string(
         description:
-            'Path prefix filter (e.g. "lib/src/server/"), or a full file path '
-            '(e.g. "lib/src/server/prompts_support.dart") to scope to that one file. '
+            'Path prefix filter (e.g. "lib/src/"), or a full file path '
+            '(e.g. "lib/src/client.dart") to scope to that one file. '
             'Set this to avoid scanning the full tree. '
             'Trailing slash is added automatically if absent from a prefix.',
       ),
@@ -908,11 +966,11 @@ final listPackageSourceFilesTool = Tool(
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'package', 'files'],
+    required: ['resolvedVersion', 'package', 'paths'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
       'package': _kPackageNameSchema,
-      'files': Schema.list(
+      'paths': Schema.list(
         description: 'Matching file paths within the package tarball, sorted alphabetically.',
         items: Schema.string(),
       ),
@@ -932,7 +990,9 @@ final grepPackageSourceTool = Tool(
     required: ['package', 'pattern'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+        description:
+            'The pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Verify with get_package if uncertain.',
       ),
       'version': Schema.string(
         description:
@@ -942,21 +1002,22 @@ final grepPackageSourceTool = Tool(
       'pattern': Schema.string(
         description:
             'The literal substring to search for (default), or a Dart RegExp pattern when '
-            'regex is true.',
+            'regex is true (e.g. "ClientException", "^void main").',
       ),
       'regex': Schema.bool(
         description:
             'When true, compile pattern as a Dart RegExp instead of matching it as a literal '
-            'substring. Default false — an LLM-typed pattern like "isEmpty()" is matched '
-            'verbatim rather than having its parens reinterpreted as regex metacharacters.',
+            'substring (e.g. true or false, default false) — an LLM-typed pattern like '
+            '"isEmpty()" is matched verbatim rather than having its parens reinterpreted '
+            'as regex metacharacters.',
       ),
       'caseInsensitive': Schema.bool(
-        description: 'Match case-insensitively. Default false.',
+        description: 'Match case-insensitively (e.g. true or false, default false).',
       ),
       'contextLines': Schema.int(
         description:
-            'Symmetric number of lines of context to include before/after each match. '
-            'Default 0.',
+            'Symmetric number of lines of context to include before/after each match '
+            '(e.g. 2, 5; default 0).',
         minimum: 0,
       ),
       'directory': Schema.string(
@@ -983,9 +1044,9 @@ final grepPackageSourceTool = Tool(
       'matches': Schema.list(
         description: 'Matches sorted by file path then line number, capped at 50 total.',
         items: Schema.object(
-          required: ['file', 'line', 'matchedLine', 'contextBefore', 'contextAfter'],
+          required: ['path', 'line', 'matchedLine', 'contextBefore', 'contextAfter'],
           properties: {
-            'file': Schema.string(description: 'The source file the match was found in.'),
+            'path': Schema.string(description: 'The source file path the match was found in.'),
             'line': Schema.int(description: '1-based line number of the match.'),
             'matchedLine': Schema.string(description: 'The full text of the matching line.'),
             'contextBefore': Schema.list(
@@ -1022,7 +1083,9 @@ final getThrowStatementsTool = Tool(
     required: ['package'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+        description:
+            'The pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Verify with get_package if uncertain.',
       ),
       'symbol': Schema.string(
         description:
@@ -1045,9 +1108,10 @@ final getThrowStatementsTool = Tool(
       'throws': Schema.list(
         description: 'Every throw or rethrow expression found, in source order.',
         items: Schema.object(
-          required: ['file', 'symbol', 'thrownType', 'context'],
+          required: ['path', 'line', 'symbol', 'thrownType', 'context'],
           properties: {
-            'file': Schema.string(description: 'The source file the throw was found in.'),
+            'path': Schema.string(description: 'The source file path the throw was found in.'),
+            'line': Schema.int(description: '1-based line number of the throw statement.'),
             'symbol': Schema.string(
               description:
                   'The enclosing declaration (e.g. "Client.send" or "jsonDecode").',
@@ -1078,7 +1142,7 @@ final getSdkThrowStatementsTool = Tool(
     required: ['sdk'],
     properties: {
       'sdk': UntitledSingleSelectEnumSchema(
-        description: 'Which SDK to scan.',
+        description: 'Which SDK to scan (e.g. "dart" or "flutter").',
         values: ['dart', 'flutter'],
       ),
       'library': Schema.string(
@@ -1129,9 +1193,10 @@ final getSdkThrowStatementsTool = Tool(
       'throws': Schema.list(
         description: 'Every throw or rethrow expression found, in source order.',
         items: Schema.object(
-          required: ['file', 'symbol', 'thrownType', 'context'],
+          required: ['path', 'line', 'symbol', 'thrownType', 'context'],
           properties: {
-            'file': Schema.string(description: 'The source file the throw was found in.'),
+            'path': Schema.string(description: 'The source file path the throw was found in.'),
+            'line': Schema.int(description: '1-based line number of the throw statement.'),
             'symbol': Schema.string(
               description:
                   'The enclosing declaration (e.g. "List.add" or "identical").',
@@ -1162,7 +1227,7 @@ final grepSdkSourceTool = Tool(
     required: ['sdk', 'pattern'],
     properties: {
       'sdk': UntitledSingleSelectEnumSchema(
-        description: 'Which SDK to scan.',
+        description: 'Which SDK to scan (e.g. "dart" or "flutter").',
         values: ['dart', 'flutter'],
       ),
       'library': Schema.string(
@@ -1186,20 +1251,20 @@ final grepSdkSourceTool = Tool(
       'pattern': Schema.string(
         description:
             'The literal substring to search for (default), or a Dart RegExp pattern when '
-            'regex is true.',
+            'regex is true (e.g. "StatefulWidget", "^abstract class").',
       ),
       'regex': Schema.bool(
         description:
             'When true, compile pattern as a Dart RegExp instead of matching it as a literal '
-            'substring. Default false.',
+            'substring (e.g. true or false, default false).',
       ),
       'caseInsensitive': Schema.bool(
-        description: 'Match case-insensitively. Default false.',
+        description: 'Match case-insensitively (e.g. true or false, default false).',
       ),
       'contextLines': Schema.int(
         description:
-            'Symmetric number of lines of context to include before/after each match. '
-            'Default 0.',
+            'Symmetric number of lines of context to include before/after each match '
+            '(e.g. 2, 5; default 0).',
         minimum: 0,
       ),
       'directory': Schema.string(
@@ -1238,9 +1303,9 @@ final grepSdkSourceTool = Tool(
       'matches': Schema.list(
         description: 'Matches sorted by file path then line number, capped at 50 total.',
         items: Schema.object(
-          required: ['file', 'line', 'matchedLine', 'contextBefore', 'contextAfter'],
+          required: ['path', 'line', 'matchedLine', 'contextBefore', 'contextAfter'],
           properties: {
-            'file': Schema.string(description: 'The source file the match was found in.'),
+            'path': Schema.string(description: 'The source file path the match was found in.'),
             'line': Schema.int(description: '1-based line number of the match.'),
             'matchedLine': Schema.string(description: 'The full text of the matching line.'),
             'contextBefore': Schema.list(
@@ -1277,8 +1342,10 @@ final comparePackagesTool = Tool(
     required: ['packages'],
     properties: {
       'packages': Schema.list(
-        description: 'Package names to compare (2–5 entries). Obtain them from search_packages.',
-        items: Schema.string(description: 'A pub.dev package name.'),
+        description:
+            'Package names to compare (e.g. ["http", "dio"], ["bloc", "riverpod", "provider"]; 2–5 entries). '
+            'Obtain them from search_packages.',
+        items: Schema.string(description: 'A pub.dev package name (e.g. "http", "dio").'),
         minItems: 2,
         maxItems: 5,
       ),
@@ -1326,7 +1393,9 @@ final listPackageVersionsTool = Tool(
     required: ['package'],
     properties: {
       'package': Schema.string(
-        description: 'The exact pub.dev package name. Obtain it from search_packages if unsure.',
+        description:
+            'The exact pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Obtain it from search_packages if unsure.',
       ),
     },
   ),
@@ -1376,7 +1445,9 @@ final getApiDiffTool = Tool(
     required: ['package', 'fromVersion', 'toVersion'],
     properties: {
       'package': Schema.string(
-        description: 'The pub.dev package name. Verify with get_package if uncertain.',
+        description:
+            'The pub.dev package name (e.g. "http", "riverpod", "path"). '
+            'Verify with get_package if uncertain.',
       ),
       'fromVersion': Schema.string(
         description:
@@ -1391,16 +1462,17 @@ final getApiDiffTool = Tool(
       'includeSignatureChanges': Schema.bool(
         description:
             'Opt in to a structural comparison of one declaration signature across both '
-            'versions. Requires `symbol` — there is no whole-package structural scan, so this '
-            'stays cheap and targeted. Default false; the default call downloads no tarballs.',
+            'versions (e.g. true or false, default false). Requires symbol — there is no '
+            'whole-package structural scan, so this stays cheap and targeted. Default false; '
+            'the default call downloads no tarballs.',
       ),
       'symbol': Schema.string(
         description:
-            'The declaration to compare when `includeSignatureChanges` is true — a bare name '
-            '("Client"), a dotted member name ("Client.send"), or a full qualifiedName. '
-            'Resolved against the dartdoc index of each version the same way '
-            'get_symbol_documentation resolves `symbol`. Required when '
-            '`includeSignatureChanges` is true; ignored otherwise.',
+            'The declaration to compare when includeSignatureChanges is true — a bare name '
+            '(e.g. "Client"), a dotted member name (e.g. "Client.send"), or a full qualifiedName '
+            '(e.g. "http.Client"). Resolved against the dartdoc index of each version the same way '
+            'get_symbol_documentation resolves symbol. Required when '
+            'includeSignatureChanges is true; ignored otherwise.',
       ),
     },
   ),
@@ -1477,7 +1549,8 @@ final getSdkReleaseNotesTool = Tool(
     properties: {
       'sdk': UntitledSingleSelectEnumSchema(
         description:
-            'Target SDK. Use dart for Dart SDK changes (language, core libraries, dart:* tools); '
+            'Target SDK (e.g. "dart" or "flutter"). '
+            'Use dart for Dart SDK changes (language, core libraries, dart:* tools); '
             'use flutter for Flutter framework and engine changes.',
         values: ['dart', 'flutter'],
       ),
@@ -1494,16 +1567,20 @@ final getSdkReleaseNotesTool = Tool(
       ),
       'limit': Schema.int(
         description:
-            'Maximum number of release entries to return (default 1 when fromVersion is omitted; '
-            'default 5 when fromVersion is supplied).',
+            'Maximum number of release entries to return (e.g. 1, 5; '
+            'default 1 when fromVersion is omitted, default 5 when fromVersion is supplied).',
         minimum: 1,
       ),
     },
   ),
   outputSchema: ObjectSchema(
-    required: ['resolvedVersion', 'entries'],
+    required: ['resolvedVersion', 'sdk', 'entries'],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
+      'sdk': UntitledSingleSelectEnumSchema(
+        description: 'Which SDK this response describes.',
+        values: ['dart', 'flutter'],
+      ),
       'entries': Schema.list(
         description: 'Release entries, newest first, bounded by fromVersion and limit.',
         items: Schema.object(

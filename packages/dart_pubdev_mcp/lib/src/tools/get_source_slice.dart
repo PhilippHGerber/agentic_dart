@@ -2,12 +2,12 @@
 ///
 /// Extracts Dart source from a single package file in one of two modes.
 ///
-/// **Line-range mode** (`file`, optional `lineStart`/`lineEnd`): returns the
+/// **Line-range mode** (`path`, optional `lineStart`/`lineEnd`): returns the
 /// exact requested 1-based inclusive line range with no truncation. When both
 /// bounds are omitted the full file is returned verbatim. This supersedes the
 /// old `get_package_source_file` tool.
 ///
-/// **Symbol-bounded mode** (`file`, `symbol`, optional `maxLines`): parses
+/// **Symbol-bounded mode** (`path`, `symbol`, optional `maxLines`): parses
 /// the file with the Dart analyzer, locates the named declaration's AST node,
 /// and returns its source. When `maxLines` is supplied and the node spans more
 /// lines than that, the response is truncated to the signature, opening brace,
@@ -16,7 +16,7 @@
 ///
 /// ## Symbol resolution
 ///
-/// `symbol` is matched against declarations in the given `file` only — no
+/// `symbol` is matched against declarations in the given `path` only — no
 /// API index or href resolution is involved.
 ///
 /// - A bare name (e.g. `Client`) matches a top-level class, mixin, enum,
@@ -34,7 +34,7 @@
 /// {
 ///   "resolvedVersion": "1.2.3",
 ///   "package": "http",
-///   "file": "lib/http.dart",
+///   "path": "lib/http.dart",
 ///   "mode": "symbol",
 ///   "symbol": "Client",
 ///   "lineStart": 40,
@@ -61,7 +61,7 @@
 /// - `PACKAGE_NOT_FOUND`
 /// - `SOURCE_FILE_NOT_FOUND` (file absent from the tarball)
 /// - `SYMBOL_NOT_FOUND` (symbol-bounded mode, declaration not in the file)
-/// - `INVALID_ARGUMENT` (`file` missing, or path contains `..` segments)
+/// - `INVALID_ARGUMENT` (`path` missing, or path contains `..` segments)
 library;
 
 import 'package:analyzer/dart/analysis/results.dart';
@@ -105,7 +105,7 @@ final class GetSourceSliceHandler {
     final args = request.arguments ?? const {};
     final package = (args['package'] as String?) ?? '';
     final suppliedVersion = args['version'] as String?;
-    final rawFile = (args['file'] as String?) ?? '';
+    final rawPath = (args['path'] as String?) ?? '';
     final rawSymbol = (args['symbol'] as String?) ?? (args['symbolName'] as String?);
     final symbol = (rawSymbol == null || rawSymbol.isEmpty) ? null : rawSymbol;
     final lineStart = asInt(args['lineStart']);
@@ -116,13 +116,13 @@ final class GetSourceSliceHandler {
     // SDK package name (e.g. "flutter") never reaches VersionResolver/PubDevClient.
     if (sdkPackageGuardError(package) case final error?) return ToolResponse.error(error);
 
-    // Validate: `file` is always required.
-    final file = _normalizePath(rawFile);
-    if (file == null || file.isEmpty) {
+    // Validate: `path` is always required.
+    final path = _normalizePath(rawPath);
+    if (path == null || path.isEmpty) {
       return ToolResponse.error(
         const DomainError(
           code: DomainErrors.invalidArgument,
-          message: 'The `file` parameter is required and must not contain ".." segments.',
+          message: 'The `path` parameter is required and must not contain ".." segments.',
           suggestion:
               'Provide a relative path from the package root '
               '(e.g. "lib/src/server/prompts_support.dart"). '
@@ -146,26 +146,26 @@ final class GetSourceSliceHandler {
 
     _log(
       LoggingLevel.info,
-      'get_source_slice: package=$package version=$resolvedVersion file=$file '
+      'get_source_slice: package=$package version=$resolvedVersion path=$path '
       '${symbol != null ? 'symbol=$symbol' : 'lines=$lineStart..$lineEnd'}',
     );
 
     // Symbol-bounded mode needs the parsed AST; line-range mode needs only the
     // raw content, so each mode resolves through the matching AstAccess method.
     if (symbol != null) {
-      switch (await _astAccess.unit(package, resolvedVersion, file)) {
+      switch (await _astAccess.unit(package, resolvedVersion, path)) {
         case PubDevFailure(:final error):
           return ToolResponse.error(error);
         case PubDevSuccess(:final value):
-          return _symbolBounded(package, resolvedVersion, file, value, symbol, maxLines);
+          return _symbolBounded(package, resolvedVersion, path, value, symbol, maxLines);
       }
     }
 
-    switch (await _astAccess.fileText(package, resolvedVersion, file)) {
+    switch (await _astAccess.fileText(package, resolvedVersion, path)) {
       case PubDevFailure(:final error):
         return ToolResponse.error(error);
       case PubDevSuccess(:final value):
-        return _lineRange(resolvedVersion, package, file, value, lineStart, lineEnd);
+        return _lineRange(resolvedVersion, package, path, value, lineStart, lineEnd);
     }
   }
 
@@ -174,7 +174,7 @@ final class GetSourceSliceHandler {
   CallToolResult _lineRange(
     String resolvedVersion,
     String package,
-    String file,
+    String path,
     String content,
     int? lineStart,
     int? lineEnd,
@@ -183,7 +183,7 @@ final class GetSourceSliceHandler {
     return _success(
       resolvedVersion: resolvedVersion,
       package: package,
-      file: file,
+      path: path,
       mode: 'line-range',
       lineStart: slice.lineStart,
       lineEnd: slice.effectiveLineEnd,
@@ -197,7 +197,7 @@ final class GetSourceSliceHandler {
   CallToolResult _symbolBounded(
     String package,
     String resolvedVersion,
-    String file,
+    String path,
     ParseStringResult ast,
     String symbol,
     int? maxLines,
@@ -207,7 +207,7 @@ final class GetSourceSliceHandler {
       return ToolResponse.error(
         DomainError(
           code: DomainErrors.symbolNotFound,
-          message: 'Symbol "$symbol" was not found in $file.',
+          message: 'Symbol "$symbol" was not found in $path.',
           suggestion:
               'Verify the symbol name is spelled correctly. '
               'For a class member use "ClassName.memberName". '
@@ -220,7 +220,7 @@ final class GetSourceSliceHandler {
     return _success(
       resolvedVersion: resolvedVersion,
       package: package,
-      file: file,
+      path: path,
       mode: 'symbol',
       symbol: symbol,
       lineStart: slice.lineStart,
@@ -244,7 +244,7 @@ final class GetSourceSliceHandler {
   static CallToolResult _success({
     required String resolvedVersion,
     required String package,
-    required String file,
+    required String path,
     required String mode,
     required int lineStart,
     required int lineEnd,
@@ -253,7 +253,7 @@ final class GetSourceSliceHandler {
     String? symbol,
   }) => ToolResponse.ok({
     'package': package,
-    'file': file,
+    'path': path,
     'mode': mode,
     'symbol': ?symbol,
     'lineStart': lineStart,

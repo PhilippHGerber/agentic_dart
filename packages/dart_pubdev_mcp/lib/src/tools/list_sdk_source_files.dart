@@ -199,7 +199,7 @@ final class ListSdkSourceFilesHandler {
       'sdk': sdk,
       'library': ?library,
       'package': ?package,
-      'files': paths,
+      'paths': paths,
     }, resolvedVersion: resolvedVersion);
   }
 

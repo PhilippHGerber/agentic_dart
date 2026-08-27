@@ -118,8 +118,8 @@ const kGetSymbolDocumentationDescription =
 /// Description for `getSourceSliceTool`.
 const kGetSourceSliceDescription =
     'Read Dart source from a package file in line-range or AST symbol-bounded mode. '
-    'Line-range mode: specify file with optional lineStart/lineEnd (1-based, inclusive; omit bounds for entire file). '
-    'Symbol-bounded mode: specify file and symbol (e.g. "Client", "Client.send", "new" for unnamed constructor); '
+    'Line-range mode: specify path with optional lineStart/lineEnd (1-based, inclusive; omit bounds for entire file). '
+    'Symbol-bounded mode: specify path and symbol (e.g. "Client", "Client.send", "new" for unnamed constructor); '
     'maxLines truncates large bodies while reporting true lineEnd. '
     'Reads any file across lib/, test/, bin/, and example/. '
     'Use list_package_source_files if the file path is unknown; use get_symbol_documentation for doc comments.';
@@ -129,8 +129,8 @@ const kGetSourceSliceDescription =
 /// Description for `getSdkSourceSliceTool`.
 const kGetSdkSourceSliceDescription =
     'Read source code from the Dart SDK (dart:core, dart:async) or Flutter framework (package:flutter). '
-    'Specify sdk: "dart" with library (e.g. "core") and file (e.g. "list.dart"), '
-    'or sdk: "flutter" with package (e.g. "flutter") and file (e.g. "src/widgets/framework.dart"). '
+    'Specify sdk: "dart" with library (e.g. "core") and path (e.g. "list.dart"), '
+    'or sdk: "flutter" with package (e.g. "flutter") and path (e.g. "src/widgets/framework.dart"). '
     'Supports lineStart/lineEnd line ranges or symbol extraction (with optional maxLines). '
     'Auto-detects local SDK version when version is omitted. Use list_sdk_source_files to locate files.';
 
@@ -142,7 +142,7 @@ const kListSdkSourceFilesDescription =
     'For sdk: "dart", optionally filter by library (e.g. "core"); '
     'for sdk: "flutter", optionally filter by package (e.g. "flutter"). '
     'Filter results using directory path prefixes and fileExtension. '
-    'Pass resulting paths to get_sdk_source_slice as file.';
+    'Pass resulting paths to get_sdk_source_slice as path.';
 
 // ─── list_package_source_files ────────────────────────────────────────────────
 

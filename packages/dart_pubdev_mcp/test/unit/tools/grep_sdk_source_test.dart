@@ -85,8 +85,8 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      final files = _matches(result).map((m) => m['file']).toSet();
-      expect(files, equals({'lib/core/list.dart', 'lib/core/map.dart'}));
+      final paths = _matches(result).map((m) => m['path']).toSet();
+      expect(paths, equals({'lib/core/list.dart', 'lib/core/map.dart'}));
     });
 
     test('unscoped scan (no library) searches the whole dart: tree', () async {
@@ -96,8 +96,8 @@ void main() {
         _request({'sdk': 'dart', 'version': '3.12.2', 'pattern': 'isEmpty'}),
       );
 
-      final files = _matches(result).map((m) => m['file']).toSet();
-      expect(files, equals({'lib/core/list.dart', 'lib/core/map.dart'}));
+      final paths = _matches(result).map((m) => m['path']).toSet();
+      expect(paths, equals({'lib/core/list.dart', 'lib/core/map.dart'}));
     });
 
     test('response echoes sdk, library, pattern, resolvedVersion', () async {
@@ -141,8 +141,8 @@ void main() {
       );
 
       expect(result.isError, isNull);
-      final files = _matches(result).map((m) => m['file']).toSet();
-      expect(files, equals({'packages/flutter/lib/src/rendering/paragraph.dart'}));
+      final paths = _matches(result).map((m) => m['path']).toSet();
+      expect(paths, equals({'packages/flutter/lib/src/rendering/paragraph.dart'}));
     });
 
     test('unscoped scan (no package) searches the whole flutter/flutter tree', () async {
@@ -152,9 +152,9 @@ void main() {
         _request({'sdk': 'flutter', 'version': '3.35.1', 'pattern': 'class'}),
       );
 
-      final files = _matches(result).map((m) => m['file']).toSet();
+      final paths = _matches(result).map((m) => m['path']).toSet();
       expect(
-        files,
+        paths,
         equals({
           'packages/flutter/lib/src/widgets/framework.dart',
           'packages/flutter/lib/src/rendering/paragraph.dart',
@@ -211,8 +211,8 @@ void main() {
         _request({'sdk': 'dart', 'version': '3.12.2', 'pattern': 'isEmpty'}),
       );
 
-      final files = _matches(result).map((m) => m['file']! as String).toList();
-      expect(files.any((f) => f.endsWith('.md')), isFalse);
+      final paths = _matches(result).map((m) => m['path'] as String? ?? '').toList();
+      expect(paths.any((f) => f.endsWith('.md')), isFalse);
     });
 
     test('fileExtension override widens scope to a non-.dart extension', () async {
@@ -227,8 +227,8 @@ void main() {
         }),
       );
 
-      final files = _matches(result).map((m) => m['file']).toList();
-      expect(files, equals(['README.md']));
+      final paths = _matches(result).map((m) => m['path']).toList();
+      expect(paths, equals(['README.md']));
     });
 
     test('fileExtension override narrows within .dart files too', () async {
@@ -244,8 +244,8 @@ void main() {
         }),
       );
 
-      final files = _matches(result).map((m) => m['file']).toList();
-      expect(files, equals(['packages/flutter/pubspec.yaml']));
+      final paths = _matches(result).map((m) => m['path']).toList();
+      expect(paths, equals(['packages/flutter/pubspec.yaml']));
     });
   });
 
@@ -333,8 +333,8 @@ void main() {
         }),
       );
 
-      final files = _matches(result).map((m) => m['file']).toSet();
-      expect(files, equals({'lib/core/list.dart', 'lib/core/map.dart'}));
+      final paths = _matches(result).map((m) => m['path']).toSet();
+      expect(paths, equals({'lib/core/list.dart', 'lib/core/map.dart'}));
     });
 
     test('a full file path scopes the scan to that one file', () async {
@@ -349,8 +349,8 @@ void main() {
         }),
       );
 
-      final files = _matches(result).map((m) => m['file']).toSet();
-      expect(files, equals({'lib/core/list.dart'}));
+      final paths = _matches(result).map((m) => m['path']).toSet();
+      expect(paths, equals({'lib/core/list.dart'}));
     });
   });
 

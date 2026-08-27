@@ -3,8 +3,6 @@
 /// Each case is a golden sample shaped exactly like a real handler's success
 /// payload (see the handler source for the authoritative shape), validated
 /// against the matching `Tool.outputSchema` from `tool_definitions.dart`.
-/// `search_packages` is intentionally absent — see its doc comment in
-/// `tool_definitions.dart` for why it declares no `outputSchema`.
 library;
 
 import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart';
@@ -14,6 +12,58 @@ import '../../support/schema_conformance.dart';
 
 void main() {
   group('outputSchema conformance', () {
+    test('search_packages', () {
+      expectConformsToOutputSchema(searchPackagesTool, {
+        'packages': [
+          {
+            'package': 'http',
+            'version': '1.2.0',
+            'description': 'A composable, multi-platform HTTP client.',
+            'likes': 3000,
+            'pubPoints': 160,
+            'popularity': 100000,
+            'verified': true,
+            'sdks': ['dart', 'flutter'],
+            'platforms': ['android', 'ios', 'web'],
+            'topics': ['network', 'http'],
+            'isFlutterFavorite': true,
+            'daysSinceUpdate': 10,
+            'activeMaintenance': true,
+            'publisher': 'dart.dev',
+            'license': 'BSD-3-Clause',
+          },
+        ],
+      });
+    });
+
+    test('search_packages (optional fields omitted)', () {
+      expectConformsToOutputSchema(searchPackagesTool, {
+        'packages': [
+          {
+            'package': 'unverified_pkg',
+            'version': '0.1.0',
+            'description': 'An unverified package.',
+            'likes': 0,
+            'pubPoints': 0,
+            'popularity': 0,
+            'verified': false,
+            'sdks': <String>[],
+            'platforms': <String>[],
+            'topics': <String>[],
+            'isFlutterFavorite': false,
+            'daysSinceUpdate': 200,
+            'activeMaintenance': false,
+          },
+        ],
+      });
+    });
+
+    test('search_packages (zero results)', () {
+      expectConformsToOutputSchema(searchPackagesTool, {
+        'packages': <Object?>[],
+      });
+    });
+
     test('get_package', () {
       expectConformsToOutputSchema(getPackageTool, {
         'resolvedVersion': '1.2.0',
@@ -69,6 +119,7 @@ void main() {
     test('get_changelog', () {
       expectConformsToOutputSchema(getChangelogTool, {
         'resolvedVersion': '1.2.0',
+        'package': 'http',
         'entries': [
           {
             'version': '1.2.0',
@@ -188,7 +239,7 @@ void main() {
       expectConformsToOutputSchema(getSourceSliceTool, {
         'resolvedVersion': '1.2.0',
         'package': 'http',
-        'file': 'lib/http.dart',
+        'path': 'lib/http.dart',
         'mode': 'line-range',
         'lineStart': 1,
         'lineEnd': 40,
@@ -201,7 +252,7 @@ void main() {
       expectConformsToOutputSchema(getSourceSliceTool, {
         'resolvedVersion': '1.2.0',
         'package': 'http',
-        'file': 'lib/http.dart',
+        'path': 'lib/http.dart',
         'mode': 'symbol',
         'symbol': 'Client',
         'lineStart': 40,
@@ -216,7 +267,7 @@ void main() {
         'resolvedVersion': '3.12.2',
         'sdk': 'dart',
         'library': 'core',
-        'file': 'list.dart',
+        'path': 'list.dart',
         'mode': 'line-range',
         'lineStart': 1,
         'lineEnd': 40,
@@ -230,7 +281,7 @@ void main() {
         'resolvedVersion': '3.35.1',
         'sdk': 'flutter',
         'package': 'flutter',
-        'file': 'src/widgets/framework.dart',
+        'path': 'src/widgets/framework.dart',
         'mode': 'line-range',
         'lineStart': 1,
         'lineEnd': 40,
@@ -244,7 +295,7 @@ void main() {
         'resolvedVersion': '3.12.2',
         'sdk': 'dart',
         'library': 'core',
-        'file': 'list.dart',
+        'path': 'list.dart',
         'mode': 'symbol',
         'symbol': 'MyList',
         'lineStart': 1,
@@ -259,7 +310,7 @@ void main() {
         'resolvedVersion': '3.35.1',
         'sdk': 'flutter',
         'package': 'flutter',
-        'file': 'src/widgets/framework.dart',
+        'path': 'src/widgets/framework.dart',
         'mode': 'symbol',
         'symbol': 'State.setState',
         'lineStart': 40,
@@ -274,7 +325,7 @@ void main() {
         'resolvedVersion': '3.12.2',
         'sdk': 'dart',
         'library': 'core',
-        'files': ['lib/core/list.dart', 'lib/core/map.dart'],
+        'paths': ['lib/core/list.dart', 'lib/core/map.dart'],
       });
     });
 
@@ -282,7 +333,7 @@ void main() {
       expectConformsToOutputSchema(listSdkSourceFilesTool, {
         'resolvedVersion': '3.35.1',
         'sdk': 'flutter',
-        'files': ['packages/flutter/lib/src/widgets/framework.dart'],
+        'paths': ['packages/flutter/lib/src/widgets/framework.dart'],
       });
     });
 
@@ -290,7 +341,63 @@ void main() {
       expectConformsToOutputSchema(listPackageSourceFilesTool, {
         'resolvedVersion': '1.2.0',
         'package': 'http',
-        'files': ['lib/http.dart', 'lib/src/client.dart'],
+        'paths': ['lib/http.dart', 'lib/src/client.dart'],
+      });
+    });
+
+    test('grep_package_source', () {
+      expectConformsToOutputSchema(grepPackageSourceTool, {
+        'resolvedVersion': '1.2.0',
+        'package': 'http',
+        'pattern': 'isEmpty',
+        'hasMore': false,
+        'matches': [
+          {
+            'path': 'lib/src/client.dart',
+            'line': 42,
+            'matchedLine': '  if (uri.path.isEmpty) {',
+            'contextBefore': ['class Client {'],
+            'contextAfter': ['    throw ArgumentError();'],
+          },
+        ],
+      });
+    });
+
+    test('grep_sdk_source (dart)', () {
+      expectConformsToOutputSchema(grepSdkSourceTool, {
+        'resolvedVersion': '3.12.2',
+        'sdk': 'dart',
+        'library': 'core',
+        'pattern': 'isEmpty',
+        'hasMore': false,
+        'matches': [
+          {
+            'path': 'lib/core/list.dart',
+            'line': 42,
+            'matchedLine': '  bool get isEmpty => length == 0;',
+            'contextBefore': ['class List<E> {'],
+            'contextAfter': ['  bool get isNotEmpty => !isEmpty;'],
+          },
+        ],
+      });
+    });
+
+    test('grep_sdk_source (flutter)', () {
+      expectConformsToOutputSchema(grepSdkSourceTool, {
+        'resolvedVersion': '3.35.1',
+        'sdk': 'flutter',
+        'package': 'flutter',
+        'pattern': 'RenderParagraph',
+        'hasMore': false,
+        'matches': [
+          {
+            'path': 'packages/flutter/lib/src/rendering/paragraph.dart',
+            'line': 42,
+            'matchedLine': 'class RenderParagraph extends RenderBox {',
+            'contextBefore': <String>[],
+            'contextAfter': <String>[],
+          },
+        ],
       });
     });
 
@@ -300,13 +407,15 @@ void main() {
         'package': 'http',
         'throws': [
           {
-            'file': 'lib/src/client.dart',
+            'path': 'lib/src/client.dart',
+            'line': 42,
             'symbol': 'Client.send',
             'thrownType': 'ClientException',
             'context': 'if (closed) {\n  throw ClientException("closed");\n}',
           },
           {
-            'file': 'lib/src/utils.dart',
+            'path': 'lib/src/utils.dart',
+            'line': 15,
             'symbol': 'parseHeader',
             'thrownType': 'rethrow',
             'context': 'rethrow;',
@@ -322,7 +431,8 @@ void main() {
         'library': 'core',
         'throws': [
           {
-            'file': 'lib/core/list.dart',
+            'path': 'lib/core/list.dart',
+            'line': 42,
             'symbol': 'MyList.add',
             'thrownType': 'RangeError',
             'context': 'if (full) {\n  throw RangeError("full");\n}',
@@ -338,7 +448,8 @@ void main() {
         'package': 'flutter',
         'throws': [
           {
-            'file': 'packages/flutter/lib/src/widgets/framework.dart',
+            'path': 'packages/flutter/lib/src/widgets/framework.dart',
+            'line': 42,
             'symbol': 'debugChecksAreDisabled',
             'thrownType': 'rethrow',
             'context': 'rethrow;',
@@ -398,6 +509,7 @@ void main() {
     test('get_sdk_release_notes', () {
       expectConformsToOutputSchema(getSdkReleaseNotesTool, {
         'resolvedVersion': '3.14.0',
+        'sdk': 'dart',
         'entries': [
           {
             'version': '3.14.0',

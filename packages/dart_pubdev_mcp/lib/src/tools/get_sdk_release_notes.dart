@@ -103,7 +103,7 @@ final class GetSdkReleaseNotesHandler {
 
     if (fromVersion == null) {
       final bounded = entries.sublist(targetIndex).take(effectiveLimit).toList();
-      return _success(bounded, resolvedVersion);
+      return _success(bounded, sdk, resolvedVersion);
     }
 
     return _applyFromVersion(
@@ -155,7 +155,7 @@ final class GetSdkReleaseNotesHandler {
     }
 
     final bounded = entries.sublist(targetIndex, fromIndex).take(effectiveLimit).toList();
-    return _success(bounded, resolvedVersion);
+    return _success(bounded, sdk, resolvedVersion);
   }
 
   static bool _matchesVersion(String entryVersion, String targetVersion) {
@@ -189,10 +189,14 @@ final class GetSdkReleaseNotesHandler {
     return parts;
   }
 
-  static CallToolResult _success(List<SdkReleaseNotesEntry> entries, String resolvedVersion) =>
+  static CallToolResult _success(
+    List<SdkReleaseNotesEntry> entries,
+    String sdk,
+    String resolvedVersion,
+  ) =>
       ToolResponse.ok(
         {
-          'resolvedVersion': resolvedVersion,
+          'sdk': sdk,
           'entries': entries.map(_entryToJson).toList(),
         },
         resolvedVersion: resolvedVersion,

@@ -68,6 +68,12 @@ String? _resolvedVersion(CallToolResult result) {
   return json['resolvedVersion'] as String?;
 }
 
+/// Decodes the first content item of [result] and returns its `package`.
+String? _package(CallToolResult result) {
+  final json = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
+  return json['package'] as String?;
+}
+
 /// Decodes the first content item of [result] as a JSON error payload.
 Map<String, Object?> _errorPayload(CallToolResult result) {
   final outer = jsonDecode((result.content.first as TextContent).text) as Map<String, Object?>;
@@ -239,6 +245,18 @@ void main() {
       final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_entries(result).every((e) => e.containsKey('breaking')), isTrue);
+    });
+  });
+
+  // ─── package echo ──────────────────────────────────────────────────────────
+
+  group('package echo', () {
+    test('is present and equals the requested package name', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_package(result), equals('http'));
     });
   });
 

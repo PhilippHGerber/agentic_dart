@@ -73,7 +73,7 @@ void main() {
       expect(result.isError, isNull);
       final matches = _matches(result);
       expect(matches, hasLength(1));
-      expect(matches.single['file'], equals('lib/src/client.dart'));
+      expect(matches.single['path'], equals('lib/src/client.dart'));
       expect(matches.single['line'], equals(3));
       expect(matches.single['matchedLine'], equals('    isEmpty();'));
     });
@@ -275,8 +275,8 @@ void main() {
         _request({'package': 'foo', 'version': '1.0.0', 'pattern': 'needle'}),
       );
 
-      final files = _matches(result).map((m) => m['file']).toList();
-      expect(files, equals(['lib/foo.dart']));
+      final paths = _matches(result).map((m) => m['path']).toList();
+      expect(paths, equals(['lib/foo.dart']));
     });
 
     test('an explicit fileExtension override searches the denylisted extension', () async {
@@ -294,8 +294,8 @@ void main() {
         }),
       );
 
-      final files = _matches(result).map((m) => m['file']).toList();
-      expect(files, equals(['assets/logo.png']));
+      final paths = _matches(result).map((m) => m['path']).toList();
+      expect(paths, equals(['assets/logo.png']));
     });
   });
 
@@ -317,8 +317,8 @@ void main() {
         }),
       );
 
-      final files = _matches(result).map((m) => m['file']).toList();
-      expect(files, equals(['lib/src/a.dart']));
+      final paths = _matches(result).map((m) => m['path']).toList();
+      expect(paths, equals(['lib/src/a.dart']));
     });
   });
 
@@ -360,8 +360,8 @@ void main() {
       );
 
       final matches = _matches(result);
-      expect(matches[0]['file'], equals('lib/a.dart'));
-      expect(matches[1]['file'], equals('lib/z.dart'));
+      expect(matches[0]['path'], equals('lib/a.dart'));
+      expect(matches[1]['path'], equals('lib/z.dart'));
     });
   });
 

@@ -12,7 +12,8 @@ import 'package:dart_pubdev_mcp/src/data/pub_client.dart';
 import 'package:dart_pubdev_mcp/src/identity.dart';
 import 'package:dart_pubdev_mcp/src/resources/package_resources.dart';
 import 'package:dart_pubdev_mcp/src/server.dart';
-import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart' show listPackageVersionsTool;
+import 'package:dart_pubdev_mcp/src/tools/tool_definitions.dart'
+    show listPackageVersionsTool, searchPackagesTool;
 import 'package:dart_pubdev_mcp/src/tools/tool_descriptions.dart' show kServerInstructions;
 import 'package:dart_pubdev_mcp/src/update/update_check_state_store.dart';
 import 'package:dart_pubdev_mcp/src/version.dart';
@@ -299,11 +300,11 @@ void main() {
         expect(names, contains('get_source_slice'));
       });
 
-      test('get_source_slice input schema marks package and file as required', () async {
+      test('get_source_slice input schema marks package and path as required', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_source_slice');
-        expect(tool.inputSchema.required, containsAll(['package', 'file']));
+        expect(tool.inputSchema.required, containsAll(['package', 'path']));
       });
 
       test('lists get_sdk_source_slice after initialization', () async {
@@ -313,11 +314,11 @@ void main() {
         expect(names, contains('get_sdk_source_slice'));
       });
 
-      test('get_sdk_source_slice input schema marks sdk and file as required', () async {
+      test('get_sdk_source_slice input schema marks sdk and path as required', () async {
         await doInitialize();
         final tools = await serverConnection.listTools(ListToolsRequest());
         final tool = tools.tools.firstWhere((t) => t.name == 'get_sdk_source_slice');
-        expect(tool.inputSchema.required, containsAll(['sdk', 'file']));
+        expect(tool.inputSchema.required, containsAll(['sdk', 'path']));
       });
 
       test(
@@ -803,9 +804,156 @@ void main() {
       );
 
       expect(result.isError, isTrue);
-      expect(decodeError(result)['code'], equals('INVALID_ARGUMENT'));
+      final error = decodeError(result);
+      expect(error['code'], equals('INVALID_ARGUMENT'));
+      expect(error['retryable'], isFalse);
+      expect(
+        error['suggestion'],
+        equals(
+          "Tool 'find_symbols' requires parameter(s): [package]. Expected properties: [package, query, version].",
+        ),
+      );
+      expect(
+        error['details'],
+        equals({
+          'receivedKeys': ['query'],
+          'missingRequired': ['package'],
+          'expectedRequired': ['package', 'query'],
+          'expectedOptional': ['version'],
+        }),
+      );
       verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
     });
+
+    test(
+      'missing required parameter with misspelled key produces rich schema diff and suggestion',
+      () async {
+        final result = await serverConnection.callTool(
+          CallToolRequest(
+            name: 'list_package_source_files',
+            arguments: {'packageName': 'http'},
+          ),
+        );
+
+        expect(result.isError, isTrue);
+        final error = decodeError(result);
+        expect(error['code'], equals('INVALID_ARGUMENT'));
+        expect(error['retryable'], isFalse);
+        expect(
+          error['suggestion'],
+          equals(
+            "Tool 'list_package_source_files' requires parameter(s): [package]. Received unrecognized key(s): [packageName]. Expected properties: [directory, fileExtension, package, version].",
+          ),
+        );
+        expect(
+          error['details'],
+          equals({
+            'receivedKeys': ['packageName'],
+            'missingRequired': ['package'],
+            'expectedRequired': ['package'],
+            'expectedOptional': ['directory', 'fileExtension', 'version'],
+            'unknownKeys': ['packageName'],
+          }),
+        );
+        verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      },
+    );
+
+    test('missing all arguments with empty map returns schema diff without unknownKeys', () async {
+      final result = await serverConnection.callTool(
+        CallToolRequest(
+          name: 'list_package_source_files',
+          arguments: <String, Object?>{},
+        ),
+      );
+
+      expect(result.isError, isTrue);
+      final error = decodeError(result);
+      expect(error['code'], equals('INVALID_ARGUMENT'));
+      expect(error['retryable'], isFalse);
+      expect(
+        error['suggestion'],
+        equals(
+          "Tool 'list_package_source_files' requires parameter(s): [package]. Expected properties: [directory, fileExtension, package, version].",
+        ),
+      );
+      expect(
+        error['details'],
+        equals({
+          'receivedKeys': <String>[],
+          'missingRequired': ['package'],
+          'expectedRequired': ['package'],
+          'expectedOptional': ['directory', 'fileExtension', 'version'],
+        }),
+      );
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test('missing arguments when arguments map is null returns schema diff', () async {
+      final result = await serverConnection.callTool(
+        CallToolRequest(name: 'list_package_source_files'),
+      );
+
+      expect(result.isError, isTrue);
+      final error = decodeError(result);
+      expect(error['code'], equals('INVALID_ARGUMENT'));
+      expect(error['retryable'], isFalse);
+      expect(
+        error['suggestion'],
+        equals(
+          "Tool 'list_package_source_files' requires parameter(s): [package]. Expected properties: [directory, fileExtension, package, version].",
+        ),
+      );
+      expect(
+        error['details'],
+        equals({
+          'receivedKeys': <String>[],
+          'missingRequired': ['package'],
+          'expectedRequired': ['package'],
+          'expectedOptional': ['directory', 'fileExtension', 'version'],
+        }),
+      );
+      verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+    });
+
+    test(
+      'extra unrecognized key alongside schema validation error formats unknown key suggestion',
+      () async {
+        final result = await serverConnection.callTool(
+          CallToolRequest(
+            name: 'browse_api_symbols',
+            arguments: {
+              'package': 'http',
+              'query': 'Client',
+              'limit': 99,
+              'extraKey': 'extra',
+            },
+          ),
+        );
+
+        expect(result.isError, isTrue);
+        final error = decodeError(result);
+        expect(error['code'], equals('INVALID_ARGUMENT'));
+        expect(error['retryable'], isFalse);
+        expect(
+          error['suggestion'],
+          equals(
+            "Tool 'browse_api_symbols' received unrecognized key(s): [extraKey]. Expected properties: [kind, limit, package, query, version].",
+          ),
+        );
+        expect(
+          error['details'],
+          equals({
+            'receivedKeys': ['extraKey', 'limit', 'package', 'query'],
+            'missingRequired': <String>[],
+            'expectedRequired': ['package', 'query'],
+            'expectedOptional': ['kind', 'limit', 'version'],
+            'unknownKeys': ['extraKey'],
+          }),
+        );
+        verifyNever(() => mockHttp.get(any(), headers: any(named: 'headers')));
+      },
+    );
 
     test('the rejection body is JSON, never a plain-text validation message', () async {
       final result = await serverConnection.callTool(
@@ -1020,7 +1168,7 @@ void main() {
       expect(decodeBody(second), isNot(contains('dartPubdevMcpUpdate')));
     });
 
-    test('a search_packages first call defers the notice to the next eligible call', () async {
+    test('a search_packages first call carries the notice in text content', () async {
       stubPackageInfo(mockHttp, packageName: 'dart_pubdev_mcp', version: '999.0.0');
       stubUrl(
         mock: mockHttp,
@@ -1042,14 +1190,14 @@ void main() {
       final searchResult = await serverConnection.callTool(
         CallToolRequest(name: 'search_packages', arguments: {'query': 'http'}),
       );
-      // search_packages' response body is a bare JSON array — not eligible.
-      final decodedArray = jsonDecode((searchResult.content.single as TextContent).text);
-      expect(decodedArray, isA<List<Object?>>());
+      expect(decodeBody(searchResult), contains('dartPubdevMcpUpdate'));
+      expect(searchResult.structuredContent, isNot(contains('dartPubdevMcpUpdate')));
+      expectConformsToOutputSchema(searchPackagesTool, searchResult.structuredContent);
 
       stubPackageInfo(mockHttp);
       final next = await listHttpVersions();
 
-      expect(decodeBody(next), contains('dartPubdevMcpUpdate'));
+      expect(decodeBody(next), isNot(contains('dartPubdevMcpUpdate')));
     });
 
     test('a Tool Error response never carries the notice', () async {
