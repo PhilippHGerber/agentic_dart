@@ -171,15 +171,15 @@ final class GetThrowStatementsHandler {
       final prefix = symbol.substring(0, dotIndex);
       final suffix = symbol.substring(dotIndex + 1);
       if (_isTypeIdentifier(prefix)) {
-        return _scanClassMethod(package, resolvedVersion, prefix, suffix, symbol);
+        return await _scanClassMethod(package, resolvedVersion, prefix, suffix, symbol);
       } else {
-        return _scanTopLevelFunction(package, resolvedVersion, symbol);
+        return await _scanTopLevelFunction(package, resolvedVersion, symbol);
       }
     } else {
       if (_isTypeIdentifier(symbol)) {
-        return _scanClass(package, resolvedVersion, symbol);
+        return await _scanClass(package, resolvedVersion, symbol);
       } else {
-        return _scanTopLevelFunction(package, resolvedVersion, symbol);
+        return await _scanTopLevelFunction(package, resolvedVersion, symbol);
       }
     }
   }

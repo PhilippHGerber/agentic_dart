@@ -131,7 +131,7 @@ final class _McpProcess {
   /// Closes stdin and waits for the process to exit, killing it after 5 s.
   Future<int> close() async {
     await _process.stdin.close();
-    return _process.exitCode.timeout(
+    return await _process.exitCode.timeout(
       const Duration(seconds: 5),
       onTimeout: () {
         _process.kill(ProcessSignal.sigkill);

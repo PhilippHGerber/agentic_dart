@@ -72,8 +72,7 @@ List<SdkReleaseNotesEntry> parseSdkChangelogText(String text) {
         date: currentDate,
         changes: List.unmodifiable(currentChanges),
         sections: {
-          for (final entry in currentSections.entries)
-            entry.key: List.unmodifiable(entry.value),
+          for (final entry in currentSections.entries) entry.key: List.unmodifiable(entry.value),
         },
         breaking: isBreaking,
       ),
@@ -102,7 +101,8 @@ List<SdkReleaseNotesEntry> parseSdkChangelogText(String text) {
         if (dateMatch != null) {
           final dateStr = dateMatch.group(1);
           if (dateStr != null) {
-            currentDate = DateTime.tryParse('${dateStr}T00:00:00.000Z') ??
+            currentDate =
+                DateTime.tryParse('${dateStr}T00:00:00.000Z') ??
                 DateTime.tryParse(dateStr)?.toUtc();
           }
         }

@@ -249,7 +249,7 @@ base class PubMcpServer extends MCPServer
         resourceRef.uri == PackageResourcesHandler.kPubspecTemplate.uriTemplate;
     if (!isPackageTemplate) return _emptyCompletion;
 
-    return switch (request.argument.name) {
+    return await switch (request.argument.name) {
       'name' => _completeName(request.argument.value),
       'version' => _completeVersion(request),
       _ => _emptyCompletion,
@@ -401,12 +401,11 @@ base class PubMcpServer extends MCPServer
       final receivedKeys = (request.arguments?.keys.toList() ?? <String>[])..sort();
       final expectedRequired = (tool.inputSchema.required?.toList() ?? <String>[])..sort();
       final allProperties = (tool.inputSchema.properties?.keys.toList() ?? <String>[])..sort();
-      final expectedOptional =
-          allProperties.where((k) => !expectedRequired.contains(k)).toList()..sort();
-      final missingRequired =
-          expectedRequired.where((k) => !receivedKeys.contains(k)).toList()..sort();
-      final unknownKeys =
-          receivedKeys.where((k) => !allProperties.contains(k)).toList()..sort();
+      final expectedOptional = allProperties.where((k) => !expectedRequired.contains(k)).toList()
+        ..sort();
+      final missingRequired = expectedRequired.where((k) => !receivedKeys.contains(k)).toList()
+        ..sort();
+      final unknownKeys = receivedKeys.where((k) => !allProperties.contains(k)).toList()..sort();
 
       final String suggestion;
       if (missingRequired.isNotEmpty && unknownKeys.isNotEmpty) {

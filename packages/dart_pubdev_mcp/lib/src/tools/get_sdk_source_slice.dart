@@ -118,7 +118,7 @@ final class GetSdkSourceSliceHandler {
     final lineEnd = asInt(args['lineEnd']);
     final maxLines = asInt(args['maxLines']);
 
-    return switch (sdk) {
+    return await switch (sdk) {
       'dart' => _handleDart(args, suppliedVersion, symbol, maxLines, lineStart, lineEnd),
       'flutter' => _handleFlutter(args, suppliedVersion, symbol, maxLines, lineStart, lineEnd),
       _ => ToolResponse.error(

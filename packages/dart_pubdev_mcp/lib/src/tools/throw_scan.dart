@@ -34,7 +34,6 @@ List<String> sortedDartPaths(Iterable<String> paths) => [
   ...paths.where((k) => k.endsWith('.dart') && !k.startsWith('lib/')),
 ];
 
-
 /// Recursively collects throw and rethrow expressions from [node] into
 /// [results] with standardized `symbol` and `thrownType` properties.
 ///

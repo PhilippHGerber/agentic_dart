@@ -917,15 +917,17 @@ final class SecurityAdvisory {
   factory SecurityAdvisory.fromJson(Map<String, Object?> json) {
     final id = _optStr(json, 'id') ?? '';
     final databaseSpecific = json['database_specific'] as Map<String, Object?>?;
-    final pubDisplayUrl = databaseSpecific != null ? _optStr(databaseSpecific, 'pub_display_url') : null;
+    final pubDisplayUrl = databaseSpecific != null
+        ? _optStr(databaseSpecific, 'pub_display_url')
+        : null;
 
     final ranges = <OsvRange>[];
-    for (final affected in ((json['affected'] as List<Object?>?) ?? const [])
-        .whereType<Map<String, Object?>>()) {
+    for (final affected
+        in ((json['affected'] as List<Object?>?) ?? const []).whereType<Map<String, Object?>>()) {
       ranges.addAll(
-        ((affected['ranges'] as List<Object?>?) ?? const [])
-            .whereType<Map<String, Object?>>()
-            .map(OsvRange.fromJson),
+        ((affected['ranges'] as List<Object?>?) ?? const []).whereType<Map<String, Object?>>().map(
+          OsvRange.fromJson,
+        ),
       );
     }
 

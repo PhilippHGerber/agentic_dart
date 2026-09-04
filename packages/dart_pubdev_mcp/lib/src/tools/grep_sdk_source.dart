@@ -155,7 +155,7 @@ final class GrepSdkSourceHandler {
       }
     }
 
-    return switch (sdk) {
+    return await switch (sdk) {
       'dart' => _handleDart(
         args,
         suppliedVersion,

@@ -53,7 +53,8 @@ List<ChangelogEntry> parseChangelogText(String text) {
     if (ver == null) return;
 
     final rawText = rawTextBuffer.toString().trim();
-    final isBreaking = rawText.toLowerCase().contains('breaking') ||
+    final isBreaking =
+        rawText.toLowerCase().contains('breaking') ||
         currentChanges.any((c) => c.toLowerCase().contains('breaking'));
 
     entries.add(
@@ -87,7 +88,8 @@ List<ChangelogEntry> parseChangelogText(String text) {
         if (dateMatch != null) {
           final dateStr = dateMatch.group(1);
           if (dateStr != null) {
-            currentDate = DateTime.tryParse('${dateStr}T00:00:00.000Z') ??
+            currentDate =
+                DateTime.tryParse('${dateStr}T00:00:00.000Z') ??
                 DateTime.tryParse(dateStr)?.toUtc();
           }
         }

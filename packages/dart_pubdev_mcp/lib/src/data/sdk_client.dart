@@ -21,8 +21,7 @@ import 'domain_error.dart';
 import 'pub_client.dart' show HttpStatusException, PubDevClient, RetryPolicy;
 
 const _kCodeloadBaseUrl = 'https://codeload.github.com';
-const _kDartChangelogUrl =
-    'https://raw.githubusercontent.com/dart-lang/sdk/main/CHANGELOG.md';
+const _kDartChangelogUrl = 'https://raw.githubusercontent.com/dart-lang/sdk/main/CHANGELOG.md';
 const _kFlutterChangelogUrl =
     'https://raw.githubusercontent.com/flutter/flutter/master/CHANGELOG.md';
 
@@ -309,23 +308,19 @@ final class SdkClient {
     if (!dir.existsSync()) return null;
 
     try {
-      final files = dir
-          .listSync()
-          .whereType<File>()
-          .where((f) {
+      final files =
+          dir.listSync().whereType<File>().where((f) {
             final filename = f.uri.pathSegments.isNotEmpty ? f.uri.pathSegments.last : '';
             return filename.startsWith('$cacheName@') && filename.endsWith('.tar.gz');
-          })
-          .toList()
-        ..sort((a, b) {
-          try {
-            final aStat = a.statSync().modified;
-            final bStat = b.statSync().modified;
-            return bStat.compareTo(aStat);
-          } on Object catch (_) {
-            return 0;
-          }
-        });
+          }).toList()..sort((a, b) {
+            try {
+              final aStat = a.statSync().modified;
+              final bStat = b.statSync().modified;
+              return bStat.compareTo(aStat);
+            } on Object catch (_) {
+              return 0;
+            }
+          });
 
       for (final file in files) {
         try {

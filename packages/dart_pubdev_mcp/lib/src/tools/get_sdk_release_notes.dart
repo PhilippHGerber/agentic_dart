@@ -193,14 +193,13 @@ final class GetSdkReleaseNotesHandler {
     List<SdkReleaseNotesEntry> entries,
     String sdk,
     String resolvedVersion,
-  ) =>
-      ToolResponse.ok(
-        {
-          'sdk': sdk,
-          'entries': entries.map(_entryToJson).toList(),
-        },
-        resolvedVersion: resolvedVersion,
-      );
+  ) => ToolResponse.ok(
+    {
+      'sdk': sdk,
+      'entries': entries.map(_entryToJson).toList(),
+    },
+    resolvedVersion: resolvedVersion,
+  );
 
   static Map<String, Object?> _entryToJson(SdkReleaseNotesEntry e) => {
     'version': e.version,

@@ -788,7 +788,7 @@ final class PubDevClient {
   Future<PubDevResult<Map<String, Object?>>> _fetchPackageInfo(String name) async {
     final cache = _packageInfoCache;
     if (cache == null) {
-      return _fetchJson('$_kBaseUrl/api/packages/$name');
+      return await _fetchJson('$_kBaseUrl/api/packages/$name');
     }
 
     final cached = cache.get(name);

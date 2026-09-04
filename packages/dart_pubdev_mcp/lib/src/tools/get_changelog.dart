@@ -261,14 +261,13 @@ final class GetChangelogHandler {
     List<ChangelogEntry> entries,
     String package,
     String resolvedVersion,
-  ) =>
-      ToolResponse.ok(
-        {
-          'package': package,
-          'entries': entries.map(_entryToJson).toList(),
-        },
-        resolvedVersion: resolvedVersion,
-      );
+  ) => ToolResponse.ok(
+    {
+      'package': package,
+      'entries': entries.map(_entryToJson).toList(),
+    },
+    resolvedVersion: resolvedVersion,
+  );
 
   static Map<String, Object?> _entryToJson(ChangelogEntry e) => {
     'version': e.version,

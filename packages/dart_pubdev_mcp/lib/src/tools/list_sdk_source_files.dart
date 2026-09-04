@@ -48,7 +48,7 @@ final class ListSdkSourceFilesHandler {
     final sdk = (args['sdk'] as String?) ?? '';
     final suppliedVersion = args['version'] as String?;
 
-    return switch (sdk) {
+    return await switch (sdk) {
       'dart' => _handleDart(args, suppliedVersion),
       'flutter' => _handleFlutter(args, suppliedVersion),
       _ => ToolResponse.error(

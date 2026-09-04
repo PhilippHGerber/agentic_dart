@@ -146,7 +146,7 @@ final class GetSdkThrowStatementsHandler {
       return ToolResponse.error(_kScopeRequired);
     }
 
-    return switch (sdk) {
+    return await switch (sdk) {
       'dart' => _handleDart(args, suppliedVersion, symbol),
       'flutter' => _handleFlutter(args, suppliedVersion, symbol),
       _ => ToolResponse.error(
@@ -180,7 +180,7 @@ final class GetSdkThrowStatementsHandler {
 
     final ref = suppliedVersion ?? resolveDartSdkRef(platformVersion: _platformVersion);
 
-    return _scan(
+    return await _scan(
       cacheName: 'dart_sdk',
       ref: ref,
       prefix: 'lib/$library/',
@@ -231,7 +231,7 @@ final class GetSdkThrowStatementsHandler {
       ref = detected;
     }
 
-    return _scan(
+    return await _scan(
       cacheName: 'flutter_sdk',
       ref: ref,
       prefix: 'packages/$package/lib/',
@@ -267,7 +267,7 @@ final class GetSdkThrowStatementsHandler {
       final prefix = symbol.substring(0, dotIndex);
       final suffix = symbol.substring(dotIndex + 1);
       if (_isTypeIdentifier(prefix)) {
-        return _scanClassMethod(
+        return await _scanClassMethod(
           cacheName: cacheName,
           ref: ref,
           filePaths: scopedPaths,
@@ -278,7 +278,7 @@ final class GetSdkThrowStatementsHandler {
           package: package,
         );
       } else {
-        return _scanTopLevelFunction(
+        return await _scanTopLevelFunction(
           cacheName: cacheName,
           ref: ref,
           filePaths: scopedPaths,
@@ -290,7 +290,7 @@ final class GetSdkThrowStatementsHandler {
       }
     } else {
       if (_isTypeIdentifier(symbol)) {
-        return _scanEntireClass(
+        return await _scanEntireClass(
           cacheName: cacheName,
           ref: ref,
           filePaths: scopedPaths,
@@ -300,7 +300,7 @@ final class GetSdkThrowStatementsHandler {
           package: package,
         );
       } else {
-        return _scanTopLevelFunction(
+        return await _scanTopLevelFunction(
           cacheName: cacheName,
           ref: ref,
           filePaths: scopedPaths,

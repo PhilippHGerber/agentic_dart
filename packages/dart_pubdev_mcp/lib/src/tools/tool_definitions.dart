@@ -106,8 +106,7 @@ final searchPackagesTool = Tool(
     required: ['packages'],
     properties: {
       'packages': Schema.list(
-        description:
-            'Matching package summaries sorted by relevance or specified sort criterion.',
+        description: 'Matching package summaries sorted by relevance or specified sort criterion.',
         items: Schema.object(
           required: [
             'package',
@@ -137,7 +136,9 @@ final searchPackagesTool = Tool(
             'topics': Schema.list(description: 'Package topics.', items: Schema.string()),
             'isFlutterFavorite': Schema.bool(description: 'Whether package is a Flutter Favorite.'),
             'daysSinceUpdate': Schema.int(description: 'Days since the latest release.'),
-            'activeMaintenance': Schema.bool(description: 'Whether updated within the last 180 days.'),
+            'activeMaintenance': Schema.bool(
+              description: 'Whether updated within the last 180 days.',
+            ),
             'publisher': Schema.string(description: 'Publisher domain name if verified.'),
             'license': Schema.string(description: 'Detected SPDX license identifier.'),
           },
@@ -1129,8 +1130,7 @@ final getThrowStatementsTool = Tool(
             'path': Schema.string(description: 'The source file path the throw was found in.'),
             'line': Schema.int(description: '1-based line number of the throw statement.'),
             'symbol': Schema.string(
-              description:
-                  'The enclosing declaration (e.g. "Client.send" or "jsonDecode").',
+              description: 'The enclosing declaration (e.g. "Client.send" or "jsonDecode").',
             ),
             'thrownType': Schema.string(
               description:
@@ -1214,8 +1214,7 @@ final getSdkThrowStatementsTool = Tool(
             'path': Schema.string(description: 'The source file path the throw was found in.'),
             'line': Schema.int(description: '1-based line number of the throw statement.'),
             'symbol': Schema.string(
-              description:
-                  'The enclosing declaration (e.g. "List.add" or "identical").',
+              description: 'The enclosing declaration (e.g. "List.add" or "identical").',
             ),
             'thrownType': Schema.string(
               description:
