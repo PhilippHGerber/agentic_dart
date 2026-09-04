@@ -212,6 +212,8 @@ final class AstAccess {
       final quoted = matches.take(3).map((p) => '"$p"').join(', ');
       return 'Did you mean: $quoted?';
     }
-    return 'Call list_package_source_files to browse available paths.';
+    return 'Call list_package_source_files to browse available paths. Publishers can exclude '
+        'files like test/ via .pubignore; check the repository field from get_package to find '
+        'them in source control instead.';
   }
 }

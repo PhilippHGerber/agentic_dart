@@ -165,6 +165,10 @@ final class GetPackageHandler {
     if (d.license != null) 'license': d.license,
     if (d.readmeExcerpt != null) 'readmeExcerpt': d.readmeExcerpt,
     if (d.repository != null) 'repository': d.repository,
+    if (d.homepage != null) 'homepage': d.homepage,
+    if (d.issueTracker != null) 'issueTracker': d.issueTracker,
+    if (d.documentation != null) 'documentation': d.documentation,
+    'archiveUrl': d.archiveUrl,
     'advisories': ?advisories,
   };
 }

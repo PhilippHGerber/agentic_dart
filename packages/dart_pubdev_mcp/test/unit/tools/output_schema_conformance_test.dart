@@ -87,6 +87,10 @@ void main() {
         'license': 'BSD-3-Clause',
         'readmeExcerpt': 'A composable...',
         'repository': 'https://github.com/dart-lang/http',
+        'homepage': 'https://github.com/dart-lang/http',
+        'issueTracker': 'https://github.com/dart-lang/http/issues',
+        'documentation': 'https://pub.dev/documentation/http/latest/',
+        'archiveUrl': 'https://pub.dev/api/packages/http/versions/1.2.0/archive.tar.gz',
         'advisories': {
           'count': 1,
           'ids': ['GHSA-4rgh-jx4f-qfcq'],
@@ -113,6 +117,7 @@ void main() {
         'dependencies': <String, Object?>{},
         'devDependencies': <String, Object?>{},
         'versionsRecent': <String>[],
+        'archiveUrl': 'https://pub.dev/api/packages/http/versions/1.2.0/archive.tar.gz',
       });
     });
 

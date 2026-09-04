@@ -20,6 +20,8 @@ const kServerInstructions =
     'otherwise browse_api_symbols or find_symbols to locate it, then get_throw_statements, '
     'then get_source_slice for implementation detail (list_package_source_files first when '
     'the file path is unknown). '
+    'Archives are indexed in full (tests, examples, pubspec, README too) — never fall back to a '
+    'local pub cache for them. '
     'grep_package_source searches across the whole cached source tree for a literal or regex '
     'pattern — use it to find every call site of a symbol instead of enumerating files by hand. '
     'Upgrade analysis: get_changelog with fromVersion set → inspect breaking flags → '
@@ -32,9 +34,8 @@ const kServerInstructions =
     'get_sdk_release_notes retrieves structured release notes and breaking changes for Dart or Flutter SDKs. '
     'list_sdk_source_files to discover a file path when unknown, then get_sdk_throw_statements '
     'for exception surface, then get_sdk_source_slice for implementation detail. '
-    'grep_sdk_source searches across the whole cached SDK/framework source tree (Dart-only by '
-    'default) for a literal or regex pattern — use it to find something anywhere in the SDK or '
-    'framework instead of enumerating files by hand. '
+    'grep_sdk_source searches the whole cached SDK/framework source tree (Dart-only by default) '
+    'for a literal or regex pattern. '
     'Every error response carries a machine-readable code and a suggestion field — read suggestion before retrying. '
     'Resources: read pub://meta/resources first to see all available URIs. '
     'pub://meta/scoring — pub.dev 160-point scoring rubric. '
@@ -117,11 +118,12 @@ const kGetSymbolDocumentationDescription =
 
 /// Description for `getSourceSliceTool`.
 const kGetSourceSliceDescription =
-    'Read Dart source from a package file in line-range or AST symbol-bounded mode. '
+    "Read any file from a package's published archive (Dart source, pubspec.yaml, README, tests, "
+    'examples) in line-range or AST symbol-bounded mode. '
     'Line-range mode: specify path with optional lineStart/lineEnd (1-based, inclusive; omit bounds for entire file). '
-    'Symbol-bounded mode: specify path and symbol (e.g. "Client", "Client.send", "new" for unnamed constructor); '
+    'Symbol-bounded mode: specify path and symbol (e.g. "Client", "Client.send", "new" for unnamed constructor) — '
+    'Dart files only; '
     'maxLines truncates large bodies while reporting true lineEnd. '
-    'Reads any file across lib/, test/, bin/, and example/. '
     'Use list_package_source_files if the file path is unknown; use get_symbol_documentation for doc comments.';
 
 // ─── get_sdk_source_slice ─────────────────────────────────────────────────────
@@ -148,7 +150,8 @@ const kListSdkSourceFilesDescription =
 
 /// Description for `listPackageSourceFilesTool`.
 const kListPackageSourceFilesDescription =
-    'List file paths in a package archive (lib/, example/, test/, bin/). '
+    "List every file in a package's published archive, lib/, test/, example/, bin/, plus "
+    'pubspec.yaml, README, CHANGELOG and other non-Dart files. '
     'Filter results using directory path prefixes and fileExtension. '
     'Pass resulting paths to get_source_slice to read file contents.';
 
@@ -157,6 +160,7 @@ const kListPackageSourceFilesDescription =
 /// Description for `grepPackageSourceTool`.
 const kGrepPackageSourceDescription =
     'Search a package source tree for a literal string (default) or Dart RegExp pattern (regex: true). '
+    'The whole archive is searched, including test/ and example/. '
     'Scope searches using directory prefixes and fileExtension; set caseInsensitive: true or contextLines for surrounding lines. '
     'Binary files are excluded by default. Results are sorted by file/line and capped at 50 matches (hasMore: true).';
 

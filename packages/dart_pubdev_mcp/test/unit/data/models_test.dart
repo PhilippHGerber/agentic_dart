@@ -17,6 +17,8 @@ List<Object?> _loadFixtureList(String name) {
   return jsonDecode(file.readAsStringSync()) as List<Object?>;
 }
 
+Map<String, Object?> _asMap(Object? value) => (value as Map<String, Object?>?) ?? const {};
+
 void main() {
   final packageInfo = _loadFixture('package_info.json');
   final packageScore = _loadFixture('package_score.json');
@@ -294,6 +296,48 @@ void main() {
         detail.repository,
         equals('https://github.com/dart-lang/http/tree/master/pkgs/http'),
       );
+    });
+
+    test('archiveUrl is the deterministic pub.dev archive URL for name and version', () {
+      expect(
+        detail.archiveUrl,
+        equals('https://pub.dev/api/packages/http/versions/1.6.0/archive.tar.gz'),
+      );
+    });
+
+    test('homepage is null when absent from the pubspec', () {
+      expect(detail.homepage, isNull);
+    });
+
+    test('issueTracker is null when absent from the pubspec', () {
+      expect(detail.issueTracker, isNull);
+    });
+
+    test('documentation is null when absent from the pubspec', () {
+      expect(detail.documentation, isNull);
+    });
+
+    test('homepage/issueTracker/documentation are parsed when present in the pubspec', () {
+      final latest = _asMap(packageInfo['latest']);
+      final d = PackageDetail.fromPackageAndScore(
+        {
+          ...packageInfo,
+          'latest': <String, Object?>{
+            ...latest,
+            'pubspec': <String, Object?>{
+              ..._asMap(latest['pubspec']),
+              'homepage': 'https://example.com/home',
+              'issue_tracker': 'https://example.com/issues',
+              'documentation': 'https://example.com/docs',
+            },
+          },
+        },
+        packageScore,
+      );
+
+      expect(d.homepage, equals('https://example.com/home'));
+      expect(d.issueTracker, equals('https://example.com/issues'));
+      expect(d.documentation, equals('https://example.com/docs'));
     });
 
     test('versionsRecent contains at most 5 entries', () {

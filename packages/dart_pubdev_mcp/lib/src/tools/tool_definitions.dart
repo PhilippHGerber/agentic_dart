@@ -188,6 +188,7 @@ final getPackageTool = Tool(
       'dependencies',
       'devDependencies',
       'versionsRecent',
+      'archiveUrl',
     ],
     properties: {
       'resolvedVersion': _kResolvedVersionSchema,
@@ -258,6 +259,21 @@ final getPackageTool = Tool(
       ),
       'repository': Schema.string(
         description: 'The source repository URL. Omitted when not declared.',
+      ),
+      'homepage': Schema.string(
+        description: 'The pubspec `homepage` URL. Omitted when not declared.',
+      ),
+      'issueTracker': Schema.string(
+        description: 'The pubspec `issue_tracker` URL. Omitted when not declared.',
+      ),
+      'documentation': Schema.string(
+        description: 'The pubspec `documentation` URL. Omitted when not declared.',
+      ),
+      'archiveUrl': Schema.string(
+        description:
+            'Direct download URL of the published .tar.gz for this version — use it '
+            '(or `repository`) when the caller needs the package on disk; this server '
+            'never writes to the workspace.',
       ),
       'advisories': Schema.object(
         description:

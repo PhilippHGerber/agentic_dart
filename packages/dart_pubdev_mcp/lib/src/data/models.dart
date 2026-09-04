@@ -10,6 +10,14 @@ library;
 
 String? _optStr(Map<String, Object?> map, String key) => map[key] as String?;
 
+/// The deterministic pub.dev archive download URL for [name] at [version].
+///
+/// Shared by [PackageDetail.fromPackageAndScore] (as `archiveUrl`) and
+/// `PubDevClient.getPackageSourceFiles` (the URL it downloads) so the two
+/// call sites never drift apart.
+String packageArchiveUrl(String name, String version) =>
+    'https://pub.dev/api/packages/$name/versions/$version/archive.tar.gz';
+
 Map<String, Object?> _subMap(Map<String, Object?> map, String key) =>
     (map[key] as Map<String, Object?>?) ?? const {};
 
@@ -292,10 +300,14 @@ final class PackageDetail {
     required this.dependencies,
     required this.devDependencies,
     required this.versionsRecent,
+    required this.archiveUrl,
     this.publisher,
     this.license,
     this.readmeExcerpt,
     this.repository,
+    this.homepage,
+    this.issueTracker,
+    this.documentation,
   });
 
   /// Builds a [PackageDetail] from a package-info response and a score response.
@@ -325,10 +337,12 @@ final class PackageDetail {
         .where((v) => v.isNotEmpty)
         .toList();
     final publishedAt = published != null ? DateTime.tryParse(published) : null;
+    final name = _optStr(packageInfo, 'name') ?? '';
+    final version = _optStr(latest, 'version') ?? '';
 
     return PackageDetail(
-      name: _optStr(packageInfo, 'name') ?? '',
-      version: _optStr(latest, 'version') ?? '',
+      name: name,
+      version: version,
       description: _optStr(pubspec, 'description') ?? '',
       verified: _tagsWithPrefix(tags, 'publisher:').isNotEmpty,
       publishedAt: publishedAt,
@@ -345,6 +359,10 @@ final class PackageDetail {
       license: licenses.firstOrNull,
       readmeExcerpt: readmeExcerpt,
       repository: _optStr(pubspec, 'repository'),
+      archiveUrl: packageArchiveUrl(name, version),
+      homepage: _optStr(pubspec, 'homepage'),
+      issueTracker: _optStr(pubspec, 'issue_tracker'),
+      documentation: _optStr(pubspec, 'documentation'),
     );
   }
 
@@ -402,6 +420,22 @@ final class PackageDetail {
   /// The VCS repository URL from the pubspec, or `null`.
   final String? repository;
 
+  /// Direct download URL of the published `.tar.gz` for [version].
+  ///
+  /// Deterministic — computed via [packageArchiveUrl] rather than read from
+  /// the pubspec — and always present, unlike the other source-metadata
+  /// fields.
+  final String archiveUrl;
+
+  /// The `homepage` URL from the pubspec, or `null`.
+  final String? homepage;
+
+  /// The `issue_tracker` URL from the pubspec, or `null`.
+  final String? issueTracker;
+
+  /// The `documentation` URL from the pubspec, or `null`.
+  final String? documentation;
+
   /// Returns a copy of this detail with the given fields replaced.
   PackageDetail copyWith({
     String? name,
@@ -422,6 +456,10 @@ final class PackageDetail {
     String? license,
     String? readmeExcerpt,
     String? repository,
+    String? archiveUrl,
+    String? homepage,
+    String? issueTracker,
+    String? documentation,
   }) => PackageDetail(
     name: name ?? this.name,
     version: version ?? this.version,
@@ -441,6 +479,10 @@ final class PackageDetail {
     license: license ?? this.license,
     readmeExcerpt: readmeExcerpt ?? this.readmeExcerpt,
     repository: repository ?? this.repository,
+    archiveUrl: archiveUrl ?? this.archiveUrl,
+    homepage: homepage ?? this.homepage,
+    issueTracker: issueTracker ?? this.issueTracker,
+    documentation: documentation ?? this.documentation,
   );
 }
 

@@ -669,7 +669,7 @@ final class PubDevClient {
       return _extractTarballFiles(cachedBytes);
     }
 
-    final url = '$_kBaseUrl/api/packages/$name/versions/$version/archive.tar.gz';
+    final url = packageArchiveUrl(name, version);
     // Time only the download (retries included); the tarball `← pub` line is
     // logged after extraction because its file count is not known until then.
     final stopwatch = Stopwatch()..start();

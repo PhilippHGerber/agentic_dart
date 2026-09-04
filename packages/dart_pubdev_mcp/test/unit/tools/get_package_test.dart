@@ -82,6 +82,37 @@ void _stubVersionSuccess(MockHttpClient mock, String version) {
   );
 }
 
+/// Stubs a successful `get_package` fetch with the fixture pubspec's
+/// `latest.pubspec` map overridden by [pubspecOverrides] — used to exercise
+/// `homepage`/`issue_tracker`/`documentation` presence without a second fixture.
+void _stubSuccessWithPubspecOverrides(MockHttpClient mock, Map<String, Object?> pubspecOverrides) {
+  final data = jsonDecode(readFixture('package_info.json')) as Map<String, Object?>;
+  final latest = Map<String, Object?>.from(
+    (data['latest'] as Map<String, Object?>?) ?? const {},
+  );
+  final pubspec = Map<String, Object?>.from(
+    (latest['pubspec'] as Map<String, Object?>?) ?? const {},
+  )..addAll(pubspecOverrides);
+  latest['pubspec'] = pubspec;
+  data['latest'] = latest;
+
+  stubUrl(
+    mock: mock,
+    urlFragment: '/documentation/http/latest/',
+    response: notFound(),
+  );
+  stubUrl(
+    mock: mock,
+    urlFragment: '/api/packages/http',
+    response: ok(jsonEncode(data)),
+  );
+  stubUrl(
+    mock: mock,
+    urlFragment: '/api/packages/http/score',
+    response: ok(readFixture('package_score.json')),
+  );
+}
+
 /// Creates a [CallToolRequest] for `get_package` with the given [args].
 CallToolRequest _request(Map<String, Object?> args) =>
     CallToolRequest(name: 'get_package', arguments: args);
@@ -289,6 +320,69 @@ void main() {
       final result = await buildHandler().call(_request({'package': 'http'}));
 
       expect(_detail(result)['repository'], isNotNull);
+    });
+  });
+
+  // ─── source metadata (ticket 02) ───────────────────────────────────────────────
+
+  group('source metadata', () {
+    test('archiveUrl is always present and points at the resolved version', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(
+        _detail(result)['archiveUrl'],
+        equals('https://pub.dev/api/packages/http/versions/1.6.0/archive.tar.gz'),
+      );
+    });
+
+    test('homepage/issueTracker/documentation are omitted when absent from the pubspec', () async {
+      _stubSuccess(mockHttp);
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_detail(result).containsKey('homepage'), isFalse);
+      expect(_detail(result).containsKey('issueTracker'), isFalse);
+      expect(_detail(result).containsKey('documentation'), isFalse);
+    });
+
+    test('homepage is present when declared in the pubspec', () async {
+      _stubSuccessWithPubspecOverrides(mockHttp, {'homepage': 'https://example.com/home'});
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_detail(result)['homepage'], equals('https://example.com/home'));
+    });
+
+    test('issueTracker is present when declared in the pubspec', () async {
+      _stubSuccessWithPubspecOverrides(mockHttp, {
+        'issue_tracker': 'https://example.com/issues',
+      });
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_detail(result)['issueTracker'], equals('https://example.com/issues'));
+    });
+
+    test('documentation is present when declared in the pubspec', () async {
+      _stubSuccessWithPubspecOverrides(mockHttp, {'documentation': 'https://example.com/docs'});
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expect(_detail(result)['documentation'], equals('https://example.com/docs'));
+    });
+
+    test('structuredContent conforms to the declared outputSchema with all four present', () async {
+      _stubSuccessWithPubspecOverrides(mockHttp, {
+        'homepage': 'https://example.com/home',
+        'issue_tracker': 'https://example.com/issues',
+        'documentation': 'https://example.com/docs',
+      });
+
+      final result = await buildHandler().call(_request({'package': 'http'}));
+
+      expectConformsToOutputSchema(getPackageTool, result.structuredContent);
     });
   });
 
