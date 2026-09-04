@@ -3,8 +3,9 @@
 All notable changes to `dart_pubdev_mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.10.1]
 
+### Added
 - `get_package`: added `homepage`, `issueTracker`, `documentation` and `archiveUrl` (pub.dev `.tar.gz` download URL).
 
 ## [0.10.0]
